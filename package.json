@@ -1,0 +1,43 @@
+{
+  "name": "backend-monolith",
+  "version": "1.0.0",
+  "description": "Monolith application with standard modular structure",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "NODE_ENV=production node server.js",
+    "start:dev": "NODE_ENV=development node server.js",
+    "dev": "NODE_ENV=development nodemon server.js",
+    "start:prod": "NODE_ENV=production node server.js",
+    "seed": "node scripts/seedAdmin.js",
+    "seed:prod": "NODE_ENV=production node scripts/seedAdmin.js",
+    "update-apiKey": "node scripts/updateVendorApiKey.js",
+    "update-apiKey:prod": "NODE_ENV=production node scripts/updateVendorApiKey.js",
+    "generate:secret": "node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1022.0",
+    "axios": "^1.13.6",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "joi": "^18.0.2",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "multer": "^2.1.1",
+    "node-cron": "^4.2.1",
+    "pg": "^8.11.3",
+    "pg-hstore": "^2.3.4",
+    "razorpay": "^2.9.6",
+    "sequelize": "^6.35.2",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
