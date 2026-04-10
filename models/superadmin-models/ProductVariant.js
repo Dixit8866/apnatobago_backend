@@ -22,6 +22,23 @@ const ProductVariant = sequelize.define(
             allowNull: false,
             defaultValue: 0,
         },
+        image: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: null,
+        },
+        baseUnitLabel: {
+            // pcs / gram / ml (for internal counting)
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: 'pcs',
+        },
+        baseUnitsPerPack: {
+            // how many base units in this volume (e.g., 1 box => 20 pcs, 1 kg => 1000 gram)
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 1,
+        },
         status: {
             type: DataTypes.STRING,
             defaultValue: 'Active',

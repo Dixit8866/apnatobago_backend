@@ -13,7 +13,9 @@
     "seed:prod": "NODE_ENV=production node scripts/seedAdmin.js",
     "update-apiKey": "node scripts/updateVendorApiKey.js",
     "update-apiKey:prod": "NODE_ENV=production node scripts/updateVendorApiKey.js",
-    "generate:secret": "node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\""
+    "generate:secret": "node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\"",
+    "wipe:non-admin": "node scripts/wipe-non-admin.js",
+    "seed:curated": "node scripts/seed-curated.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1022.0",

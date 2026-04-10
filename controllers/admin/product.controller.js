@@ -98,11 +98,6 @@ async function validateCategoryIds({ mainCategoryId, subCategoryId, companyCateg
 }
 
 async function buildVolumeMap(variants, transaction) {
-    const composedVolumes = variants.map((v) => `${String(v.volumeValue || '').trim()}-${String(v.volumeId || '').trim()}`).filter(Boolean);
-    if (new Set(composedVolumes).size !== composedVolumes.length) {
-        return { error: 'Duplicate volume selected. Each volume can be added only once.' };
-    }
-
     const volumeIds = [...new Set(variants.map((v) => String(v.volumeId || '').trim()).filter(Boolean))];
     const volumeRows = await Volume.findAll({ where: { id: { [Op.in]: volumeIds }, status: 'Active' }, transaction });
     if (volumeRows.length !== volumeIds.length) {
@@ -152,6 +147,7 @@ export const createProduct = async (req, res, next) => {
             subCategoryId,
             companyCategoryId,
             productDescription,
+            packagings,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -195,6 +191,7 @@ export const createProduct = async (req, res, next) => {
                 subCategoryId,
                 companyCategoryId,
                 productDescription: normalizeProductDescription(productDescription),
+                packagings: Array.isArray(packagings) ? packagings : [],
                 status: status || 'Active',
             },
             { transaction: t }
@@ -204,6 +201,9 @@ export const createProduct = async (req, res, next) => {
             const volumeValue = String(v.volumeValue || '').trim();
             const volumeId = String(v.volumeId || '').trim();
             const purchasePrice = Number(v.purchasePrice);
+            const image = typeof v.image === 'string' ? v.image.trim() : null;
+            const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
+            const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             if (!volumeValue || !volumeId) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
@@ -221,6 +221,9 @@ export const createProduct = async (req, res, next) => {
                     productId: product.id,
                     volume: normalizedVolume,
                     purchasePrice,
+                    image,
+                    baseUnitLabel,
+                    baseUnitsPerPack,
                     status: v.status || 'Active',
                 },
                 { transaction: t }
@@ -353,6 +356,7 @@ export const updateProduct = async (req, res, next) => {
             subCategoryId,
             companyCategoryId,
             productDescription,
+            packagings,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -400,6 +404,7 @@ export const updateProduct = async (req, res, next) => {
                 subCategoryId,
                 companyCategoryId,
                 productDescription: normalizeProductDescription(productDescription),
+                packagings: Array.isArray(packagings) ? packagings : product.packagings || [],
                 status: status || product.status,
             },
             { transaction: t }
@@ -417,6 +422,9 @@ export const updateProduct = async (req, res, next) => {
             const volumeValue = String(v.volumeValue || '').trim();
             const volumeId = String(v.volumeId || '').trim();
             const purchasePrice = Number(v.purchasePrice);
+            const image = typeof v.image === 'string' ? v.image.trim() : null;
+            const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
+            const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             if (!volumeValue || !volumeId) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
@@ -434,6 +442,8 @@ export const updateProduct = async (req, res, next) => {
                     productId: product.id,
                     volume: normalizedVolume,
                     purchasePrice,
+                    baseUnitLabel,
+                    baseUnitsPerPack,
                     status: v.status || 'Active',
                 },
                 { transaction: t }

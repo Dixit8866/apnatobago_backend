@@ -35,7 +35,7 @@ const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:8080',
     'http://localhost:8081', 
-    'http://localhost:8082', // Added 8082 for godown panel
+    'http://localhost:8082',
 ];
 
 app.use(cors({
@@ -76,3 +76,4 @@ app.use((req, res, next) => {
 app.use(globalErrorHandler);
 
 export default app;
+
