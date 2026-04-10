@@ -442,6 +442,7 @@ export const updateProduct = async (req, res, next) => {
                     productId: product.id,
                     volume: normalizedVolume,
                     purchasePrice,
+                    image,
                     baseUnitLabel,
                     baseUnitsPerPack,
                     status: v.status || 'Active',
