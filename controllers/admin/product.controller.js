@@ -219,6 +219,7 @@ export const createProduct = async (req, res, next) => {
             const variant = await ProductVariant.create(
                 {
                     productId: product.id,
+                    volumeId,
                     volume: normalizedVolume,
                     purchasePrice,
                     image,
@@ -331,6 +332,7 @@ export const getProductById = async (req, res, next) => {
                                 { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name', 'status'] },
                             ],
                         },
+                        { model: Volume, as: 'volumeRef', attributes: ['id', 'name', 'status'] },
                     ],
                 },
             ],
@@ -440,6 +442,7 @@ export const updateProduct = async (req, res, next) => {
             const variant = await ProductVariant.create(
                 {
                     productId: product.id,
+                    volumeId,
                     volume: normalizedVolume,
                     purchasePrice,
                     image,

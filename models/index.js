@@ -31,6 +31,10 @@ ProductVariant.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 ProductVariant.hasMany(ProductPricing, { foreignKey: 'variantId', as: 'pricings' });
 ProductPricing.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
 
+// Variant -> Volume (so edit form can get volumeId directly)
+Volume.hasMany(ProductVariant, { foreignKey: 'volumeId', as: 'productVariants' });
+ProductVariant.belongsTo(Volume, { foreignKey: 'volumeId', as: 'volumeRef' });
+
 // Pricing -> CustomLevel
 CustomLevel.hasMany(ProductPricing, { foreignKey: 'customLevelId', as: 'productPricings' });
 ProductPricing.belongsTo(CustomLevel, { foreignKey: 'customLevelId', as: 'customLevel' });
