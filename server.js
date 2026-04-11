@@ -61,8 +61,40 @@ async function runAutoMigrations() {
             );
             fixed++;
         }
-
         console.log(`[AutoMigrate] product_variants volumeId backfill done — Fixed: ${fixed} | Skipped: ${skipped}`);
+
+        // ─── 2. Auto Seed: Backfill Product.packagings ─────────────────────────────
+        const [productRes] = await sequelize.query(`
+            UPDATE products 
+            SET packagings = '[{"baseUnitLabel": "pcs", "baseUnitsPerPack": 1}]'::jsonb 
+            WHERE packagings IS NULL OR jsonb_array_length(CASE WHEN jsonb_typeof(packagings) = 'array' THEN packagings ELSE '[]'::jsonb END) = 0
+            RETURNING id;
+        `);
+        if (productRes && productRes.length) {
+            console.log(`[AutoSeed] Seeded default packagings for ${productRes.length} products ✓`);
+        }
+
+        // ─── 3. Auto Seed: Backfill ProductVariant.baseUnit* ──────────────────────
+        const [varUnit1] = await sequelize.query(`
+            UPDATE product_variants 
+            SET "baseUnitLabel" = 'pcs'
+            WHERE "baseUnitLabel" IS NULL OR "baseUnitLabel" = ''
+            RETURNING id;
+        `);
+        if (varUnit1 && varUnit1.length) {
+            console.log(`[AutoSeed] Seeded baseUnitLabel='pcs' for ${varUnit1.length} variants ✓`);
+        }
+
+        const [varUnit2] = await sequelize.query(`
+            UPDATE product_variants 
+            SET "baseUnitsPerPack" = 1
+            WHERE "baseUnitsPerPack" IS NULL
+            RETURNING id;
+        `);
+        if (varUnit2 && varUnit2.length) {
+            console.log(`[AutoSeed] Seeded baseUnitsPerPack=1 for ${varUnit2.length} variants ✓`);
+        }
+
     } catch (err) {
         // Never crash the server for a migration warning
         console.warn('[AutoMigrate] Warning: volumeId backfill failed (non-fatal):', err.message);

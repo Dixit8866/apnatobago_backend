@@ -135,8 +135,12 @@ function normalizeVariantPricings(variant) {
 }
 
 export const createProduct = async (req, res, next) => {
+    console.log('[Product API] createProduct CALLED');
     const t = await sequelize.transaction();
     try {
+        console.log('[Product API Create] Payload packagings:', JSON.stringify(req.body.packagings, null, 2));
+        console.log('[Product API Create] Payload variants:', JSON.stringify(req.body.variants, null, 2));
+
         const {
             name,
             thumbnail,
@@ -259,9 +263,11 @@ export const createProduct = async (req, res, next) => {
         }
 
         await t.commit();
+        console.log('[Product API Create] SUCCESS - Saved Packagings:', JSON.stringify(product.packagings, null, 2));
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Product created successfully.', product);
     } catch (error) {
         await t.rollback();
+        console.error('[Product API Create] ERROR:', error);
         next(error);
     }
 };
@@ -346,8 +352,12 @@ export const getProductById = async (req, res, next) => {
 };
 
 export const updateProduct = async (req, res, next) => {
+    console.log('[Product API] updateProduct CALLED for ID:', req.params.id);
     const t = await sequelize.transaction();
     try {
+        console.log('[Product API Update] Payload packagings:', JSON.stringify(req.body.packagings, null, 2));
+        console.log('[Product API Update] Payload variants:', JSON.stringify(req.body.variants, null, 2));
+
         const {
             name,
             thumbnail,
@@ -481,9 +491,11 @@ export const updateProduct = async (req, res, next) => {
         }
 
         await t.commit();
+        console.log('[Product API Update] SUCCESS - Saved Packagings:', JSON.stringify(Array.isArray(packagings) ? packagings : product.packagings, null, 2));
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product updated successfully.', product);
     } catch (error) {
         await t.rollback();
+        console.error('[Product API Update] ERROR:', error);
         next(error);
     }
 };
