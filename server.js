@@ -17,7 +17,7 @@ const startServer = async () => {
 
         // Sync Sequelize Models with Database
         // Note: force: false won't drop existing tables. Set alter: true for schema updates during dev.
-        await sequelize.sync({ force: false, alter: true });
+        await sequelize.sync({ force: false, alter: { drop: false } });
         console.log('[Database] Sequelize Models Synced');
 
         server.listen(PORT, () => {
