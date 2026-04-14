@@ -11,6 +11,7 @@ import MainCategory from './superadmin-models/MainCategory.js';
 import SubCategory from './superadmin-models/SubCategory.js';
 import CompanyCategory from './superadmin-models/CompanyCategory.js';
 import Volume from './superadmin-models/Volume.js';
+import SellingVolume from './superadmin-models/SellingVolume.js';
 import CustomLevel from './superadmin-models/CustomLevel.js';
 import Product from './superadmin-models/Product.js';
 import ProductVariant from './superadmin-models/ProductVariant.js';
@@ -81,6 +82,7 @@ export {
     SubCategory,
     CompanyCategory,
     Volume,
+    SellingVolume,
     CustomLevel,
     Product,
     ProductVariant,
