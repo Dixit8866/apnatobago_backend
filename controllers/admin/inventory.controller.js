@@ -64,11 +64,16 @@ async function validateGodown(godownId, transaction) {
 async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }) {
     const ids = [primaryUnitId, secondaryUnitId].filter(Boolean);
     if (!ids.length) return false;
-    const rows = await Volume.findAll({
-        where: { id: { [Op.in]: ids }, status: 'Active' },
-        transaction,
-    });
-    return rows.length === ids.length;
+    
+    // Check both normal volumes and selling volumes
+    const [volRows, sellRows] = await Promise.all([
+        Volume.findAll({ where: { id: { [Op.in]: ids }, status: 'Active' }, transaction }),
+        SellingVolume.findAll({ where: { id: { [Op.in]: ids }, status: 'Active' }, transaction })
+    ]);
+    
+    // Total found unique IDs should match the requested ids count
+    const foundIds = new Set([...volRows.map(r => r.id), ...sellRows.map(r => r.id)]);
+    return foundIds.size === ids.length;
 }
 
 export const getInventoryOptions = async (req, res, next) => {
@@ -174,9 +179,15 @@ export const getInventoryStocks = async (req, res, next) => {
             ),
         ];
 
-        const [unitRows, purchaseTxns] = await Promise.all([
+        const [unitRowsVol, unitRowsSell, purchaseTxns] = await Promise.all([
             unitIds.length
                 ? Volume.findAll({
+                    where: { id: { [Op.in]: unitIds } },
+                    attributes: ['id', 'name'],
+                })
+                : [],
+            unitIds.length
+                ? SellingVolume.findAll({
                     where: { id: { [Op.in]: unitIds } },
                     attributes: ['id', 'name'],
                 })
@@ -191,9 +202,10 @@ export const getInventoryStocks = async (req, res, next) => {
         ]);
 
         const getUnitLabel = (volume) => {
-            if (!volume?.name || typeof volume.name !== 'object') return 'Unit';
+            if (!volume?.name || typeof volume.name !== 'object') return typeof volume?.name === 'string' ? volume.name : 'Unit';
             return volume.name.en || Object.values(volume.name)[0] || 'Unit';
         };
+        const unitRows = [...unitRowsVol, ...unitRowsSell];
         const unitMap = new Map(unitRows.map((u) => [u.id, getUnitLabel(u)]));
         const latestPurchasePriceMap = new Map();
         for (const txn of purchaseTxns) {
