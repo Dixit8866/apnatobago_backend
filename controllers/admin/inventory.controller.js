@@ -9,6 +9,7 @@ import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
 import InventoryTransaction from '../../models/superadmin-models/InventoryTransaction.js';
 import Godown from '../../models/superadmin-models/Godown.js';
 import Volume from '../../models/superadmin-models/Volume.js';
+import SellingVolume from '../../models/superadmin-models/SellingVolume.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 
 function normalizeInt(val) {
@@ -72,7 +73,7 @@ async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }
 
 export const getInventoryOptions = async (req, res, next) => {
     try {
-        const [products, godowns, volumes] = await Promise.all([
+        const [products, godowns, volumes, sellingVolumes] = await Promise.all([
             Product.findAll({
                 where: { status: { [Op.ne]: 'Deleted' } },
                 order: [['createdAt', 'DESC']],
@@ -102,9 +103,18 @@ export const getInventoryOptions = async (req, res, next) => {
                 where: { status: 'Active' },
                 order: [['createdAt', 'DESC']],
             }),
+            SellingVolume.findAll({
+                where: { status: 'Active' },
+                order: [['createdAt', 'DESC']],
+            }),
         ]);
+
         const normalizedProducts = products.map((product) => {
             const p = product.toJSON();
+            // packagings is already stored as JSONB array on product:
+            // e.g. [{ baseUnitLabel: 'Dando', baseUnitsPerPack: 20, containsUnit: 'Box', relativeQty: 20 }]
+            p.packagings = Array.isArray(p.packagings) ? p.packagings : [];
+
             p.variants = (p.variants || []).map((variant) => {
                 const firstPricing = [...(variant.pricings || [])].sort((a, b) => Number(a.minQty || 0) - Number(b.minQty || 0))[0];
                 return {
@@ -121,6 +131,7 @@ export const getInventoryOptions = async (req, res, next) => {
             products: normalizedProducts,
             godowns,
             volumes,
+            sellingVolumes,
         });
     } catch (error) {
         next(error);
