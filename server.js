@@ -95,6 +95,67 @@ async function runAutoMigrations() {
             console.log(`[AutoSeed] Seeded baseUnitsPerPack=1 for ${varUnit2.length} variants ✓`);
         }
 
+        // ─── 4. Auto Migration: Add lastPurchasePricePerBaseUnit to inventory_stocks ──
+        try {
+            console.log('[AutoMigrate] Checking inventory_stocks columns...');
+            const [columnCheck] = await sequelize.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'inventory_stocks' AND column_name = 'lastPurchasePricePerBaseUnit'
+            `);
+            console.log(`[AutoMigrate] Column check result: ${columnCheck.length} columns found`);
+            if (!columnCheck.length) {
+                console.log('[AutoMigrate] Adding lastPurchasePricePerBaseUnit column...');
+                await sequelize.query(`
+                    ALTER TABLE inventory_stocks 
+                    ADD COLUMN "lastPurchasePricePerBaseUnit" DECIMAL(12, 2) NOT NULL DEFAULT 0
+                `);
+                console.log('[AutoMigrate] Added lastPurchasePricePerBaseUnit column to inventory_stocks ✓');
+            } else {
+                // Column exists, ensure no NULL values
+                console.log('[AutoMigrate] Checking for NULL values...');
+                const [nullRows] = await sequelize.query(`
+                    SELECT COUNT(*) as count FROM inventory_stocks 
+                    WHERE "lastPurchasePricePerBaseUnit" IS NULL
+                `);
+                console.log(`[AutoMigrate] NULL rows found: ${nullRows[0].count}`);
+                if (nullRows[0].count > 0) {
+                    await sequelize.query(`
+                        UPDATE inventory_stocks 
+                        SET "lastPurchasePricePerBaseUnit" = COALESCE("avgPurchasePricePerBaseUnit", 0)
+                        WHERE "lastPurchasePricePerBaseUnit" IS NULL
+                    `);
+                    console.log(`[AutoMigrate] Fixed ${nullRows[0].count} rows with NULL lastPurchasePricePerBaseUnit ✓`);
+                }
+            }
+        } catch (colErr) {
+            console.warn('[AutoMigrate] Warning: Could not add/fix column:', colErr.message);
+            console.warn('[AutoMigrate] Error stack:', colErr.stack);
+        }
+
+        // ─── 5. Auto Migration: Drop unique constraint for batch tracking ────────────
+        try {
+            // Check if any unique constraint exists (excluding primary key)
+            const [constraintCheck] = await sequelize.query(`
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'inventory_stocks' 
+                AND constraint_type = 'UNIQUE'
+                AND constraint_name NOT LIKE '%pkey%'
+            `);
+            if (constraintCheck.length) {
+                for (const constraint of constraintCheck) {
+                    await sequelize.query(`
+                        ALTER TABLE inventory_stocks 
+                        DROP CONSTRAINT IF EXISTS "${constraint.constraint_name}"
+                    `);
+                    console.log(`[AutoMigrate] Dropped unique constraint: ${constraint.constraint_name} ✓`);
+                }
+            }
+        } catch (constraintErr) {
+            console.warn('[AutoMigrate] Warning: Could not drop constraint:', constraintErr.message);
+        }
+
     } catch (err) {
         // Never crash the server for a migration warning
         console.warn('[AutoMigrate] Warning: volumeId backfill failed (non-fatal):', err.message);
@@ -106,6 +167,39 @@ const startServer = async () => {
     try {
         // Connect to Database
         await connectDB();
+
+        // Pre-sync: Drop any unique constraints/indexes on inventory_stocks BEFORE sync recreates them
+        try {
+            // Drop unique constraints
+            const [constraints] = await sequelize.query(`
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'inventory_stocks' 
+                AND constraint_type = 'UNIQUE'
+                AND constraint_name NOT LIKE '%pkey%'
+            `);
+            console.log(`[PreSync] Found ${constraints.length} unique constraints to drop`);
+            for (const c of constraints) {
+                await sequelize.query(`ALTER TABLE inventory_stocks DROP CONSTRAINT IF EXISTS "${c.constraint_name}"`);
+                console.log(`[PreSync] Dropped unique constraint: ${c.constraint_name} ✓`);
+            }
+            
+            // Drop unique indexes (PostgreSQL can have unique indexes without constraints)
+            const [indexes] = await sequelize.query(`
+                SELECT indexname 
+                FROM pg_indexes 
+                WHERE tablename = 'inventory_stocks' 
+                AND indexdef LIKE '%UNIQUE%'
+                AND indexname NOT LIKE '%pkey%'
+            `);
+            console.log(`[PreSync] Found ${indexes.length} unique indexes to drop`);
+            for (const idx of indexes) {
+                await sequelize.query(`DROP INDEX IF EXISTS "${idx.indexname}"`);
+                console.log(`[PreSync] Dropped unique index: ${idx.indexname} ✓`);
+            }
+        } catch (e) {
+            console.warn('[PreSync] Could not drop constraints/indexes:', e.message);
+        }
 
         // Sync Sequelize Models with Database
         // Note: force: false won't drop existing tables. alter: { drop: false } adds new columns safely.

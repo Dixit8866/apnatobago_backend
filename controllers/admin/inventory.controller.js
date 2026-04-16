@@ -10,6 +10,8 @@ import InventoryTransaction from '../../models/superadmin-models/InventoryTransa
 import Godown from '../../models/superadmin-models/Godown.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import SellingVolume from '../../models/superadmin-models/SellingVolume.js';
+import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
+import MainCategory from '../../models/superadmin-models/MainCategory.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 
 function normalizeInt(val) {
@@ -124,6 +126,9 @@ export const getInventoryOptions = async (req, res, next) => {
                 const firstPricing = [...(variant.pricings || [])].sort((a, b) => Number(a.minQty || 0) - Number(b.minQty || 0))[0];
                 return {
                     ...variant,
+                    volume: variant.volume || '',
+                    volumeId: variant.volumeId || '',
+                    volumeValue: variant.volumeValue || '',
                     defaultSellingPrice: firstPricing ? Number(firstPricing.price || 0) : 0,
                     defaultPurchasePrice: Number(variant.purchasePrice || 0),
                     defaultMrp: firstPricing ? Number(firstPricing.mrp || 0) : 0,
@@ -147,15 +152,27 @@ export const getInventoryStocks = async (req, res, next) => {
     try {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
-        const { search = '' } = req.query;
+        const { search = '', productId } = req.query;
 
         const include = [
-            { model: Product, as: 'product', attributes: ['id', 'name', 'status'] },
+            { 
+                model: Product, 
+                as: 'product', 
+                attributes: ['id', 'name', 'status'],
+                include: [
+                    { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                    { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] }
+                ]
+            },
             { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'status'] },
             { model: Godown, as: 'godown', attributes: ['id', 'name', 'status'] },
         ];
 
         const where = {};
+        if (productId) {
+            where.productId = productId;
+        }
+
         if (search) {
             include[0].where = { name: { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } };
             include[0].required = true;
@@ -435,36 +452,20 @@ export const createPurchaseTransaction = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
 
-        let stock = await InventoryStock.findOne({ where: { productId, variantId, godownId }, transaction: t });
-        if (!stock) {
-            stock = await InventoryStock.create(
-                {
-                    productId,
-                    variantId,
-                    godownId,
-                    primaryUnitId,
-                    secondaryUnitId,
-                    secondaryPerPrimary: Number(secondaryPerPrimary || 1),
-                    totalBaseUnits: 0,
-                    avgPurchasePricePerBaseUnit: 0,
-                    status: 'Active',
-                },
-                { transaction: t }
-            );
-        }
-
-        const oldQty = Number(stock.totalBaseUnits || 0);
-        const oldAvg = Number(stock.avgPurchasePricePerBaseUnit || 0);
-        const newQty = oldQty + qtyTotalBaseUnits;
-        const newAvg = round2(((oldQty * oldAvg) + (qtyTotalBaseUnits * unitPrice)) / newQty);
-
-        await stock.update(
+        // Create NEW stock record for each purchase (batch tracking)
+        // Each purchase creates a separate entry with its own purchase price
+        const stock = await InventoryStock.create(
             {
+                productId,
+                variantId,
+                godownId,
                 primaryUnitId,
                 secondaryUnitId,
-                secondaryPerPrimary: Number(secondaryPerPrimary || stock.secondaryPerPrimary || 1),
-                totalBaseUnits: newQty,
-                avgPurchasePricePerBaseUnit: newAvg,
+                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
+                totalBaseUnits: qtyTotalBaseUnits,
+                avgPurchasePricePerBaseUnit: unitPrice, // This batch's purchase price
+                lastPurchasePricePerBaseUnit: unitPrice, // For this specific batch
+                status: 'Active',
             },
             { transaction: t }
         );
@@ -483,8 +484,8 @@ export const createPurchaseTransaction = async (req, res, next) => {
                 qtySecondary: Number(qtySecondary || 0),
                 totalQtyBaseUnits: qtyTotalBaseUnits,
                 purchasePricePerBaseUnit: unitPrice,
-                avgPriceAfterTxn: newAvg,
-                balanceAfterBaseUnits: newQty,
+                avgPriceAfterTxn: unitPrice, // This batch's price
+                balanceAfterBaseUnits: qtyTotalBaseUnits,
                 note: note || null,
             },
             { transaction: t }
@@ -494,6 +495,12 @@ export const createPurchaseTransaction = async (req, res, next) => {
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Purchase transaction saved successfully.', transaction);
     } catch (error) {
         await t.rollback();
+        console.error('[Purchase Error]', error.name, error.message);
+        if (error.errors) {
+            error.errors.forEach((err, i) => {
+                console.error(`  [${i}] ${err.path}: ${err.message}`);
+            });
+        }
         next(error);
     }
 };
@@ -635,20 +642,7 @@ export const updateInventoryStock = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
 
-        const existing = await InventoryStock.findOne({
-            where: {
-                productId,
-                variantId,
-                godownId,
-                id: { [Op.ne]: stock.id },
-            },
-            transaction: t,
-        });
-        if (existing) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Stock already exists for selected product, variant and godown.');
-        }
-
+        // Note: Multiple stock entries per godown-product-variant are now allowed (batch tracking)
         const previousBaseUnits = Number(stock.totalBaseUnits || 0);
         const deltaBaseUnits = qtyTotalBaseUnits - previousBaseUnits;
         const deltaAbsSplit = splitBaseUnits(Math.abs(deltaBaseUnits), secondaryPerPrimary);

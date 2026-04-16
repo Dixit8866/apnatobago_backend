@@ -298,13 +298,20 @@ export const getProducts = async (req, res, next) => {
         ]);
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
+        const include = [
+            { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+            { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+            { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
+        ];
+
         if (req.query.paginate === 'false') {
-            const products = await Product.findAll({ where: whereWithFilters, order: [['createdAt', 'DESC']] });
+            const products = await Product.findAll({ where: whereWithFilters, include, order: [['createdAt', 'DESC']] });
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products fetched successfully.', { products, statusCounts });
         }
 
         const result = await Product.findAndCountAll({
             where: whereWithFilters,
+            include,
             limit,
             offset,
             order: [['createdAt', 'DESC']],

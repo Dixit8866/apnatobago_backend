@@ -45,6 +45,11 @@ const InventoryStock = sequelize.define(
             allowNull: false,
             defaultValue: 0,
         },
+        lastPurchasePricePerBaseUnit: {
+            type: DataTypes.DECIMAL(12, 2),
+            allowNull: false,
+            defaultValue: 0,
+        },
         status: {
             type: DataTypes.STRING,
             defaultValue: 'Active',
@@ -55,7 +60,10 @@ const InventoryStock = sequelize.define(
         tableName: 'inventory_stocks',
         paranoid: true,
         indexes: [
-            { unique: true, fields: ['godownId', 'productId', 'variantId'] },
+            // Non-unique indexes to allow multiple stock batches per godown-product-variant
+            { fields: ['godownId', 'productId', 'variantId'], unique: false },
+            { fields: ['productId'], unique: false },
+            { fields: ['variantId'], unique: false },
         ],
     }
 );
