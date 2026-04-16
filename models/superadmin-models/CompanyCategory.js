@@ -21,6 +21,16 @@ const CompanyCategory = sequelize.define('CompanyCategory', {
         allowNull: true,
         comment: 'Multilingual descriptions'
     },
+    mainCategoryId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        comment: 'Associated main category'
+    },
+    subCategoryId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        comment: 'Associated sub category'
+    },
     status: {
         type: DataTypes.STRING,
         defaultValue: 'Active'

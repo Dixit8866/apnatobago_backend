@@ -152,6 +152,7 @@ export const createProduct = async (req, res, next) => {
             companyCategoryId,
             productDescription,
             packagings,
+            isTobaccoProduct,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -194,6 +195,7 @@ export const createProduct = async (req, res, next) => {
                 mainCategoryId,
                 subCategoryId,
                 companyCategoryId,
+                isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : true,
                 productDescription: normalizeProductDescription(productDescription),
                 packagings: Array.isArray(packagings) ? packagings : [],
                 status: status || 'Active',
@@ -376,6 +378,7 @@ export const updateProduct = async (req, res, next) => {
             companyCategoryId,
             productDescription,
             packagings,
+            isTobaccoProduct,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -422,6 +425,7 @@ export const updateProduct = async (req, res, next) => {
                 mainCategoryId,
                 subCategoryId,
                 companyCategoryId,
+                isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : product.isTobaccoProduct,
                 productDescription: normalizeProductDescription(productDescription),
                 packagings: Array.isArray(packagings) ? packagings : product.packagings || [],
                 status: status || product.status,

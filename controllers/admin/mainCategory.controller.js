@@ -9,7 +9,12 @@ export const createMainCategory = async (req, res, next) => {
         const { image, title, description, status } = req.body;
         // title is expected to be an object: { en: "Name", gu: "નામ" }
 
-        const mainCategory = await MainCategory.create({ image, title, description, status });
+        // Get max position for auto-increment
+        const maxPos = await MainCategory.max('position') || 0;
+        const mainCategory = await MainCategory.create({
+            image, title, description, status,
+            position: maxPos + 1
+        });
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Main Category created successfully.", mainCategory);
     } catch (error) {
         next(error);
@@ -48,7 +53,7 @@ export const getMainCategories = async (req, res, next) => {
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
         if (req.query.paginate === 'false') {
-            const categories = await MainCategory.findAll({ where: whereClause, order: [['createdAt', 'DESC']] });
+            const categories = await MainCategory.findAll({ where: whereClause, order: [['position', 'ASC'], ['createdAt', 'DESC']] });
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Main Categories fetched successfully.", { categories, statusCounts });
         }
 
@@ -57,7 +62,7 @@ export const getMainCategories = async (req, res, next) => {
             where: whereClause,
             limit,
             offset,
-            order: [['createdAt', 'DESC']]
+            order: [['position', 'ASC'], ['createdAt', 'DESC']]
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -102,6 +107,61 @@ export const deleteMainCategory = async (req, res, next) => {
         await category.save();
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Main Category deleted successfully.");
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── REORDER (DRAG & DROP) ───────────────────────────────────────────────────
+export const reorderMainCategories = async (req, res, next) => {
+    try {
+        const { items } = req.body; // [{ id, position }]
+        if (!Array.isArray(items)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Items array is required.");
+        }
+
+        // Update all positions in a transaction
+        for (const item of items) {
+            await MainCategory.update(
+                { position: item.position },
+                { where: { id: item.id } }
+            );
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Categories reordered successfully.");
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── MOVE TO TOP ─────────────────────────────────────────────────────────────
+export const moveMainCategoryToTop = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const category = await MainCategory.findByPk(id);
+        if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Main Category not found.");
+
+        // Get current min position
+        const minPosition = await MainCategory.min('position') || 0;
+
+        // Use transaction for atomic update
+        const transaction = await MainCategory.sequelize.transaction();
+
+        try {
+            // Shift all categories up by 1 to make room at top
+            await MainCategory.increment('position', { by: 1, where: {}, transaction });
+
+            // Set this category to the minimum position
+            category.position = minPosition;
+            await category.save({ transaction });
+
+            await transaction.commit();
+        } catch (err) {
+            await transaction.rollback();
+            throw err;
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Category moved to top successfully.");
     } catch (error) {
         next(error);
     }

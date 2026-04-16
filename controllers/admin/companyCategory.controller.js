@@ -1,4 +1,6 @@
 import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
+import MainCategory from '../../models/superadmin-models/MainCategory.js';
+import SubCategory from '../../models/superadmin-models/SubCategory.js';
 
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -8,7 +10,7 @@ import { Op } from 'sequelize';
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createCompanyCategory = async (req, res, next) => {
     try {
-        const { title, description, image, status } = req.body;
+        const { title, description, image, status, mainCategoryId, subCategoryId } = req.body;
         if (!title || typeof title !== 'object' || !Object.values(title).some(v => v?.trim())) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide a title in at least one language.");
         }
@@ -17,7 +19,9 @@ export const createCompanyCategory = async (req, res, next) => {
             title,
             description: description || {},
             image: image || null,
-            status: status || 'Active'
+            status: status || 'Active',
+            mainCategoryId: mainCategoryId || null,
+            subCategoryId: subCategoryId || null,
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Company Category created successfully.", category);
@@ -52,9 +56,15 @@ export const getCompanyCategories = async (req, res, next) => {
         ]);
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
+        const include = [
+            { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+            { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+        ];
+
         if (req.query.paginate === 'false') {
             const categories = await CompanyCategory.findAll({
                 where: whereWithSearch,
+                include,
                 order: [['createdAt', 'DESC']]
             });
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Categories fetched successfully.", { categories, statusCounts });
@@ -65,6 +75,7 @@ export const getCompanyCategories = async (req, res, next) => {
 
         const result = await CompanyCategory.findAndCountAll({
             where: whereWithSearch,
+            include,
             limit,
             offset,
             order: [['createdAt', 'DESC']]
@@ -83,7 +94,12 @@ export const getCompanyCategories = async (req, res, next) => {
 // ─── GET BY ID ───────────────────────────────────────────────────────────────
 export const getCompanyCategoryById = async (req, res, next) => {
     try {
-        const category = await CompanyCategory.findByPk(req.params.id);
+        const category = await CompanyCategory.findByPk(req.params.id, {
+            include: [
+                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+            ]
+        });
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Company Category not found.");
         const result = category.toJSON();
 
@@ -96,7 +112,7 @@ export const getCompanyCategoryById = async (req, res, next) => {
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
 export const updateCompanyCategory = async (req, res, next) => {
     try {
-        const { title, description, image, status } = req.body;
+        const { title, description, image, status, mainCategoryId, subCategoryId } = req.body;
         const category = await CompanyCategory.findByPk(req.params.id);
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Company Category not found.");
 
@@ -105,6 +121,8 @@ export const updateCompanyCategory = async (req, res, next) => {
             description: description ?? category.description,
             image: image !== undefined ? image : category.image,
             status: status ?? category.status,
+            mainCategoryId: mainCategoryId !== undefined ? mainCategoryId : category.mainCategoryId,
+            subCategoryId: subCategoryId !== undefined ? subCategoryId : category.subCategoryId,
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category updated successfully.", category);

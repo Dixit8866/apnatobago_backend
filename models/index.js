@@ -50,6 +50,13 @@ Product.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' 
 CompanyCategory.hasMany(Product, { foreignKey: 'companyCategoryId', as: 'products' });
 Product.belongsTo(CompanyCategory, { foreignKey: 'companyCategoryId', as: 'companyCategory' });
 
+// CompanyCategory -> Main/Sub Category associations
+MainCategory.hasMany(CompanyCategory, { foreignKey: 'mainCategoryId', as: 'companyCategories' });
+CompanyCategory.belongsTo(MainCategory, { foreignKey: 'mainCategoryId', as: 'mainCategory' });
+
+SubCategory.hasMany(CompanyCategory, { foreignKey: 'subCategoryId', as: 'companyCategories' });
+CompanyCategory.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' });
+
 // Inventory stock (per product + variant)
 Product.hasMany(InventoryStock, { foreignKey: 'productId', as: 'inventoryStocks' });
 InventoryStock.belongsTo(Product, { foreignKey: 'productId', as: 'product' });

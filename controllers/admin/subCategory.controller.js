@@ -17,12 +17,15 @@ export const createSubCategory = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Title is required in at least one language.");
         }
 
+        // Get max position for auto-increment
+        const maxPos = await SubCategory.max('position') || 0;
         const newCategory = await SubCategory.create({
             mainCategoryId,
             image,
             title,
             description,
-            status
+            status,
+            position: maxPos + 1
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sub Category created successfully", newCategory);
@@ -69,7 +72,7 @@ export const getSubCategories = async (req, res, next) => {
         if (req.query.paginate === 'false') {
             const categories = await SubCategory.findAll({
                 where: whereWithSearch,
-                order: [['createdAt', 'DESC']],
+                order: [['position', 'ASC'], ['createdAt', 'DESC']],
                 include: [includeMainCategory]
             });
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Sub Categories fetched successfully", { categories, statusCounts });
@@ -82,7 +85,7 @@ export const getSubCategories = async (req, res, next) => {
             where: whereWithSearch,
             limit: queryLimit,
             offset,
-            order: [['createdAt', 'DESC']],
+            order: [['position', 'ASC'], ['createdAt', 'DESC']],
             include: [includeMainCategory]
         });
 
@@ -155,6 +158,61 @@ export const deleteSubCategory = async (req, res, next) => {
         await category.save();
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Sub Category deleted successfully");
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── REORDER (DRAG & DROP) ───────────────────────────────────────────────────
+export const reorderSubCategories = async (req, res, next) => {
+    try {
+        const { items } = req.body; // [{ id, position }]
+        if (!Array.isArray(items)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Items array is required.");
+        }
+
+        // Update all positions
+        for (const item of items) {
+            await SubCategory.update(
+                { position: item.position },
+                { where: { id: item.id } }
+            );
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Sub Categories reordered successfully.");
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── MOVE TO TOP ─────────────────────────────────────────────────────────────
+export const moveSubCategoryToTop = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const category = await SubCategory.findByPk(id);
+        if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Sub Category not found.");
+
+        // Get current min position
+        const minPosition = await SubCategory.min('position') || 0;
+
+        // Use transaction for atomic update
+        const transaction = await SubCategory.sequelize.transaction();
+
+        try {
+            // Shift all categories up by 1 to make room at top
+            await SubCategory.increment('position', { by: 1, where: {}, transaction });
+
+            // Set this category to the minimum position
+            category.position = minPosition;
+            await category.save({ transaction });
+
+            await transaction.commit();
+        } catch (err) {
+            await transaction.rollback();
+            throw err;
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Sub Category moved to top successfully.");
     } catch (error) {
         next(error);
     }

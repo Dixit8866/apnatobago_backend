@@ -5,7 +5,9 @@ import {
     getSubCategories,
     getSubCategoryById,
     updateSubCategory,
-    deleteSubCategory
+    deleteSubCategory,
+    reorderSubCategories,
+    moveSubCategoryToTop
 } from '../../controllers/admin/subCategory.controller.js';
 
 const router = express.Router();
@@ -15,5 +17,7 @@ router.get('/', protect, admin, getSubCategories);
 router.get('/:id', protect, admin, getSubCategoryById);
 router.put('/:id', protect, admin, updateSubCategory);
 router.delete('/:id', protect, admin, deleteSubCategory);
+router.post('/reorder', protect, admin, reorderSubCategories);
+router.post('/:id/move-to-top', protect, admin, moveSubCategoryToTop);
 
 export default router;

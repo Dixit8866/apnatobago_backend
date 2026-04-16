@@ -19,6 +19,11 @@ const MainCategory = sequelize.define('MainCategory', {
         type: DataTypes.JSONB,
         allowNull: true,
     },
+    position: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+    },
     status: {
         type: DataTypes.STRING,
         defaultValue: 'Active'

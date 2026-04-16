@@ -34,6 +34,11 @@ const Product = sequelize.define(
             type: DataTypes.UUID,
             allowNull: false,
         },
+        isTobaccoProduct: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: true,
+        },
         productDescription: {
             type: DataTypes.JSONB,
             allowNull: true,
