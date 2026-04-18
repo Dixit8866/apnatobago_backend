@@ -2,6 +2,10 @@ import MainCategory from '../../models/superadmin-models/MainCategory.js';
 import SubCategory from '../../models/superadmin-models/SubCategory.js';
 import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
 import Product from '../../models/superadmin-models/Product.js';
+import ProductVariant from '../../models/superadmin-models/ProductVariant.js';
+import ProductPricing from '../../models/superadmin-models/ProductPricing.js';
+import Volume from '../../models/superadmin-models/Volume.js';
+import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -98,7 +102,26 @@ export const getProducts = async (req, res) => {
 
         const products = await Product.findAll({
             where: whereClause,
-            order: [['position', 'ASC']]
+            order: [['position', 'ASC']],
+            include: [
+                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+                { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
+                {
+                    model: ProductVariant,
+                    as: 'variants',
+                    include: [
+                        { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                        {
+                            model: ProductPricing,
+                            as: 'pricings',
+                            include: [
+                                { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] },
+                            ]
+                        }
+                    ]
+                }
+            ]
         });
 
         console.log('[DEBUG] Products found:', products.length);
