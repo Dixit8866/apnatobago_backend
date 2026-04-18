@@ -18,18 +18,21 @@ const generateToken = (id) => {
 };
 
 /**
- * @desc    Helper function to send SMS OTP
+ * @desc    Helper function to send SMS OTP with debugging logs
  */
-const sendSMS = async (number, otp) => {
+const sendSMS = async (fullNumber, otp) => {
     try {
+        // Remove '+' from dialcode if present as many gateways don't like it in params
+        const cleanNumber = fullNumber.replace('+', '');
         const text = `Dear Customer, your OTP for verification is ${otp}. Do not share it with anyone.`;
+        
         const smsParams = {
             APIKey: process.env.SMS_API_KEY || 'isGOxtla5EKjl6skCtuFqQ',
             senderid: process.env.SMS_SENDER_ID || 'MRSTXI',
             channel: 2,
             DCS: 0,
             flashsms: 0,
-            number: number,
+            number: cleanNumber,
             text: text,
             route: 1,
             EntityId: process.env.SMS_ENTITY_ID || '1201159827614998700',
@@ -38,9 +41,17 @@ const sendSMS = async (number, otp) => {
 
         const baseURL = process.env.SMS_BASE_URL || 'https://www.smsgatewayhub.com/api/mt/SendSMS';
         const urlParams = new URLSearchParams(smsParams).toString();
-        await axios.get(`${baseURL}?${urlParams}`);
+        const fullUrl = `${baseURL}?${urlParams}`;
+
+        console.log(`[SMS Debug] Sending OTP to: ${cleanNumber}`);
+        console.log(`[SMS Debug] Full URL: ${fullUrl}`);
+
+        const response = await axios.get(fullUrl);
+        console.log(`[SMS Debug] API Response:`, response.data);
+        
         return true;
     } catch (smsError) {
+        console.error(`[SMS Error] Failed to send SMS:`, smsError.message);
         logger.error(`[SMS Send Error]: ${smsError.message}`);
         return false;
     }
@@ -54,18 +65,31 @@ const sendSMS = async (number, otp) => {
 export const sendOtp = async (req, res) => {
     try {
         const { number } = req.body;
+        console.log(`[Auth Debug] sendOtp called for number: ${number}`);
+
         if (!number) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number");
         }
+
+        // Find user to get dialcode
+        const user = await User.findOne({ where: { number } });
+        let fullNumber = number;
+        if (user && user.dialcode) {
+            fullNumber = `${user.dialcode}${number}`;
+        }
+        console.log(`[Auth Debug] Full number for OTP: ${fullNumber}`);
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-        await sendSMS(number, otp);
+        console.log(`[Auth Debug] OTP generated: ${otp} (Stored for ${number})`);
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, `OTP sent successfully to ${number}`);
+        await sendSMS(fullNumber, otp);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `OTP sent successfully to ${fullNumber}`);
     } catch (error) {
+        console.error(`[Auth Debug] Error in sendOtp:`, error.message);
         logger.error(`[Send OTP Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
@@ -79,6 +103,8 @@ export const sendOtp = async (req, res) => {
 export const verifyOtp = async (req, res) => {
     try {
         const { number, otp } = req.body;
+        console.log(`[Auth Debug] verifyOtp called - Number: ${number}, OTP: ${otp}`);
+
         if (!number || !otp) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number and OTP");
         }
@@ -92,18 +118,18 @@ export const verifyOtp = async (req, res) => {
         });
 
         if (!otpRecord) {
+            console.log(`[Auth Debug] OTP Verification Failed for ${number}`);
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired OTP");
         }
+
+        console.log(`[Auth Debug] OTP Verified for ${number}. Activating user...`);
 
         // Search for user and activate/verify if found
         const user = await User.findOne({ where: { number } });
         if (user) {
-            // If user was inactive, activate them
-            if (user.status === 'Inactive') {
-                user.status = 'Active';
-            }
-            // You could also update kycverification or similar here if desired
+            user.status = 'Active';
             await user.save();
+            console.log(`[Auth Debug] User ${number} status updated to Active`);
         }
 
         // Delete successful OTP
@@ -111,19 +137,21 @@ export const verifyOtp = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP verified successfully");
     } catch (error) {
+        console.error(`[Auth Debug] Error in verifyOtp:`, error.message);
         logger.error(`[Verify OTP Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
 };
 
 /**
- * @desc    Register a new user (Creates record THEN sends OTP)
+ * @desc    Register a new user
  * @route   POST /api/user/register
  * @access  Public
  */
 export const registerUser = async (req, res) => {
     try {
         const { fullname, email, dialcode, number, city, postcode, password, confirmPassword, fcmtoken } = req.body;
+        console.log(`[Auth Debug] registerUser called - Number: ${number}, Name: ${fullname}`);
 
         if (!fullname || !dialcode || !number || !password || !confirmPassword) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
@@ -135,10 +163,11 @@ export const registerUser = async (req, res) => {
 
         const userExists = await User.findOne({ where: { number } });
         if (userExists) {
+            console.log(`[Auth Debug] Registration failed - User already exists: ${number}`);
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "User with this number already exists");
         }
 
-        // Create User - Default to Active since they need to verify via OTP later anyway
+        // Create User
         const user = await User.create({
             fullname,
             email,
@@ -150,16 +179,20 @@ export const registerUser = async (req, res) => {
             fcmtoken,
             showtabacco: false,
             creditline: 0,
-            status: 'Inactive', // Created as Inactive until OTP verified
+            status: 'Inactive',
             kycverification: 'pending'
         });
 
         if (user) {
-            // Generate and Send OTP
+            console.log(`[Auth Debug] User record created. Sending OTP...`);
+            
+            // Send OTP (combine dialcode and number)
+            const fullNumber = `${dialcode}${number}`;
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
             await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-            await sendSMS(number, otp);
+            await sendSMS(fullNumber, otp);
 
             const token = generateToken(user.id);
             user.logintoken = token;
@@ -169,12 +202,13 @@ export const registerUser = async (req, res) => {
             delete userData.password;
             delete userData.logintoken;
 
-            return sendSuccessResponse(res, HTTP_STATUS.CREATED, "User registered successfully. Please verify OTP sent to your number.", {
+            return sendSuccessResponse(res, HTTP_STATUS.CREATED, "User registered. Please verify OTP.", {
                 user: userData,
                 token
             });
         }
     } catch (error) {
+        console.error(`[Auth Debug] Error in registerUser:`, error.message);
         logger.error(`[User Register Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
@@ -188,6 +222,7 @@ export const registerUser = async (req, res) => {
 export const loginUser = async (req, res) => {
     try {
         const { number, password, fcmtoken } = req.body;
+        console.log(`[Auth Debug] loginUser called - Number: ${number}`);
 
         if (!number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide number and password");
@@ -196,7 +231,8 @@ export const loginUser = async (req, res) => {
         const user = await User.findOne({ where: { number } });
 
         if (!user || user.status === 'Deleted') {
-            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Invalid number or password, or account is deleted");
+            console.log(`[Auth Debug] Login failed - User not found or deleted: ${number}`);
+            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Invalid number or password");
         }
 
         const isMatch = await user.matchPassword(password);
@@ -205,14 +241,14 @@ export const loginUser = async (req, res) => {
         }
 
         if (user.status === 'Inactive') {
-            // If user is inactive, maybe they haven't verified OTP yet?
-            // Re-send OTP if they try to login while inactive
+            console.log(`[Auth Debug] Login blocked - User Inactive. Re-sending OTP...`);
+            const fullNumber = `${user.dialcode}${number}`;
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
             await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-            await sendSMS(number, otp);
+            await sendSMS(fullNumber, otp);
             
-            return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, "Account not verified. OTP has been sent again to your number.");
+            return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, "Account not verified. OTP sent again.");
         }
 
         const token = generateToken(user.id);
@@ -223,6 +259,7 @@ export const loginUser = async (req, res) => {
         }
 
         await user.save();
+        console.log(`[Auth Debug] Login successful for ${number}`);
 
         const userData = user.toJSON();
         delete userData.password;
@@ -233,6 +270,7 @@ export const loginUser = async (req, res) => {
             token
         });
     } catch (error) {
+        console.error(`[Auth Debug] Error in loginUser:`, error.message);
         logger.error(`[User Login Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
