@@ -83,16 +83,16 @@ export const getProducts = async (req, res) => {
         console.log('[DEBUG] Query params:', { mainCategoryId, subCategoryId, companyCategoryId });
         console.log('[DEBUG] User:', { id: user?.id, showtabacco: user?.showtabacco });
 
-        const whereClause = {};
+        const whereClause = { status: 'Active' };
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
         if (subCategoryId) whereClause.subCategoryId = subCategoryId;
         if (companyCategoryId) whereClause.companyCategoryId = companyCategoryId;
 
-        // DEBUG: Temporarily disabled filters
-        // whereClause.status = 'Active';
-        // if (user && !user.showtabacco) {
-        //     whereClause.isTobaccoProduct = false;
-        // }
+        // If user doesn't have showtabacco permission, only show non-tobacco products
+        if (user && !user.showtabacco) {
+            whereClause.isTobaccoProduct = false;
+        }
+        // If user has showtabacco = true, show all products (no isTobaccoProduct filter)
 
         console.log('[DEBUG] whereClause:', whereClause);
 
