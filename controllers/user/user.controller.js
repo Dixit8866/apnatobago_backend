@@ -18,7 +18,36 @@ const generateToken = (id) => {
 };
 
 /**
- * @desc    Send OTP to phone number (for Registration or Login)
+ * @desc    Helper function to send SMS OTP
+ */
+const sendSMS = async (number, otp) => {
+    try {
+        const text = `Dear Customer, your OTP for verification is ${otp}. Do not share it with anyone.`;
+        const smsParams = {
+            APIKey: process.env.SMS_API_KEY || 'isGOxtla5EKjl6skCtuFqQ',
+            senderid: process.env.SMS_SENDER_ID || 'MRSTXI',
+            channel: 2,
+            DCS: 0,
+            flashsms: 0,
+            number: number,
+            text: text,
+            route: 1,
+            EntityId: process.env.SMS_ENTITY_ID || '1201159827614998700',
+            dlttemplateid: process.env.SMS_TEMPLATE_ID || '1207166081646554203'
+        };
+
+        const baseURL = process.env.SMS_BASE_URL || 'https://www.smsgatewayhub.com/api/mt/SendSMS';
+        const urlParams = new URLSearchParams(smsParams).toString();
+        await axios.get(`${baseURL}?${urlParams}`);
+        return true;
+    } catch (smsError) {
+        logger.error(`[SMS Send Error]: ${smsError.message}`);
+        return false;
+    }
+};
+
+/**
+ * @desc    Send OTP to phone number
  * @route   POST /api/user/send-otp
  * @access  Public
  */
@@ -29,40 +58,11 @@ export const sendOtp = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number");
         }
 
-        // Generate 6 digit OTP random
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-        // Store OTP in Otp table (Update if exists for same number, or create new)
-        await OTP.upsert({
-            number,
-            otp,
-            expiresAt
-        }, { where: { number } });
-
-        // Send SMS Using Config
-        const text = `Dear Customer, your OTP for verification is ${otp}. Do not share it with anyone.`;
-        
-        try {
-            const smsParams = {
-                APIKey: process.env.SMS_API_KEY || 'isGOxtla5EKjl6skCtuFqQ',
-                senderid: process.env.SMS_SENDER_ID || 'MRSTXI',
-                channel: 2,
-                DCS: 0,
-                flashsms: 0,
-                number: number,
-                text: text,
-                route: 1,
-                EntityId: process.env.SMS_ENTITY_ID || '1201159827614998700',
-                dlttemplateid: process.env.SMS_TEMPLATE_ID || '1207166081646554203'
-            };
-
-            const baseURL = process.env.SMS_BASE_URL || 'https://www.smsgatewayhub.com/api/mt/SendSMS';
-            const urlParams = new URLSearchParams(smsParams).toString();
-            await axios.get(`${baseURL}?${urlParams}`);
-        } catch (smsError) {
-             logger.error(`[SMS Send Error]: ${smsError.message}`);
-        }
+        await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
+        await sendSMS(number, otp);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `OTP sent successfully to ${number}`);
     } catch (error) {
@@ -72,7 +72,7 @@ export const sendOtp = async (req, res) => {
 };
 
 /**
- * @desc    Verify OTP for general purpose
+ * @desc    Verify OTP
  * @route   POST /api/user/verify-otp
  * @access  Public
  */
@@ -95,8 +95,20 @@ export const verifyOtp = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired OTP");
         }
 
-        // OTP Verified - we can choose to delete it here or after specific action
-        // For general verification, we just confirm success
+        // Search for user and activate/verify if found
+        const user = await User.findOne({ where: { number } });
+        if (user) {
+            // If user was inactive, activate them
+            if (user.status === 'Inactive') {
+                user.status = 'Active';
+            }
+            // You could also update kycverification or similar here if desired
+            await user.save();
+        }
+
+        // Delete successful OTP
+        await OTP.destroy({ where: { number } });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP verified successfully");
     } catch (error) {
         logger.error(`[Verify OTP Error]: ${error.message}`);
@@ -105,42 +117,28 @@ export const verifyOtp = async (req, res) => {
 };
 
 /**
- * @desc    Register a new user (Requires OTP verification)
+ * @desc    Register a new user (Creates record THEN sends OTP)
  * @route   POST /api/user/register
  * @access  Public
  */
 export const registerUser = async (req, res) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, confirmPassword, fcmtoken, otp } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, confirmPassword, fcmtoken } = req.body;
 
-        if (!fullname || !dialcode || !number || !password || !confirmPassword || !otp) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields (including OTP)");
+        if (!fullname || !dialcode || !number || !password || !confirmPassword) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
         }
 
         if (password !== confirmPassword) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Passwords do not match");
         }
 
-        // 1. Verify OTP first
-        const otpRecord = await OTP.findOne({ 
-            where: { 
-                number, 
-                otp,
-                expiresAt: { [Op.gt]: new Date() }
-            } 
-        });
-
-        if (!otpRecord) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired OTP. Please verify your number first.");
-        }
-
-        // 2. Check if user already exists
         const userExists = await User.findOne({ where: { number } });
         if (userExists) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "User with this number already exists");
         }
 
-        // 3. Create User
+        // Create User - Default to Active since they need to verify via OTP later anyway
         const user = await User.create({
             fullname,
             email,
@@ -152,24 +150,26 @@ export const registerUser = async (req, res) => {
             fcmtoken,
             showtabacco: false,
             creditline: 0,
-            status: 'Active',
+            status: 'Inactive', // Created as Inactive until OTP verified
             kycverification: 'pending'
         });
 
         if (user) {
-            // Delete OTP record after successful registration
-            await OTP.destroy({ where: { number } });
+            // Generate and Send OTP
+            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+            await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
+            await sendSMS(number, otp);
 
             const token = generateToken(user.id);
             user.logintoken = token;
             await user.save();
 
-            // Prepare response - remove sensitive/redundant data
             const userData = user.toJSON();
             delete userData.password;
-            delete userData.logintoken; // Don't send in user object as it's already in 'token' field
+            delete userData.logintoken;
 
-            return sendSuccessResponse(res, HTTP_STATUS.CREATED, "User registered successfully", {
+            return sendSuccessResponse(res, HTTP_STATUS.CREATED, "User registered successfully. Please verify OTP sent to your number.", {
                 user: userData,
                 token
             });
@@ -205,7 +205,14 @@ export const loginUser = async (req, res) => {
         }
 
         if (user.status === 'Inactive') {
-            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Your account is inactive. Contact support.");
+            // If user is inactive, maybe they haven't verified OTP yet?
+            // Re-send OTP if they try to login while inactive
+            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+            const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+            await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
+            await sendSMS(number, otp);
+            
+            return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, "Account not verified. OTP has been sent again to your number.");
         }
 
         const token = generateToken(user.id);
@@ -239,7 +246,7 @@ export const loginUser = async (req, res) => {
 export const getProfile = async (req, res) => {
     try {
         const userData = req.user.toJSON();
-        delete userData.logintoken; // Clean up response
+        delete userData.logintoken;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Profile fetched successfully", {
             user: userData
