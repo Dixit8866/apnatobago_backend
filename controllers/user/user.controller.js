@@ -22,9 +22,14 @@ const generateToken = (id) => {
  */
 const sendSMS = async (fullNumber, otp) => {
     try {
-        // Remove '+' from dialcode if present as many gateways don't like it in params
+        // Clean number (remove '+' if present)
         const cleanNumber = fullNumber.replace('+', '');
-        const text = `Dear Customer, your OTP for verification is ${otp}. Do not share it with anyone.`;
+        
+        // DLT Approved Template: {#var#} is your mobile verification code. Regards, {#var#} Call: {#var#} Team MRSTXI
+        // We must fill all 3 variables exactly
+        const companyName = "MRSTXI";
+        const supportContact = "MRSTXI"; // You can replace this with a support number later
+        const text = `${otp} is your mobile verification code. Regards, ${companyName} Call: ${supportContact} Team MRSTXI`;
         
         const smsParams = {
             APIKey: process.env.SMS_API_KEY || 'isGOxtla5EKjl6skCtuFqQ',
@@ -44,6 +49,7 @@ const sendSMS = async (fullNumber, otp) => {
         const fullUrl = `${baseURL}?${urlParams}`;
 
         console.log(`[SMS Debug] Sending OTP to: ${cleanNumber}`);
+        console.log(`[SMS Debug] Using DLT Template Text: ${text}`);
         console.log(`[SMS Debug] Full URL: ${fullUrl}`);
 
         const response = await axios.get(fullUrl);
@@ -71,11 +77,16 @@ export const sendOtp = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number");
         }
 
-        // Find user to get dialcode
         const user = await User.findOne({ where: { number } });
         let fullNumber = number;
         if (user && user.dialcode) {
-            fullNumber = `${user.dialcode}${number}`;
+             // Avoid double dialcode (if number already starts with dialcode)
+             const pureDialcode = user.dialcode.replace('+', '');
+             if (number.startsWith(pureDialcode)) {
+                 fullNumber = number;
+             } else {
+                 fullNumber = `${pureDialcode}${number}`;
+             }
         }
         console.log(`[Auth Debug] Full number for OTP: ${fullNumber}`);
 
@@ -83,11 +94,11 @@ export const sendOtp = async (req, res) => {
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-        console.log(`[Auth Debug] OTP generated: ${otp} (Stored for ${number})`);
+        console.log(`[Auth Debug] OTP generated: ${otp}`);
 
         await sendSMS(fullNumber, otp);
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, `OTP sent successfully to ${fullNumber}`);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `OTP sent successfully`);
     } catch (error) {
         console.error(`[Auth Debug] Error in sendOtp:`, error.message);
         logger.error(`[Send OTP Error]: ${error.message}`);
@@ -118,13 +129,10 @@ export const verifyOtp = async (req, res) => {
         });
 
         if (!otpRecord) {
-            console.log(`[Auth Debug] OTP Verification Failed for ${number}`);
+            console.log(`[Auth Debug] OTP Verification Failed`);
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired OTP");
         }
 
-        console.log(`[Auth Debug] OTP Verified for ${number}. Activating user...`);
-
-        // Search for user and activate/verify if found
         const user = await User.findOne({ where: { number } });
         if (user) {
             user.status = 'Active';
@@ -132,7 +140,6 @@ export const verifyOtp = async (req, res) => {
             console.log(`[Auth Debug] User ${number} status updated to Active`);
         }
 
-        // Delete successful OTP
         await OTP.destroy({ where: { number } });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP verified successfully");
@@ -151,7 +158,7 @@ export const verifyOtp = async (req, res) => {
 export const registerUser = async (req, res) => {
     try {
         const { fullname, email, dialcode, number, city, postcode, password, confirmPassword, fcmtoken } = req.body;
-        console.log(`[Auth Debug] registerUser called - Number: ${number}, Name: ${fullname}`);
+        console.log(`[Auth Debug] registerUser called - Number: ${number}`);
 
         if (!fullname || !dialcode || !number || !password || !confirmPassword) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
@@ -163,11 +170,9 @@ export const registerUser = async (req, res) => {
 
         const userExists = await User.findOne({ where: { number } });
         if (userExists) {
-            console.log(`[Auth Debug] Registration failed - User already exists: ${number}`);
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "User with this number already exists");
         }
 
-        // Create User
         const user = await User.create({
             fullname,
             email,
@@ -186,8 +191,9 @@ export const registerUser = async (req, res) => {
         if (user) {
             console.log(`[Auth Debug] User record created. Sending OTP...`);
             
-            // Send OTP (combine dialcode and number)
-            const fullNumber = `${dialcode}${number}`;
+            const pureDialcode = dialcode.replace('+', '');
+            const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
+            
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -231,7 +237,6 @@ export const loginUser = async (req, res) => {
         const user = await User.findOne({ where: { number } });
 
         if (!user || user.status === 'Deleted') {
-            console.log(`[Auth Debug] Login failed - User not found or deleted: ${number}`);
             return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Invalid number or password");
         }
 
@@ -241,8 +246,10 @@ export const loginUser = async (req, res) => {
         }
 
         if (user.status === 'Inactive') {
-            console.log(`[Auth Debug] Login blocked - User Inactive. Re-sending OTP...`);
-            const fullNumber = `${user.dialcode}${number}`;
+            console.log(`[Auth Debug] User Inactive. Re-sending OTP...`);
+            const pureDialcode = (user.dialcode || '+91').replace('+', '');
+            const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
+            
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
             await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
@@ -259,7 +266,6 @@ export const loginUser = async (req, res) => {
         }
 
         await user.save();
-        console.log(`[Auth Debug] Login successful for ${number}`);
 
         const userData = user.toJSON();
         delete userData.password;
@@ -297,8 +303,6 @@ export const getProfile = async (req, res) => {
 
 /**
  * @desc    Logout user
- * @route   POST /api/user/logout
- * @access  Private (Requires Token)
  */
 export const logoutUser = async (req, res) => {
     try {
@@ -308,34 +312,24 @@ export const logoutUser = async (req, res) => {
             user.fcmtoken = null; 
             await user.save();
         }
-
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Logged out successfully");
     } catch (error) {
-        logger.error(`[Logout Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
 };
 
 /**
- * @desc    Delete user account (Soft Delete)
- * @route   DELETE /api/user/delete-account
- * @access  Private (Requires Token)
+ * @desc    Delete user account
  */
 export const deleteAccount = async (req, res) => {
     try {
         const user = await User.findByPk(req.user.id);
-        if (!user) {
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
-        }
-
+        if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
         user.status = 'Deleted';
         user.logintoken = null;
-        user.fcmtoken = null;
         await user.save();
-
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Account deleted successfully");
     } catch (error) {
-        logger.error(`[Delete Account Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
 };
