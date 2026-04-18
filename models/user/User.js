@@ -64,13 +64,9 @@ const User = sequelize.define('User', {
         type: DataTypes.STRING,
         defaultValue: 'Active', // Active | Inactive | Deleted
     },
-    otp: {
+    kycverification: {
         type: DataTypes.STRING,
-        allowNull: true,
-    },
-    otpExpires: {
-        type: DataTypes.DATE,
-        allowNull: true,
+        defaultValue: 'pending', // pending | verified
     }
 }, {
     timestamps: true,
