@@ -58,6 +58,11 @@ const Product = sequelize.define(
             type: DataTypes.STRING,
             defaultValue: 'Active',
         },
+        position: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0,
+            allowNull: false,
+        },
     },
     {
         timestamps: true,

@@ -34,6 +34,11 @@ const CompanyCategory = sequelize.define('CompanyCategory', {
     status: {
         type: DataTypes.STRING,
         defaultValue: 'Active'
+    },
+    position: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+        allowNull: false,
     }
 }, {
     timestamps: true,

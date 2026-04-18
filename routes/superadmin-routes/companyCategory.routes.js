@@ -5,7 +5,9 @@ import {
     getCompanyCategories,
     getCompanyCategoryById,
     updateCompanyCategory,
-    deleteCompanyCategory
+    deleteCompanyCategory,
+    reorderCompanyCategories,
+    moveCompanyCategoryToTop
 } from '../../controllers/admin/companyCategory.controller.js';
 
 const router = express.Router();
@@ -15,5 +17,7 @@ router.get('/', protect, admin, getCompanyCategories);
 router.get('/:id', protect, admin, getCompanyCategoryById);
 router.put('/:id', protect, admin, updateCompanyCategory);
 router.delete('/:id', protect, admin, deleteCompanyCategory);
+router.post('/reorder', protect, admin, reorderCompanyCategories);
+router.post('/:id/move-to-top', protect, admin, moveCompanyCategoryToTop);
 
 export default router;

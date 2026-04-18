@@ -165,9 +165,9 @@ export const createProduct = async (req, res, next) => {
         }
 
         const normalizedImages = normalizeImages(images);
-        if (normalizedImages.length < 1 || normalizedImages.length > 5) {
+        if (normalizedImages.length > 5) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Product images must be between 1 and 5.');
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Maximum 5 product images allowed.');
         }
 
         if (!Array.isArray(variants) || variants.length === 0) {
@@ -307,7 +307,7 @@ export const getProducts = async (req, res, next) => {
         ];
 
         if (req.query.paginate === 'false') {
-            const products = await Product.findAll({ where: whereWithFilters, include, order: [['createdAt', 'DESC']] });
+            const products = await Product.findAll({ where: whereWithFilters, include, order: [['position', 'ASC'], ['createdAt', 'DESC']] });
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products fetched successfully.', { products, statusCounts });
         }
 
@@ -316,7 +316,7 @@ export const getProducts = async (req, res, next) => {
             include,
             limit,
             offset,
-            order: [['createdAt', 'DESC']],
+            order: [['position', 'ASC'], ['createdAt', 'DESC']],
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -396,9 +396,9 @@ export const updateProduct = async (req, res, next) => {
         }
 
         const normalizedImages = normalizeImages(images);
-        if (normalizedImages.length < 1 || normalizedImages.length > 5) {
+        if (normalizedImages.length > 5) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Product images must be between 1 and 5.');
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Maximum 5 product images allowed.');
         }
         if (!Array.isArray(variants) || variants.length === 0) {
             await t.rollback();
@@ -520,6 +520,68 @@ export const deleteProduct = async (req, res, next) => {
         await product.save();
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product deleted successfully.');
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── REORDER (DRAG & DROP) ───────────────────────────────────────────────────
+export const reorderProducts = async (req, res, next) => {
+    try {
+        const { items } = req.body; // [{ id, position }]
+        if (!Array.isArray(items)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid items array.');
+        }
+
+        // Update positions in parallel
+        await Promise.all(
+            items.map(async (item) => {
+                if (!item.id || typeof item.position !== 'number') return;
+                await Product.update(
+                    { position: item.position },
+                    { where: { id: item.id } }
+                );
+            })
+        );
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products reordered successfully.');
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── MOVE TO TOP ─────────────────────────────────────────────────────────────
+export const moveProductToTop = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        
+        // Get all active products ordered by position
+        const products = await Product.findAll({
+            where: { status: { [Op.ne]: 'Deleted' } },
+            order: [['position', 'ASC']]
+        });
+        
+        // Find the target product
+        const targetIndex = products.findIndex(p => p.id === id);
+        if (targetIndex === -1) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
+        }
+        
+        // Remove target from current position and insert at beginning
+        const [target] = products.splice(targetIndex, 1);
+        products.unshift(target);
+        
+        // Update all positions sequentially
+        await Promise.all(
+            products.map(async (prod, index) => {
+                await Product.update(
+                    { position: index },
+                    { where: { id: prod.id } }
+                );
+            })
+        );
+        
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product moved to top successfully.');
     } catch (error) {
         next(error);
     }

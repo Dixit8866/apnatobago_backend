@@ -1,0 +1,43 @@
+import express from 'express';
+import {
+    registerUser,
+    loginUser,
+    sendOtp,
+    verifyOtp,
+    getProfile,
+    logoutUser,
+    deleteAccount
+} from '../../controllers/user/user.controller.js';
+import {
+    getMainCategories,
+    getSubCategories,
+    getCompanyCategories,
+    getProducts,
+    getProductsByMainCategory,
+    getProductsBySubCategory,
+    getProductsByCompanyCategory
+} from '../../controllers/user/catalogue.controller.js';
+import { protectUser } from '../../middlewares/userAuth.middleware.js';
+
+const router = express.Router();
+
+router.post('/register', registerUser);
+router.post('/login', loginUser);
+router.post('/send-otp', sendOtp);
+router.post('/verify-otp', verifyOtp);
+
+// Profile and Account
+router.get('/profile', protectUser, getProfile);
+router.post('/logout', protectUser, logoutUser);
+router.delete('/delete-account', protectUser, deleteAccount);
+
+// Catalogue - Protected by User Auth
+router.get('/main-categories', protectUser, getMainCategories);
+router.get('/sub-categories', protectUser, getSubCategories);
+router.get('/company-categories', protectUser, getCompanyCategories);
+router.get('/products', protectUser, getProducts);
+router.get('/products/main-category/:id', protectUser, getProductsByMainCategory);
+router.get('/products/sub-category/:id', protectUser, getProductsBySubCategory);
+router.get('/products/company-category/:id', protectUser, getProductsByCompanyCategory);
+
+export default router;

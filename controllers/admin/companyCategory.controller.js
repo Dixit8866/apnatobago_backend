@@ -65,7 +65,7 @@ export const getCompanyCategories = async (req, res, next) => {
             const categories = await CompanyCategory.findAll({
                 where: whereWithSearch,
                 include,
-                order: [['createdAt', 'DESC']]
+                order: [['position', 'ASC'], ['createdAt', 'DESC']]
             });
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Categories fetched successfully.", { categories, statusCounts });
         }
@@ -78,7 +78,7 @@ export const getCompanyCategories = async (req, res, next) => {
             include,
             limit,
             offset,
-            order: [['createdAt', 'DESC']]
+            order: [['position', 'ASC'], ['createdAt', 'DESC']]
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -102,6 +102,15 @@ export const getCompanyCategoryById = async (req, res, next) => {
         });
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Company Category not found.");
         const result = category.toJSON();
+
+        // DEBUG: Log what we send back to frontend
+        console.log('[GET_BY_ID] Company Category fetched:', {
+            id:             result.id,
+            mainCategoryId: result.mainCategoryId,
+            subCategoryId:  result.subCategoryId,
+            mainCategory:   result.mainCategory,
+            subCategory:    result.subCategory,
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category fetched successfully.", result);
     } catch (error) {
@@ -141,6 +150,68 @@ export const deleteCompanyCategory = async (req, res, next) => {
         await category.save();
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category deleted successfully.");
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── REORDER (DRAG & DROP) ───────────────────────────────────────────────────
+export const reorderCompanyCategories = async (req, res, next) => {
+    try {
+        const { items } = req.body; // [{ id, position }]
+        if (!Array.isArray(items)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid items array.");
+        }
+
+        // Update positions in parallel
+        await Promise.all(
+            items.map(async (item) => {
+                if (!item.id || typeof item.position !== 'number') return;
+                await CompanyCategory.update(
+                    { position: item.position },
+                    { where: { id: item.id } }
+                );
+            })
+        );
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Categories reordered successfully.");
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ─── MOVE TO TOP ─────────────────────────────────────────────────────────────
+export const moveCompanyCategoryToTop = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        
+        // Get all active categories ordered by position
+        const categories = await CompanyCategory.findAll({
+            where: { status: { [Op.ne]: 'Deleted' } },
+            order: [['position', 'ASC']]
+        });
+        
+        // Find the target category
+        const targetIndex = categories.findIndex(c => c.id === id);
+        if (targetIndex === -1) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Company Category not found.");
+        }
+        
+        // Remove target from current position and insert at beginning
+        const [target] = categories.splice(targetIndex, 1);
+        categories.unshift(target);
+        
+        // Update all positions sequentially
+        await Promise.all(
+            categories.map(async (cat, index) => {
+                await CompanyCategory.update(
+                    { position: index },
+                    { where: { id: cat.id } }
+                );
+            })
+        );
+        
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category moved to top successfully.");
     } catch (error) {
         next(error);
     }
