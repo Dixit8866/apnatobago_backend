@@ -79,20 +79,30 @@ export const getProducts = async (req, res) => {
         const { mainCategoryId, subCategoryId, companyCategoryId } = req.query;
         const user = req.user;
 
-        const whereClause = { status: 'Active' };
+        console.log('[DEBUG] getProducts called');
+        console.log('[DEBUG] Query params:', { mainCategoryId, subCategoryId, companyCategoryId });
+        console.log('[DEBUG] User:', { id: user?.id, showtabacco: user?.showtabacco });
+
+        const whereClause = {};
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
         if (subCategoryId) whereClause.subCategoryId = subCategoryId;
         if (companyCategoryId) whereClause.companyCategoryId = companyCategoryId;
 
-        // If user doesn't have tobacco permission, hide tobacco products
-        if (user && !user.showtabacco) {
-            whereClause.isTobaccoProduct = false;
-        }
+        // DEBUG: Temporarily disabled filters
+        // whereClause.status = 'Active';
+        // if (user && !user.showtabacco) {
+        //     whereClause.isTobaccoProduct = false;
+        // }
+
+        console.log('[DEBUG] whereClause:', whereClause);
 
         const products = await Product.findAll({
             where: whereClause,
             order: [['position', 'ASC']]
         });
+
+        console.log('[DEBUG] Products found:', products.length);
+        console.log('[DEBUG] First product (if any):', products[0] ? { id: products[0].id, name: products[0].name, status: products[0].status, mainCategoryId: products[0].mainCategoryId } : 'No products');
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Products fetched successfully", products);
     } catch (error) {
