@@ -156,6 +156,18 @@ async function runAutoMigrations() {
             console.warn('[AutoMigrate] Warning: Could not drop constraint:', constraintErr.message);
         }
 
+        // ─── 6. Auto Seed: Backfill User.kycverification ──────────────────────────
+        try {
+            await sequelize.query(`
+                UPDATE users 
+                SET kycverification = 'pending' 
+                WHERE kycverification IS NULL
+            `);
+            console.log('[AutoSeed] Backfilled kycverification for existing users ✓');
+        } catch (userErr) {
+            console.warn('[AutoSeed] Warning: User kycverification backfill failed:', userErr.message);
+        }
+
     } catch (err) {
         // Never crash the server for a migration warning
         console.warn('[AutoMigrate] Warning: volumeId backfill failed (non-fatal):', err.message);

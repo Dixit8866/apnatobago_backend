@@ -18,6 +18,8 @@ import ProductVariant from './superadmin-models/ProductVariant.js';
 import ProductPricing from './superadmin-models/ProductPricing.js';
 import InventoryStock from './superadmin-models/InventoryStock.js';
 import InventoryTransaction from './superadmin-models/InventoryTransaction.js';
+import User from './user/User.js';
+import OTP from './user/Otp.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Godown -> GodownStaff (One Godown has many Staff members)
@@ -96,4 +98,6 @@ export {
     ProductPricing,
     InventoryStock,
     InventoryTransaction,
+    User,
+    OTP
 };
