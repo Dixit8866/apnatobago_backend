@@ -30,7 +30,8 @@ export const getCart = async (req, res) => {
                             model: ProductPricing, 
                             as: 'pricings',
                             attributes: ['customLevelId', 'minQty', 'maxQty', 'price', 'mrp']
-                        }
+                        },
+                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
                     ]
                 }
             ],
@@ -81,7 +82,7 @@ export const getCart = async (req, res) => {
                 name: product.name,
                 thumbnail: product.thumbnail,
                 volumeLabel: variant.volume, 
-                baseUnitLabel: variant.baseUnitLabel,
+                baseUnitLabel: variant.baseUnitRef?.name ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel) : variant.baseUnitLabel,
                 quantity: quantity,
                 unitPrice: unitPrice,
                 mrp: unitMrp,
