@@ -408,26 +408,14 @@ export const forgotPassword = async (req, res) => {
  */
 export const resetPassword = async (req, res) => {
     try {
-        const { number, otp, newPassword, confirmPassword } = req.body;
+        const { number, newPassword, confirmPassword } = req.body;
         
-        if (!number || !otp || !newPassword || !confirmPassword) {
+        if (!number || !newPassword || !confirmPassword) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
         }
 
         if (newPassword !== confirmPassword) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Passwords do not match");
-        }
-
-        const otpRecord = await OTP.findOne({ 
-            where: { 
-                number, 
-                otp,
-                expiresAt: { [Op.gt]: new Date() }
-            } 
-        });
-
-        if (!otpRecord) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired OTP");
         }
 
         const user = await User.findOne({ where: { number } });
@@ -439,8 +427,6 @@ export const resetPassword = async (req, res) => {
         // Reset logintoken to force logout everywhere
         user.logintoken = null; 
         await user.save();
-
-        await OTP.destroy({ where: { number } });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Password reset successfully");
     } catch (error) {
