@@ -40,7 +40,7 @@ export const getCart = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        return sendSuccessResponse(res, "Cart fetched successfully", cartItems);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", cartItems);
     } catch (error) {
         logger.error(`Error in getCart: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -71,7 +71,7 @@ export const addToCart = async (req, res) => {
             const newQty = Number(cartItem.quantity) + Number(quantity);
             if (newQty <= 0) {
                 await cartItem.destroy();
-                return sendSuccessResponse(res, "Item removed from cart");
+                return sendSuccessResponse(res, HTTP_STATUS.OK, "Item removed from cart");
             }
             cartItem.quantity = newQty;
             await cartItem.save();
@@ -88,7 +88,7 @@ export const addToCart = async (req, res) => {
             });
         }
 
-        return sendSuccessResponse(res, "Cart updated successfully", cartItem);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart updated successfully", cartItem);
     } catch (error) {
         logger.error(`Error in addToCart: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -120,13 +120,13 @@ export const updateCartItem = async (req, res) => {
 
         if (Number(quantity) <= 0) {
             await cartItem.destroy();
-            return sendSuccessResponse(res, "Item removed from cart");
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Item removed from cart");
         }
 
         cartItem.quantity = Number(quantity);
         await cartItem.save();
 
-        return sendSuccessResponse(res, "Cart item updated successfully", cartItem);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart item updated successfully", cartItem);
     } catch (error) {
         logger.error(`Error in updateCartItem: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -153,7 +153,7 @@ export const removeFromCart = async (req, res) => {
 
         await cartItem.destroy();
 
-        return sendSuccessResponse(res, "Item removed from cart");
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Item removed from cart");
     } catch (error) {
         logger.error(`Error in removeFromCart: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -173,7 +173,7 @@ export const clearCart = async (req, res) => {
             where: { userId }
         });
 
-        return sendSuccessResponse(res, "Cart cleared successfully");
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart cleared successfully");
     } catch (error) {
         logger.error(`Error in clearCart: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
