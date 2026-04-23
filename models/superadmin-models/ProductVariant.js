@@ -44,10 +44,9 @@ const ProductVariant = sequelize.define(
             allowNull: false,
             defaultValue: 1,
         },
-        isLooseSell: {
-            type: DataTypes.BOOLEAN,
-            allowNull: false,
-            defaultValue: false,
+        sellingVolume: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: true,
         },
         status: {
             type: DataTypes.STRING,

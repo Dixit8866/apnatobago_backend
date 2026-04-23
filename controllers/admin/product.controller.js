@@ -207,7 +207,7 @@ export const createProduct = async (req, res, next) => {
             const image = typeof v.image === 'string' ? v.image.trim() : null;
             const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
-            const isLooseSell = Boolean(v.isLooseSell);
+            const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
             if (!volumeValue || !volumeId) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
@@ -229,7 +229,7 @@ export const createProduct = async (req, res, next) => {
                     image,
                     baseUnitLabel,
                     baseUnitsPerPack,
-                    isLooseSell,
+                    sellingVolume,
                     status: v.status || 'Active',
                 },
                 { transaction: t }
@@ -443,7 +443,7 @@ export const updateProduct = async (req, res, next) => {
             const image = typeof v.image === 'string' ? v.image.trim() : null;
             const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
-            const isLooseSell = Boolean(v.isLooseSell);
+            const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
             if (!volumeValue || !volumeId) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
@@ -465,7 +465,7 @@ export const updateProduct = async (req, res, next) => {
                     image,
                     baseUnitLabel,
                     baseUnitsPerPack,
-                    isLooseSell,
+                    sellingVolume,
                     status: v.status || 'Active',
                 },
                 { transaction: t }
