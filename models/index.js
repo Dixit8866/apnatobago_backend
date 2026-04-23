@@ -23,6 +23,7 @@ import Vendor from './superadmin-models/Vendor.js';
 import VendorOrder from './superadmin-models/VendorOrder.js';
 import PurchaseBill from './superadmin-models/PurchaseBill.js';
 import Cart from './user/Cart.js';
+import Wishlist from './user/Wishlist.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Godown -> GodownStaff (One Godown has many Staff members)
@@ -116,6 +117,13 @@ Cart.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 ProductVariant.hasMany(Cart, { foreignKey: 'variantId', as: 'cartItems' });
 Cart.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
 
+// Wishlist Associations
+User.hasMany(Wishlist, { foreignKey: 'userId', as: 'wishlistItems' });
+Wishlist.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+Product.hasMany(Wishlist, { foreignKey: 'productId', as: 'wishlistedBy' });
+Wishlist.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+
 export {
     Admin,
     Godown,
@@ -137,4 +145,5 @@ export {
     VendorOrder,
     PurchaseBill,
     Cart,
+    Wishlist,
 };

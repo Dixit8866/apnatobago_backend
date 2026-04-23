@@ -23,6 +23,7 @@ import {
 } from '../../controllers/user/catalogue.controller.js';
 import { protectUser } from '../../middlewares/userAuth.middleware.js';
 import cartRoutes from './cart.routes.js';
+import wishlistRoutes from './wishlist.routes.js';
 
 const router = express.Router();
 
@@ -51,5 +52,8 @@ router.get('/products/company-category/:id', protectUser, getProductsByCompanyCa
 
 // Cart
 router.use('/cart', cartRoutes);
+
+// Wishlist
+router.use('/wishlist', wishlistRoutes);
 
 export default router;
