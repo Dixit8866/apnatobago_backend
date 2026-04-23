@@ -21,6 +21,7 @@ import {
     getProductsBySubCategory,
     getProductsByCompanyCategory
 } from '../../controllers/user/catalogue.controller.js';
+import { getAppSettings } from '../../controllers/user/settings.controller.js';
 import { protectUser } from '../../middlewares/userAuth.middleware.js';
 import cartRoutes from './cart.routes.js';
 import wishlistRoutes from './wishlist.routes.js';
@@ -49,6 +50,7 @@ router.get('/products', protectUser, getProducts);
 router.get('/products/main-category/:id', protectUser, getProductsByMainCategory);
 router.get('/products/sub-category/:id', protectUser, getProductsBySubCategory);
 router.get('/products/company-category/:id', protectUser, getProductsByCompanyCategory);
+router.get('/settings', protectUser, getAppSettings);
 
 // Cart
 router.use('/cart', cartRoutes);
