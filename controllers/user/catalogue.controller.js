@@ -128,7 +128,21 @@ export const getProducts = async (req, res) => {
         console.log('[DEBUG] Products found:', products.length);
         console.log('[DEBUG] First product (if any):', products[0] ? { id: products[0].id, name: products[0].name, status: products[0].status, mainCategoryId: products[0].mainCategoryId } : 'No products');
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Products fetched successfully", products);
+        const mappedProducts = products.map(p => {
+            const productJson = p.toJSON();
+            if (productJson.variants) {
+                productJson.variants = productJson.variants.map(v => {
+                    if (v.baseUnitRef && v.baseUnitRef.name) {
+                        // Get first available name from multilingual object
+                        v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
+                    }
+                    return v;
+                });
+            }
+            return productJson;
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Products fetched successfully", mappedProducts);
     } catch (error) {
         logger.error(`[Get Products Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch products");

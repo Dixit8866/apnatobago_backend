@@ -353,7 +353,17 @@ export const getProductById = async (req, res, next) => {
         });
 
         if (!product) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product fetched successfully.', product);
+        const productJson = product.toJSON();
+        if (productJson.variants) {
+            productJson.variants = productJson.variants.map(v => {
+                if (v.baseUnitRef && v.baseUnitRef.name) {
+                    v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
+                }
+                return v;
+            });
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product fetched successfully.', productJson);
     } catch (error) {
         next(error);
     }
