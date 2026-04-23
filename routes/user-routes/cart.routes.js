@@ -10,7 +10,9 @@ router.use(protectUser);
 router.get('/', getCart);
 router.post('/', addToCart);
 router.put('/:id', updateCartItem);
+router.put('/', updateCartItem);
 router.delete('/clear', clearCart);
 router.delete('/:id', removeFromCart);
+router.delete('/', removeFromCart);
 
 export default router;

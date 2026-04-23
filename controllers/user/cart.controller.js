@@ -164,8 +164,12 @@ export const addToCart = async (req, res) => {
 export const updateCartItem = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { id } = req.params;
+        const id = req.params.id || req.query.id;
         const { quantity } = req.body;
+
+        if (!id) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide cart item ID");
+        }
 
         if (quantity === undefined) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide quantity");
@@ -202,7 +206,11 @@ export const updateCartItem = async (req, res) => {
 export const removeFromCart = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { id } = req.params;
+        const id = req.params.id || req.query.id;
+
+        if (!id) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide cart item ID");
+        }
 
         const cartItem = await Cart.findOne({
             where: { id, userId }
