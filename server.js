@@ -202,16 +202,29 @@ const startServer = async () => {
             console.warn('[PreSync] Could not drop constraints/indexes:', e.message);
         }
 
-        // Pre-sync: Nullify non-UUID 'pcs' in baseUnitLabel to avoid cast errors when changing type to UUID
+        // Pre-sync: Drop NOT NULL and Nullify non-UUID 'pcs' in baseUnitLabel to avoid cast errors when changing type to UUID
         try {
+            // 1. Drop DEFAULT and NOT NULL constraints
+            await sequelize.query(`ALTER TABLE product_variants ALTER COLUMN "baseUnitLabel" DROP DEFAULT`);
+            await sequelize.query(`ALTER TABLE product_variants ALTER COLUMN "baseUnitLabel" DROP NOT NULL`);
+            
+            // 2. Nullify non-uuid values like 'pcs'
             await sequelize.query(`
                 UPDATE product_variants 
                 SET "baseUnitLabel" = NULL 
-                WHERE "baseUnitLabel" = 'pcs'
+                WHERE "baseUnitLabel" NOT SIMILAR TO '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
             `);
-            console.log('[PreSync] Nullified "pcs" in product_variants.baseUnitLabel ✓');
+
+            // 3. Manually cast to UUID type (PostgreSQL)
+            await sequelize.query(`
+                ALTER TABLE product_variants 
+                ALTER COLUMN "baseUnitLabel" TYPE UUID 
+                USING "baseUnitLabel"::UUID
+            `);
+            
+            console.log('[PreSync] baseUnitLabel prepared and cast to UUID ✓');
         } catch (e) {
-            console.warn('[PreSync] Warning: Could not nullify "pcs" (column might not exist yet):', e.message);
+            console.warn('[PreSync] Warning: Could not prepare baseUnitLabel:', e.message);
         }
 
         // Sync Sequelize Models with Database
