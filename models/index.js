@@ -24,6 +24,7 @@ import VendorOrder from './superadmin-models/VendorOrder.js';
 import PurchaseBill from './superadmin-models/PurchaseBill.js';
 import Cart from './user/Cart.js';
 import Wishlist from './user/Wishlist.js';
+import AppSettings from './superadmin-models/AppSettings.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Godown -> GodownStaff (One Godown has many Staff members)
@@ -41,6 +42,9 @@ ProductPricing.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant
 // Variant -> Volume (so edit form can get volumeId directly)
 Volume.hasMany(ProductVariant, { foreignKey: 'volumeId', as: 'productVariants' });
 ProductVariant.belongsTo(Volume, { foreignKey: 'volumeId', as: 'volumeRef' });
+
+// Variant -> BaseUnit (for inventory calculation labels)
+ProductVariant.belongsTo(Volume, { foreignKey: 'baseUnitLabel', as: 'baseUnitRef' });
 
 // Pricing -> CustomLevel
 CustomLevel.hasMany(ProductPricing, { foreignKey: 'customLevelId', as: 'productPricings' });
@@ -146,4 +150,5 @@ export {
     PurchaseBill,
     Cart,
     Wishlist,
+    AppSettings,
 };

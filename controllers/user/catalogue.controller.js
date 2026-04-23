@@ -112,6 +112,7 @@ export const getProducts = async (req, res) => {
                     as: 'variants',
                     include: [
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
                         {
                             model: ProductPricing,
                             as: 'pricings',

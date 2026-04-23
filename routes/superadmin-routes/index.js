@@ -15,6 +15,7 @@ import inventoryRoutes from './inventory.routes.js';
 import vendorRoutes from './vendor.routes.js';
 import vendorOrderRoutes from './vendorOrder.routes.js';
 import purchaseRoutes from './purchase.routes.js';
+import settingsRoutes from './settings.routes.js';
 import userRoutes from './user.routes.js';
 
 const router = express.Router();
@@ -35,6 +36,7 @@ router.use('/inventory', inventoryRoutes);
 router.use('/vendors', vendorRoutes);
 router.use('/vendor-orders', vendorOrderRoutes);
 router.use('/purchase', purchaseRoutes);
+router.use('/settings', settingsRoutes);
 router.use('/users', userRoutes);
 
 export default router;

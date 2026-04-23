@@ -117,10 +117,18 @@ export const createVendorOrder = async (req, res) => {
 export const getAllVendorOrders = async (req, res) => {
     try {
         const { limit, offset, page } = getPaginationOptions(req.query);
-        const { search, status } = req.query;
-
+        const { search, status, today } = req.query;
         const where = {};
+
         if (status) where.status = status;
+
+        if (today === 'true') {
+            const startOfDay = new Date();
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date();
+            endOfDay.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+        }
 
         const vendorInclude = {
             model: Vendor,

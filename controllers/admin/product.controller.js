@@ -346,6 +346,7 @@ export const getProductById = async (req, res, next) => {
                             ],
                         },
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name', 'status'] },
+                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name', 'status'] },
                     ],
                 },
             ],
