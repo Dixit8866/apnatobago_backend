@@ -51,9 +51,6 @@ ProductVariant.belongsTo(Volume, { foreignKey: 'innerUnitLabel', as: 'innerUnitR
 Volume.hasMany(ProductVariant, { foreignKey: 'volumeId', as: 'productVariants' });
 ProductVariant.belongsTo(Volume, { foreignKey: 'volumeId', as: 'volumeRef' });
 
-// Variant -> BaseUnit (for inventory calculation labels)
-ProductVariant.belongsTo(Volume, { foreignKey: 'baseUnitLabel', as: 'baseUnitRef' });
-
 // Pricing -> CustomLevel
 CustomLevel.hasMany(ProductPricing, { foreignKey: 'customLevelId', as: 'productPricings' });
 ProductPricing.belongsTo(CustomLevel, { foreignKey: 'customLevelId', as: 'customLevel' });
