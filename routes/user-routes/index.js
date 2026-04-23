@@ -22,6 +22,7 @@ import {
     getProductsByCompanyCategory
 } from '../../controllers/user/catalogue.controller.js';
 import { protectUser } from '../../middlewares/userAuth.middleware.js';
+import cartRoutes from './cart.routes.js';
 
 const router = express.Router();
 
@@ -47,5 +48,8 @@ router.get('/products', protectUser, getProducts);
 router.get('/products/main-category/:id', protectUser, getProductsByMainCategory);
 router.get('/products/sub-category/:id', protectUser, getProductsBySubCategory);
 router.get('/products/company-category/:id', protectUser, getProductsByCompanyCategory);
+
+// Cart
+router.use('/cart', cartRoutes);
 
 export default router;
