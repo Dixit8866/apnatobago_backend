@@ -11,28 +11,25 @@ import logger from '../../logger/apiLogger.js';
 export const getCart = async (req, res) => {
     try {
         const userId = req.user.id;
+        const userAppLevel = req.user.applevel;
 
-        const cartItems = await Cart.findAll({
+        const cartItemsRaw = await Cart.findAll({
             where: { userId },
             include: [
                 {
                     model: Product,
                     as: 'product',
-                    include: [
-                        { model: MainCategory, as: 'mainCategory' },
-                        { model: SubCategory, as: 'subCategory' },
-                        { model: CompanyCategory, as: 'companyCategory' }
-                    ]
+                    attributes: ['id', 'name', 'thumbnail']
                 },
                 {
                     model: ProductVariant,
                     as: 'variant',
+                    attributes: ['id', 'volume', 'baseUnitLabel', 'purchasePrice'],
                     include: [
-                        { model: Volume, as: 'volumeRef' },
                         { 
                             model: ProductPricing, 
                             as: 'pricings',
-                            include: [{ model: CustomLevel, as: 'customLevel' }]
+                            attributes: ['customLevelId', 'minQty', 'maxQty', 'price', 'mrp']
                         }
                     ]
                 }
@@ -40,7 +37,71 @@ export const getCart = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", cartItems);
+        let itemTotal = 0;
+        let totalMrp = 0;
+
+        const formattedItems = cartItemsRaw.map(item => {
+            const variant = item.variant;
+            const product = item.product;
+            
+            if (!variant || !product) return null;
+
+            const quantity = Number(item.quantity);
+
+            // Find applicable pricing based on user's applevel and quantity
+            let applicablePricing = variant.pricings.find(p => 
+                p.customLevelId === userAppLevel && 
+                quantity >= Number(p.minQty) && 
+                (p.maxQty === null || quantity <= Number(p.maxQty))
+            );
+
+            // Fallback: If no match for quantity, find any pricing for this level
+            if (!applicablePricing) {
+                applicablePricing = variant.pricings.find(p => p.customLevelId === userAppLevel);
+            }
+
+            // Ultimate fallback to first pricing
+            if (!applicablePricing && variant.pricings.length > 0) {
+                applicablePricing = variant.pricings[0];
+            }
+
+            const unitPrice = applicablePricing ? Number(applicablePricing.price) : Number(variant.purchasePrice);
+            const unitMrp = applicablePricing ? Number(applicablePricing.mrp) : unitPrice;
+            
+            const totalPrice = unitPrice * quantity;
+            const totalItemMrp = unitMrp * quantity;
+
+            itemTotal += totalPrice;
+            totalMrp += totalItemMrp;
+
+            return {
+                cartId: item.id,
+                productId: product.id,
+                variantId: variant.id,
+                name: product.name,
+                thumbnail: product.thumbnail,
+                volumeLabel: variant.volume, 
+                baseUnitLabel: variant.baseUnitLabel,
+                quantity: quantity,
+                unitPrice: unitPrice,
+                mrp: unitMrp,
+                totalPrice: Number(totalPrice.toFixed(2)),
+                savings: Number((totalItemMrp - totalPrice).toFixed(2))
+            };
+        }).filter(item => item !== null);
+
+        // Simple delivery logic (can be adjusted based on requirements)
+        const deliveryCharges = 0; 
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", {
+            items: formattedItems,
+            billDetails: {
+                itemTotal: Number(itemTotal.toFixed(2)),
+                deliveryCharges: Number(deliveryCharges.toFixed(2)),
+                totalSavings: Number((totalMrp - itemTotal).toFixed(2)),
+                grandTotal: Number((itemTotal + deliveryCharges).toFixed(2))
+            }
+        });
     } catch (error) {
         logger.error(`Error in getCart: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
