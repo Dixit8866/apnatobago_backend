@@ -205,7 +205,8 @@ export const createProduct = async (req, res, next) => {
             const volumeId = String(v.volumeId || '').trim();
             const purchasePrice = Number(v.purchasePrice);
             const image = typeof v.image === 'string' ? v.image.trim() : null;
-            const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
+            const baseUnitLabel = v.baseUnitLabel || null;
+            const innerUnitLabel = v.innerUnitLabel || null;
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
             if (!volumeValue || !volumeId) {
@@ -228,6 +229,7 @@ export const createProduct = async (req, res, next) => {
                     purchasePrice,
                     image,
                     baseUnitLabel,
+                    innerUnitLabel,
                     baseUnitsPerPack,
                     sellingVolume,
                     status: v.status || 'Active',
@@ -347,6 +349,7 @@ export const getProductById = async (req, res, next) => {
                         },
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name', 'status'] },
                         { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name', 'status'] },
+                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name', 'status'] },
                     ],
                 },
             ],
@@ -442,7 +445,8 @@ export const updateProduct = async (req, res, next) => {
             const volumeId = String(v.volumeId || '').trim();
             const purchasePrice = Number(v.purchasePrice);
             const image = typeof v.image === 'string' ? v.image.trim() : null;
-            const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
+            const baseUnitLabel = v.baseUnitLabel || null;
+            const innerUnitLabel = v.innerUnitLabel || null;
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
             if (!volumeValue || !volumeId) {
@@ -465,6 +469,7 @@ export const updateProduct = async (req, res, next) => {
                     purchasePrice,
                     image,
                     baseUnitLabel,
+                    innerUnitLabel,
                     baseUnitsPerPack,
                     sellingVolume,
                     status: v.status || 'Active',

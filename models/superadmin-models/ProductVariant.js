@@ -33,7 +33,13 @@ const ProductVariant = sequelize.define(
             defaultValue: null,
         },
         baseUnitLabel: {
-            // Reference to Volume ID (e.g. gram, ml, pcs)
+            // Reference to Volume ID for Outer Unit (e.g. Carton, Box)
+            type: DataTypes.UUID,
+            allowNull: true,
+            defaultValue: null,
+        },
+        innerUnitLabel: {
+            // Reference to Volume ID for Inner Unit / Selling Unit (e.g. Pcs, Bottle)
             type: DataTypes.UUID,
             allowNull: true,
             defaultValue: null,

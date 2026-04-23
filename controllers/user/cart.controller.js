@@ -24,14 +24,15 @@ export const getCart = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variant',
-                    attributes: ['id', 'volume', 'baseUnitLabel', 'purchasePrice'],
+                    attributes: ['id', 'volume', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice'],
                     include: [
                         { 
                             model: ProductPricing, 
                             as: 'pricings',
                             attributes: ['customLevelId', 'minQty', 'maxQty', 'price', 'mrp']
                         },
-                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
                     ]
                 }
             ],
@@ -83,6 +84,7 @@ export const getCart = async (req, res) => {
                 thumbnail: product.thumbnail,
                 volumeLabel: variant.volume, 
                 baseUnitLabel: variant.baseUnitRef?.name ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel) : variant.baseUnitLabel,
+                innerUnitLabel: variant.innerUnitRef?.name ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel) : variant.innerUnitLabel,
                 quantity: quantity,
                 unitPrice: unitPrice,
                 mrp: unitMrp,

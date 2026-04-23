@@ -39,6 +39,14 @@ ProductVariant.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 ProductVariant.hasMany(ProductPricing, { foreignKey: 'variantId', as: 'pricings' });
 ProductPricing.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
 
+// Variant -> BaseUnit (for mapping volume UUID back to name)
+Volume.hasMany(ProductVariant, { foreignKey: 'baseUnitLabel', as: 'productBaseVariants' });
+ProductVariant.belongsTo(Volume, { foreignKey: 'baseUnitLabel', as: 'baseUnitRef' });
+
+// Variant -> InnerUnit (Selling Unit)
+Volume.hasMany(ProductVariant, { foreignKey: 'innerUnitLabel', as: 'productInnerVariants' });
+ProductVariant.belongsTo(Volume, { foreignKey: 'innerUnitLabel', as: 'innerUnitRef' });
+
 // Variant -> Volume (so edit form can get volumeId directly)
 Volume.hasMany(ProductVariant, { foreignKey: 'volumeId', as: 'productVariants' });
 ProductVariant.belongsTo(Volume, { foreignKey: 'volumeId', as: 'volumeRef' });

@@ -113,6 +113,7 @@ export const getProducts = async (req, res) => {
                     include: [
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                         { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                         {
                             model: ProductPricing,
                             as: 'pricings',
@@ -135,6 +136,9 @@ export const getProducts = async (req, res) => {
                     if (v.baseUnitRef && v.baseUnitRef.name) {
                         // Get first available name from multilingual object
                         v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
+                    }
+                    if (v.innerUnitRef && v.innerUnitRef.name) {
+                        v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                     }
                     return v;
                 });
