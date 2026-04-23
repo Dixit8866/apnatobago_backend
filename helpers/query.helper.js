@@ -5,7 +5,7 @@ export const getPaginationOptions = (reqQuery) => {
     }
 
     const page = parseInt(reqQuery.page, 10) || 1;
-    const limit = parseInt(reqQuery.limit, 10) || 10;
+    const limit = parseInt(reqQuery.limit, 10) || 50;
     const offset = (page - 1) * limit;
 
     return { limit, offset, page };

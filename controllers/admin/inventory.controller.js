@@ -9,7 +9,6 @@ import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
 import InventoryTransaction from '../../models/superadmin-models/InventoryTransaction.js';
 import Godown from '../../models/superadmin-models/Godown.js';
 import Volume from '../../models/superadmin-models/Volume.js';
-import SellingVolume from '../../models/superadmin-models/SellingVolume.js';
 import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
 import MainCategory from '../../models/superadmin-models/MainCategory.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
@@ -67,20 +66,17 @@ async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }
     const ids = [primaryUnitId, secondaryUnitId].filter(Boolean);
     if (!ids.length) return false;
     
-    // Check both normal volumes and selling volumes
-    const [volRows, sellRows] = await Promise.all([
-        Volume.findAll({ where: { id: { [Op.in]: ids }, status: 'Active' }, transaction }),
-        SellingVolume.findAll({ where: { id: { [Op.in]: ids }, status: 'Active' }, transaction })
-    ]);
+    // Check volumes
+    const volRows = await Volume.findAll({ where: { id: { [Op.in]: ids }, status: 'Active' }, transaction });
     
     // Total found unique IDs should match the requested ids count
-    const foundIds = new Set([...volRows.map(r => r.id), ...sellRows.map(r => r.id)]);
+    const foundIds = new Set(volRows.map(r => r.id));
     return foundIds.size === ids.length;
 }
 
 export const getInventoryOptions = async (req, res, next) => {
     try {
-        const [products, godowns, volumes, sellingVolumes] = await Promise.all([
+        const [products, godowns, volumes] = await Promise.all([
             Product.findAll({
                 where: { status: { [Op.ne]: 'Deleted' } },
                 order: [['createdAt', 'DESC']],
@@ -110,17 +106,10 @@ export const getInventoryOptions = async (req, res, next) => {
                 where: { status: 'Active' },
                 order: [['createdAt', 'DESC']],
             }),
-            SellingVolume.findAll({
-                where: { status: 'Active' },
-                order: [['createdAt', 'DESC']],
-            }),
         ]);
 
         const normalizedProducts = products.map((product) => {
             const p = product.toJSON();
-            // packagings is already stored as JSONB array on product:
-            // e.g. [{ baseUnitLabel: 'Dando', baseUnitsPerPack: 20, containsUnit: 'Box', relativeQty: 20 }]
-            p.packagings = Array.isArray(p.packagings) ? p.packagings : [];
 
             p.variants = (p.variants || []).map((variant) => {
                 const firstPricing = [...(variant.pricings || [])].sort((a, b) => Number(a.minQty || 0) - Number(b.minQty || 0))[0];
@@ -141,7 +130,6 @@ export const getInventoryOptions = async (req, res, next) => {
             products: normalizedProducts,
             godowns,
             volumes,
-            sellingVolumes,
         });
     } catch (error) {
         next(error);
@@ -196,15 +184,9 @@ export const getInventoryStocks = async (req, res, next) => {
             ),
         ];
 
-        const [unitRowsVol, unitRowsSell, purchaseTxns] = await Promise.all([
+        const [unitRowsVol, purchaseTxns] = await Promise.all([
             unitIds.length
                 ? Volume.findAll({
-                    where: { id: { [Op.in]: unitIds } },
-                    attributes: ['id', 'name'],
-                })
-                : [],
-            unitIds.length
-                ? SellingVolume.findAll({
                     where: { id: { [Op.in]: unitIds } },
                     attributes: ['id', 'name'],
                 })
@@ -222,7 +204,7 @@ export const getInventoryStocks = async (req, res, next) => {
             if (!volume?.name || typeof volume.name !== 'object') return typeof volume?.name === 'string' ? volume.name : 'Unit';
             return volume.name.en || Object.values(volume.name)[0] || 'Unit';
         };
-        const unitRows = [...unitRowsVol, ...unitRowsSell];
+        const unitRows = unitRowsVol;
         const unitMap = new Map(unitRows.map((u) => [u.id, getUnitLabel(u)]));
         const latestPurchasePriceMap = new Map();
         for (const txn of purchaseTxns) {
@@ -606,11 +588,14 @@ export const updateInventoryStock = async (req, res, next) => {
             secondaryPerPrimary = stock.secondaryPerPrimary,
             qtyPrimary = 0,
             qtySecondary = 0,
+            totalBaseUnits,
             purchasePricePerBaseUnit,
             note,
         } = req.body;
 
-        const qtyTotalBaseUnits = qtyToBaseUnits(qtyPrimary, qtySecondary, secondaryPerPrimary);
+        const qtyTotalBaseUnits = totalBaseUnits !== undefined 
+            ? Number(totalBaseUnits)
+            : qtyToBaseUnits(qtyPrimary, qtySecondary, secondaryPerPrimary);
         const avgPrice = Number(purchasePricePerBaseUnit);
 
         if (!productId || !variantId || !godownId || !primaryUnitId) {

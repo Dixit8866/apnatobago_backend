@@ -33,7 +33,7 @@ export const createCompanyCategory = async (req, res, next) => {
 // ─── GET ALL ─────────────────────────────────────────────────────────────────
 export const getCompanyCategories = async (req, res, next) => {
     try {
-        const { search = '', status } = req.query;
+        const { search = '', status, mainCategoryId } = req.query;
 
         // Search-only where for accurate tab counts (no status filter)
         const searchWhere = search
@@ -45,6 +45,10 @@ export const getCompanyCategories = async (req, res, next) => {
             whereWithSearch.status = status;
         } else {
             whereWithSearch.status = { [Op.ne]: 'Deleted' }; // Hide deleted from All tab
+        }
+
+        if (mainCategoryId) {
+            whereWithSearch.mainCategoryId = mainCategoryId;
         }
 
         // Parallel status counts

@@ -48,12 +48,6 @@ const Product = sequelize.define(
                 info: [],
             },
         },
-        packagings: {
-            // [{ baseUnitLabel: 'box', baseUnitsPerPack: 10 }]
-            type: DataTypes.JSONB,
-            allowNull: true,
-            defaultValue: [],
-        },
         status: {
             type: DataTypes.STRING,
             defaultValue: 'Active',

@@ -6,7 +6,11 @@ import {
     verifyOtp,
     getProfile,
     logoutUser,
-    deleteAccount
+    deleteAccount,
+    editProfile,
+    forgotPassword,
+    resetPassword,
+    changePassword
 } from '../../controllers/user/user.controller.js';
 import {
     getMainCategories,
@@ -25,9 +29,13 @@ router.post('/register', registerUser);
 router.post('/login', loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
 
 // Profile and Account
 router.get('/profile', protectUser, getProfile);
+router.put('/profile', protectUser, editProfile);
+router.post('/change-password', protectUser, changePassword);
 router.post('/logout', protectUser, logoutUser);
 router.delete('/delete-account', protectUser, deleteAccount);
 

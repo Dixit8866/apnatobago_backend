@@ -13,7 +13,7 @@ export const createGodown = async (req, res) => {
 
 export const getGodowns = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search = '', type, all } = req.query;
+        const { page = 1, limit = 50, search = '', type, all } = req.query;
 
         let whereClause = {};
         if (search) {

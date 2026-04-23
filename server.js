@@ -63,17 +63,6 @@ async function runAutoMigrations() {
         }
         console.log(`[AutoMigrate] product_variants volumeId backfill done — Fixed: ${fixed} | Skipped: ${skipped}`);
 
-        // ─── 2. Auto Seed: Backfill Product.packagings ─────────────────────────────
-        const [productRes] = await sequelize.query(`
-            UPDATE products 
-            SET packagings = '[{"baseUnitLabel": "pcs", "baseUnitsPerPack": 1}]'::jsonb 
-            WHERE packagings IS NULL OR jsonb_array_length(CASE WHEN jsonb_typeof(packagings) = 'array' THEN packagings ELSE '[]'::jsonb END) = 0
-            RETURNING id;
-        `);
-        if (productRes && productRes.length) {
-            console.log(`[AutoSeed] Seeded default packagings for ${productRes.length} products ✓`);
-        }
-
         // ─── 3. Auto Seed: Backfill ProductVariant.baseUnit* ──────────────────────
         const [varUnit1] = await sequelize.query(`
             UPDATE product_variants 

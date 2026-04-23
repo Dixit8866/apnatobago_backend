@@ -333,3 +333,155 @@ export const deleteAccount = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
 };
+
+/**
+ * @desc    Edit user profile
+ * @route   PUT /api/user/profile
+ * @access  Private
+ */
+export const editProfile = async (req, res) => {
+    try {
+        const { fullname, email, city, postcode } = req.body;
+        const user = await User.findByPk(req.user.id);
+        
+        if (!user) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+        }
+
+        user.fullname = fullname || user.fullname;
+        user.email = email || user.email;
+        user.city = city || user.city;
+        user.postcode = postcode || user.postcode;
+
+        await user.save();
+
+        const userData = user.toJSON();
+        delete userData.password;
+        delete userData.logintoken;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Profile updated successfully", {
+            user: userData
+        });
+    } catch (error) {
+        logger.error(`[Edit Profile Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+/**
+ * @desc    Forgot Password (Send OTP)
+ * @route   POST /api/user/forgot-password
+ * @access  Public
+ */
+export const forgotPassword = async (req, res) => {
+    try {
+        const { number } = req.body;
+        if (!number) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number");
+        }
+
+        const user = await User.findOne({ where: { number } });
+        if (!user || user.status === 'Deleted') {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+        }
+
+        const pureDialcode = (user.dialcode || '+91').replace('+', '');
+        const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
+        
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+        await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
+        await sendSMS(fullNumber, otp);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP sent successfully");
+    } catch (error) {
+        logger.error(`[Forgot Password Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+/**
+ * @desc    Reset Password (Verify OTP & Set New Password)
+ * @route   POST /api/user/reset-password
+ * @access  Public
+ */
+export const resetPassword = async (req, res) => {
+    try {
+        const { number, otp, newPassword, confirmPassword } = req.body;
+        
+        if (!number || !otp || !newPassword || !confirmPassword) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
+        }
+
+        if (newPassword !== confirmPassword) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Passwords do not match");
+        }
+
+        const otpRecord = await OTP.findOne({ 
+            where: { 
+                number, 
+                otp,
+                expiresAt: { [Op.gt]: new Date() }
+            } 
+        });
+
+        if (!otpRecord) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired OTP");
+        }
+
+        const user = await User.findOne({ where: { number } });
+        if (!user || user.status === 'Deleted') {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+        }
+
+        user.password = newPassword;
+        // Reset logintoken to force logout everywhere
+        user.logintoken = null; 
+        await user.save();
+
+        await OTP.destroy({ where: { number } });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Password reset successfully");
+    } catch (error) {
+        logger.error(`[Reset Password Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+/**
+ * @desc    Change Password (Logged In User)
+ * @route   POST /api/user/change-password
+ * @access  Private
+ */
+export const changePassword = async (req, res) => {
+    try {
+        const { oldPassword, newPassword, confirmPassword } = req.body;
+        
+        if (!oldPassword || !newPassword || !confirmPassword) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
+        }
+
+        if (newPassword !== confirmPassword) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "New passwords do not match");
+        }
+
+        const user = await User.findByPk(req.user.id);
+        if (!user) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+        }
+
+        const isMatch = await user.matchPassword(oldPassword);
+        if (!isMatch) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Incorrect old password");
+        }
+
+        user.password = newPassword;
+        await user.save();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Password changed successfully");
+    } catch (error) {
+        logger.error(`[Change Password Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
+    }
+};

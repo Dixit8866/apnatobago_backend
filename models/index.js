@@ -11,7 +11,6 @@ import MainCategory from './superadmin-models/MainCategory.js';
 import SubCategory from './superadmin-models/SubCategory.js';
 import CompanyCategory from './superadmin-models/CompanyCategory.js';
 import Volume from './superadmin-models/Volume.js';
-import SellingVolume from './superadmin-models/SellingVolume.js';
 import CustomLevel from './superadmin-models/CustomLevel.js';
 import Product from './superadmin-models/Product.js';
 import ProductVariant from './superadmin-models/ProductVariant.js';
@@ -20,6 +19,9 @@ import InventoryStock from './superadmin-models/InventoryStock.js';
 import InventoryTransaction from './superadmin-models/InventoryTransaction.js';
 import User from './user/User.js';
 import OTP from './user/Otp.js';
+import Vendor from './superadmin-models/Vendor.js';
+import VendorOrder from './superadmin-models/VendorOrder.js';
+import PurchaseBill from './superadmin-models/PurchaseBill.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Godown -> GodownStaff (One Godown has many Staff members)
@@ -82,6 +84,27 @@ InventoryTransaction.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'v
 Godown.hasMany(InventoryTransaction, { foreignKey: 'godownId', as: 'inventoryTransactions' });
 InventoryTransaction.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
 
+// Vendor -> VendorOrder
+Vendor.hasMany(VendorOrder, { foreignKey: 'vendorId', as: 'orders' });
+VendorOrder.belongsTo(Vendor, { foreignKey: 'vendorId', as: 'vendor' });
+
+// User -> CustomLevel
+CustomLevel.hasMany(User, { foreignKey: 'applevel', as: 'users' });
+User.belongsTo(CustomLevel, { foreignKey: 'applevel', as: 'rewardLevel' });
+
+// PurchaseBill Associations
+Vendor.hasMany(PurchaseBill, { foreignKey: 'vendorId', as: 'purchaseBills' });
+PurchaseBill.belongsTo(Vendor, { foreignKey: 'vendorId', as: 'vendor' });
+
+VendorOrder.hasOne(PurchaseBill, { foreignKey: 'vendorOrderId', as: 'bill' });
+PurchaseBill.belongsTo(VendorOrder, { foreignKey: 'vendorOrderId', as: 'vendorOrder' });
+
+Godown.hasMany(PurchaseBill, { foreignKey: 'godownId', as: 'purchaseBills' });
+PurchaseBill.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
+
+Admin.hasMany(PurchaseBill, { foreignKey: 'receivedBy', as: 'receivedBills' });
+PurchaseBill.belongsTo(Admin, { foreignKey: 'receivedBy', as: 'receiver' });
+
 export {
     Admin,
     Godown,
@@ -91,7 +114,6 @@ export {
     SubCategory,
     CompanyCategory,
     Volume,
-    SellingVolume,
     CustomLevel,
     Product,
     ProductVariant,
@@ -99,5 +121,8 @@ export {
     InventoryStock,
     InventoryTransaction,
     User,
-    OTP
+    OTP,
+    Vendor,
+    VendorOrder,
+    PurchaseBill,
 };

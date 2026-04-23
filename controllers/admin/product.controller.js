@@ -138,7 +138,6 @@ export const createProduct = async (req, res, next) => {
     console.log('[Product API] createProduct CALLED');
     const t = await sequelize.transaction();
     try {
-        console.log('[Product API Create] Payload packagings:', JSON.stringify(req.body.packagings, null, 2));
         console.log('[Product API Create] Payload variants:', JSON.stringify(req.body.variants, null, 2));
 
         const {
@@ -151,7 +150,6 @@ export const createProduct = async (req, res, next) => {
             subCategoryId,
             companyCategoryId,
             productDescription,
-            packagings,
             isTobaccoProduct,
         } = req.body;
 
@@ -197,7 +195,6 @@ export const createProduct = async (req, res, next) => {
                 companyCategoryId,
                 isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : true,
                 productDescription: normalizeProductDescription(productDescription),
-                packagings: Array.isArray(packagings) ? packagings : [],
                 status: status || 'Active',
             },
             { transaction: t }
@@ -210,6 +207,7 @@ export const createProduct = async (req, res, next) => {
             const image = typeof v.image === 'string' ? v.image.trim() : null;
             const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
+            const isLooseSell = Boolean(v.isLooseSell);
             if (!volumeValue || !volumeId) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
@@ -231,6 +229,7 @@ export const createProduct = async (req, res, next) => {
                     image,
                     baseUnitLabel,
                     baseUnitsPerPack,
+                    isLooseSell,
                     status: v.status || 'Active',
                 },
                 { transaction: t }
@@ -265,7 +264,6 @@ export const createProduct = async (req, res, next) => {
         }
 
         await t.commit();
-        console.log('[Product API Create] SUCCESS - Saved Packagings:', JSON.stringify(product.packagings, null, 2));
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Product created successfully.', product);
     } catch (error) {
         await t.rollback();
@@ -364,7 +362,6 @@ export const updateProduct = async (req, res, next) => {
     console.log('[Product API] updateProduct CALLED for ID:', req.params.id);
     const t = await sequelize.transaction();
     try {
-        console.log('[Product API Update] Payload packagings:', JSON.stringify(req.body.packagings, null, 2));
         console.log('[Product API Update] Payload variants:', JSON.stringify(req.body.variants, null, 2));
 
         const {
@@ -377,7 +374,6 @@ export const updateProduct = async (req, res, next) => {
             subCategoryId,
             companyCategoryId,
             productDescription,
-            packagings,
             isTobaccoProduct,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
@@ -427,7 +423,6 @@ export const updateProduct = async (req, res, next) => {
                 companyCategoryId,
                 isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : product.isTobaccoProduct,
                 productDescription: normalizeProductDescription(productDescription),
-                packagings: Array.isArray(packagings) ? packagings : product.packagings || [],
                 status: status || product.status,
             },
             { transaction: t }
@@ -448,6 +443,7 @@ export const updateProduct = async (req, res, next) => {
             const image = typeof v.image === 'string' ? v.image.trim() : null;
             const baseUnitLabel = String(v.baseUnitLabel || 'pcs').trim() || 'pcs';
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
+            const isLooseSell = Boolean(v.isLooseSell);
             if (!volumeValue || !volumeId) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
@@ -469,6 +465,7 @@ export const updateProduct = async (req, res, next) => {
                     image,
                     baseUnitLabel,
                     baseUnitsPerPack,
+                    isLooseSell,
                     status: v.status || 'Active',
                 },
                 { transaction: t }
@@ -502,7 +499,6 @@ export const updateProduct = async (req, res, next) => {
         }
 
         await t.commit();
-        console.log('[Product API Update] SUCCESS - Saved Packagings:', JSON.stringify(Array.isArray(packagings) ? packagings : product.packagings, null, 2));
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product updated successfully.', product);
     } catch (error) {
         await t.rollback();
