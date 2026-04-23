@@ -202,6 +202,18 @@ const startServer = async () => {
             console.warn('[PreSync] Could not drop constraints/indexes:', e.message);
         }
 
+        // Pre-sync: Nullify non-UUID 'pcs' in baseUnitLabel to avoid cast errors when changing type to UUID
+        try {
+            await sequelize.query(`
+                UPDATE product_variants 
+                SET "baseUnitLabel" = NULL 
+                WHERE "baseUnitLabel" = 'pcs'
+            `);
+            console.log('[PreSync] Nullified "pcs" in product_variants.baseUnitLabel ✓');
+        } catch (e) {
+            console.warn('[PreSync] Warning: Could not nullify "pcs" (column might not exist yet):', e.message);
+        }
+
         // Sync Sequelize Models with Database
         // Note: force: false won't drop existing tables. alter: { drop: false } adds new columns safely.
         await sequelize.sync({ force: false, alter: { drop: false } });
