@@ -46,50 +46,45 @@ export const createOrder = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant ${variantId} not found.`);
             }
 
-            // 2. Fetch correct pricing based on user's applevel and quantity
-            // Logic: Find the pricing record for this variant and user level where quantity is within range
-            const pricing = await ProductPricing.findOne({
-                where: {
-                    variantId,
-                    customLevelId: userAppLevel,
-                    [Op.or]: [
-                        {
-                            minQty: { [Op.lte]: quantity },
-                            maxQty: { [Op.gte]: quantity }
-                        },
-                        {
-                            minQty: { [Op.lte]: quantity },
-                            maxQty: null
-                        }
-                    ]
-                }
+            // 2. Fetch all pricings for this variant
+            const pricings = await ProductPricing.findAll({
+                where: { variantId },
+                order: [['minQty', 'ASC']]
             });
 
-            if (!pricing) {
-                // Fallback: If no range matches, try to find any pricing for this variant and level
-                const fallbackPricing = await ProductPricing.findOne({
-                    where: { variantId, customLevelId: userAppLevel },
-                    order: [['minQty', 'ASC']]
-                });
+            // Find applicable pricing based on user's applevel and quantity (Same logic as Cart)
+            let applicablePricing = pricings.find(p =>
+                p.customLevelId === userAppLevel &&
+                quantity >= Number(p.minQty) &&
+                (p.maxQty === null || quantity <= Number(p.maxQty))
+            );
 
-                if (!fallbackPricing) {
-                    await t.rollback();
-                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Pricing not configured for variant ${variant.volume} at your user level.`);
-                }
-                
-                item.price = fallbackPricing.price;
-            } else {
-                item.price = pricing.price;
+            // Fallback 1: If no match for quantity, find any pricing for this level
+            if (!applicablePricing) {
+                applicablePricing = pricings.find(p => p.customLevelId === userAppLevel);
             }
 
-            const itemSubtotal = parseFloat(item.price) * parseFloat(quantity);
+            // Fallback 2: Ultimate fallback to first pricing available if still no match
+            if (!applicablePricing && pricings.length > 0) {
+                applicablePricing = pricings[0];
+            }
+
+            let itemPrice = 0;
+            if (applicablePricing) {
+                itemPrice = parseFloat(applicablePricing.price);
+            } else {
+                // Last resort: use variant's purchasePrice if no pricing configured at all
+                itemPrice = parseFloat(variant.purchasePrice) || 0;
+            }
+
+            const itemSubtotal = itemPrice * parseFloat(quantity);
             totalAmount += itemSubtotal;
 
             orderItemsData.push({
                 productId,
                 variantId,
                 quantity,
-                price: item.price,
+                price: itemPrice,
                 variantInfo: {
                     productName: variant.product.name,
                     volume: variant.volume,
