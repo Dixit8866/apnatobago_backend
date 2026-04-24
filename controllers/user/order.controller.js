@@ -105,30 +105,8 @@ export const createOrder = async (req, res) => {
             });
         }
 
-        // Calculate final total including delivery charges from AppSettings
-        const settings = await AppSettings.findOne({ transaction: t });
-        if (!settings) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "App settings not found.");
-        }
-
-        let deliveryCharge = 0;
-        if (calculatedSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
-            if (deliveryMode === 'Express') {
-                deliveryCharge = parseFloat(settings.expressDeliveryCharge);
-            } else if (deliveryMode === 'Round') {
-                deliveryCharge = parseFloat(settings.deliveryOnRoundCharge);
-            }
-        }
-
-        const finalCalculatedTotal = calculatedSubtotal + deliveryCharge;
-
-        // Validation: Compare calculated total with frontend total
-        // We use .toFixed(2) to avoid floating point comparison issues
-        if (finalCalculatedTotal.toFixed(2) !== parseFloat(frontendTotalAmount).toFixed(2)) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Price mismatch! Calculated: ${finalCalculatedTotal.toFixed(2)}, Received: ${parseFloat(frontendTotalAmount).toFixed(2)}`);
-        }
+        // TEMPORARY: Using frontend total directly as requested for testing
+        const finalTotal = parseFloat(frontendTotalAmount);
 
         // 3. Handle Payment and Credit Line
         let paymentStatus = 'Pending';
@@ -140,26 +118,34 @@ export const createOrder = async (req, res) => {
             }
 
             const currentCredit = parseFloat(user.creditline) || 0;
-            if (currentCredit < finalCalculatedTotal) {
+            if (currentCredit < finalTotal) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ${currentCredit}, Required: ${finalCalculatedTotal}`);
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ${currentCredit}, Required: ${finalTotal}`);
             }
 
             // Deduct from credit line
-            user.creditline = currentCredit - finalCalculatedTotal;
+            user.creditline = currentCredit - finalTotal;
             await user.save({ transaction: t });
             paymentStatus = 'Paid';
         } else if (paymentMethod === 'Online') {
-            paymentStatus = 'Paid'; // Marking as paid directly as requested
+            paymentStatus = 'Paid';
         } else {
-            paymentStatus = 'Pending'; // For COD
+            paymentStatus = 'Pending';
+        }
+
+        // Calculate delivery charge from settings for record keeping (but we use frontend total)
+        const settings = await AppSettings.findOne({ transaction: t });
+        let deliveryCharge = 0;
+        if (settings && calculatedSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
+            if (deliveryMode === 'Express') deliveryCharge = parseFloat(settings.expressDeliveryCharge);
+            else if (deliveryMode === 'Round') deliveryCharge = parseFloat(settings.deliveryOnRoundCharge);
         }
 
         // 4. Create the Order
         const newOrder = await Order.create({
             orderId: generateUniqueOrderId(),
             userId,
-            totalAmount: finalCalculatedTotal,
+            totalAmount: finalTotal, // Using frontend total
             paymentMethod,
             paymentStatus,
             orderStatus: 'Pending',
