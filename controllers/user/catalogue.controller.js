@@ -353,6 +353,18 @@ export const searchCatalogue = async (req, res) => {
         const mappedProducts = products.map(p => {
             const productJson = p.toJSON();
             productJson.isWishlisted = wishlistedProductIds.has(productJson.id);
+
+            if (productJson.variants) {
+                productJson.variants = productJson.variants.map(v => {
+                    if (v.baseUnitRef && v.baseUnitRef.name) {
+                        v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
+                    }
+                    if (v.innerUnitRef && v.innerUnitRef.name) {
+                        v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
+                    }
+                    return v;
+                });
+            }
             return productJson;
         });
 
