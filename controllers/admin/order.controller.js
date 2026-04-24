@@ -68,10 +68,36 @@ export const getAllOrders = async (req, res) => {
             limit,
             offset,
             order: [['createdAt', 'DESC']],
-            distinct: true // Important for count accuracy when including associations
+            distinct: true
         });
 
+        // ── Calculate Global Status Counts for Tab Badges ────────────────────────
+        // These are calculated independently of the current filters (except date for 'Today')
+        const todayStr = new Date().toISOString().split('T')[0];
+        const startOfToday = new Date(todayStr);
+        startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date(todayStr);
+        endOfToday.setHours(23, 59, 59, 999);
+
+        const [pendingCount, packedCount, shippedCount, cancelledCount, todayCount] = await Promise.all([
+            Order.count({ where: { orderStatus: 'Pending' } }),
+            Order.count({ where: { orderStatus: 'Packed' } }),
+            Order.count({ where: { orderStatus: 'Shipped' } }),
+            Order.count({ where: { orderStatus: 'Cancelled' } }),
+            Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] } } })
+        ]);
+
         const responseData = formatPaginatedResponse(result, page, limit);
+        
+        // Attach counts to response
+        responseData.statusCounts = {
+            '': responseData.totalRecords, // All (total for current search/filter if we wanted, but let's use global if no search)
+            Today: todayCount,
+            Pending: pendingCount,
+            Packed: packedCount,
+            Shipped: shippedCount,
+            Cancelled: cancelledCount
+        };
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "All orders fetched successfully.", responseData);
     } catch (error) {
