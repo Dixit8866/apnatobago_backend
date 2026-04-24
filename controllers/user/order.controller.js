@@ -27,8 +27,7 @@ export const createOrder = async (req, res) => {
         const { 
             items, 
             paymentMethod, 
-            deliveryOnRoundCharge = 0, 
-            expressDeliveryCharge = 0,
+            deliveryMode, 
             totalAmount: frontendTotalAmount // Total sent from frontend for validation
         } = req.body;
         
@@ -106,16 +105,20 @@ export const createOrder = async (req, res) => {
             });
         }
 
-        // Calculate final total including delivery charges
-        let deliveryMode = null;
-        let deliveryCharge = 0;
+        // Calculate final total including delivery charges from AppSettings
+        const settings = await AppSettings.findOne({ transaction: t });
+        if (!settings) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "App settings not found.");
+        }
 
-        if (parseFloat(expressDeliveryCharge) > 0) {
-            deliveryMode = 'Express';
-            deliveryCharge = parseFloat(expressDeliveryCharge);
-        } else if (parseFloat(deliveryOnRoundCharge) > 0) {
-            deliveryMode = 'Round';
-            deliveryCharge = parseFloat(deliveryOnRoundCharge);
+        let deliveryCharge = 0;
+        if (calculatedSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
+            if (deliveryMode === 'Express') {
+                deliveryCharge = parseFloat(settings.expressDeliveryCharge);
+            } else if (deliveryMode === 'Round') {
+                deliveryCharge = parseFloat(settings.deliveryOnRoundCharge);
+            }
         }
 
         const finalCalculatedTotal = calculatedSubtotal + deliveryCharge;
