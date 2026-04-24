@@ -110,7 +110,9 @@ export const createOrder = async (req, res) => {
 
         // 3. Handle Payment and Credit Line
         let paymentStatus = 'Pending';
-        if (paymentMethod === 'Credit') {
+        const method = paymentMethod?.toUpperCase();
+
+        if (method === 'CREDIT') {
             const user = await User.findByPk(userId, { transaction: t });
             if (!user) {
                 await t.rollback();
@@ -127,7 +129,7 @@ export const createOrder = async (req, res) => {
             user.creditline = currentCredit - finalTotal;
             await user.save({ transaction: t });
             paymentStatus = 'Paid';
-        } else if (paymentMethod === 'Online') {
+        } else if (method === 'ONLINE') {
             paymentStatus = 'Paid';
         } else {
             paymentStatus = 'Pending';

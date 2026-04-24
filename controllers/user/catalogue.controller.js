@@ -337,7 +337,14 @@ export const searchCatalogue = async (req, res) => {
                     include: [
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                         { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                        {
+                            model: ProductPricing,
+                            as: 'pricings',
+                            include: [
+                                { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] },
+                            ]
+                        }
                     ]
                 }
             ]

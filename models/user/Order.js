@@ -29,7 +29,7 @@ const Order = sequelize.define(
             defaultValue: 'Pending',
         },
         paymentMethod: {
-            type: DataTypes.STRING, // COD, Razorpay, etc.
+            type: DataTypes.STRING, // COD, ONLINE, CREDIT.
             allowNull: false,
         },
         paymentStatus: {
