@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -53,7 +53,15 @@ export const getAllOrders = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'] }
+                        { 
+                            model: ProductVariant, 
+                            as: 'variant', 
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
                     ]
                 }
             ],
@@ -133,7 +141,15 @@ export const getOrderDetails = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'] }
+                        { 
+                            model: ProductVariant, 
+                            as: 'variant', 
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
                     ]
                 }
             ]
