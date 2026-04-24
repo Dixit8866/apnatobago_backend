@@ -183,8 +183,15 @@ export const createOrder = async (req, res) => {
 export const getOrders = async (req, res) => {
     try {
         const userId = req.user.id;
+        const { id } = req.query; // Check if a specific ID is requested
+
+        const where = { userId };
+        if (id) {
+            where.id = id;
+        }
+
         const orders = await Order.findAll({
-            where: { userId },
+            where,
             include: [
                 {
                     model: OrderItem,
