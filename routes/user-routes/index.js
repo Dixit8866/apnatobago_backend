@@ -26,6 +26,7 @@ import { getAppSettings } from '../../controllers/user/settings.controller.js';
 import { protectUser } from '../../middlewares/userAuth.middleware.js';
 import cartRoutes from './cart.routes.js';
 import wishlistRoutes from './wishlist.routes.js';
+import orderRoutes from './order.routes.js';
 
 const router = express.Router();
 
@@ -59,5 +60,8 @@ router.use('/cart', cartRoutes);
 
 // Wishlist
 router.use('/wishlist', wishlistRoutes);
+
+// Orders
+router.use('/orders', orderRoutes);
 
 export default router;

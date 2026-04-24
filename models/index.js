@@ -26,6 +26,8 @@ import Cart from './user/Cart.js';
 import Wishlist from './user/Wishlist.js';
 import AppSettings from './superadmin-models/AppSettings.js';
 import Banner from './superadmin-models/Banner.js';
+import Order from './user/Order.js';
+import OrderItem from './user/OrderItem.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Godown -> GodownStaff (One Godown has many Staff members)
@@ -134,6 +136,19 @@ Wishlist.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 Product.hasMany(Wishlist, { foreignKey: 'productId', as: 'wishlistedBy' });
 Wishlist.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 
+// Order Associations
+User.hasMany(Order, { foreignKey: 'userId', as: 'orders' });
+Order.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+Order.hasMany(OrderItem, { foreignKey: 'orderId', as: 'items' });
+OrderItem.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
+
+Product.hasMany(OrderItem, { foreignKey: 'productId', as: 'orderItems' });
+OrderItem.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+
+ProductVariant.hasMany(OrderItem, { foreignKey: 'variantId', as: 'orderItems' });
+OrderItem.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
+
 export {
     Admin,
     Godown,
@@ -158,4 +173,6 @@ export {
     Wishlist,
     AppSettings,
     Banner,
+    Order,
+    OrderItem,
 };
