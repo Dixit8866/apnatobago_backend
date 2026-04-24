@@ -11,7 +11,7 @@ export const setTokenCookie = (res, token) => {
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 Days in milliseconds
     };
 
-    res.cookie('jwt', token, cookieOptions);
+    res.cookie('apna_tobacco_admin', token, cookieOptions);
 };
 
 /**
@@ -19,7 +19,7 @@ export const setTokenCookie = (res, token) => {
  * @param {Object} res - Express response object
  */
 export const clearTokenCookie = (res) => {
-    res.cookie('jwt', '', {
+    res.cookie('apna_tobacco_admin', '', {
         httpOnly: true,
         expires: new Date(0), // Expire the cookie immediately
     });

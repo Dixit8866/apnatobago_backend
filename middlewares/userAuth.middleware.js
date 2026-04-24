@@ -10,8 +10,8 @@ dotenv.config();
 export const protectUser = async (req, res, next) => {
     let token;
 
-    if (req.cookies && req.cookies.jwt) {
-        token = req.cookies.jwt;
+    if (req.cookies && req.cookies.apna_tobacco_admin) {
+        token = req.cookies.apna_tobacco_admin;
     } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         token = req.headers.authorization.split(' ')[1];
     }

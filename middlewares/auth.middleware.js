@@ -15,8 +15,8 @@ export const protect = async (req, res, next) => {
     let token;
 
     // 1. Try to get token from HTTP-Only Cookies primarily (More Secure)
-    if (req.cookies && req.cookies.jwt) {
-        token = req.cookies.jwt;
+    if (req.cookies && req.cookies.apna_tobacco_admin) {
+        token = req.cookies.apna_tobacco_admin;
     }
     // 2. Fallback to extracting it from Authorization Headers (Bearer) (Standard method)
     else if (
@@ -71,7 +71,7 @@ export const admin = (req, res, next) => {
  * Middleware to protect routes and verify JWT token specifically for Godown Staff
  */
 export const protectGodownStaff = async (req, res, next) => {
-    let token = req.cookies?.jwt || (req.headers.authorization?.startsWith('Bearer') ? req.headers.authorization.split(' ')[1] : null);
+    let token = req.cookies?.apna_tobacco_admin || (req.headers.authorization?.startsWith('Bearer') ? req.headers.authorization.split(' ')[1] : null);
 
     if (!token) return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.UNAUTHORIZED_NO_TOKEN);
 
