@@ -107,7 +107,17 @@ export const createOrder = async (req, res) => {
         }
 
         // Calculate final total including delivery charges
-        const deliveryCharge = parseFloat(deliveryOnRoundCharge) + parseFloat(expressDeliveryCharge);
+        let deliveryMode = null;
+        let deliveryCharge = 0;
+
+        if (parseFloat(expressDeliveryCharge) > 0) {
+            deliveryMode = 'Express';
+            deliveryCharge = parseFloat(expressDeliveryCharge);
+        } else if (parseFloat(deliveryOnRoundCharge) > 0) {
+            deliveryMode = 'Round';
+            deliveryCharge = parseFloat(deliveryOnRoundCharge);
+        }
+
         const finalCalculatedTotal = calculatedSubtotal + deliveryCharge;
 
         // Validation: Compare calculated total with frontend total
@@ -150,8 +160,8 @@ export const createOrder = async (req, res) => {
             paymentMethod,
             paymentStatus,
             orderStatus: 'Pending',
-            deliveryOnRoundCharge: parseFloat(deliveryOnRoundCharge),
-            expressDeliveryCharge: parseFloat(expressDeliveryCharge)
+            deliveryMode,
+            deliveryCharge
         }, { transaction: t });
 
         // 5. Create Order Items

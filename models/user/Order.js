@@ -52,11 +52,11 @@ const Order = sequelize.define(
             type: DataTypes.TEXT,
             allowNull: true,
         },
-        deliveryOnRoundCharge: {
-            type: DataTypes.DECIMAL(10, 2),
-            defaultValue: 0,
+        deliveryMode: {
+            type: DataTypes.ENUM('Round', 'Express'),
+            allowNull: true,
         },
-        expressDeliveryCharge: {
+        deliveryCharge: {
             type: DataTypes.DECIMAL(10, 2),
             defaultValue: 0,
         },
