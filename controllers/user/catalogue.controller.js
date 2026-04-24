@@ -7,6 +7,7 @@ import ProductPricing from '../../models/superadmin-models/ProductPricing.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
 import Banner from '../../models/superadmin-models/Banner.js';
+import Wishlist from '../../models/user/Wishlist.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -130,12 +131,20 @@ export const getProducts = async (req, res) => {
         console.log('[DEBUG] Products found:', products.length);
         console.log('[DEBUG] First product (if any):', products[0] ? { id: products[0].id, name: products[0].name, status: products[0].status, mainCategoryId: products[0].mainCategoryId } : 'No products');
 
+        // Fetch user's wishlist to mark items as wishlisted
+        const wishlist = await Wishlist.findAll({
+            where: { userId: user.id },
+            attributes: ['productId']
+        });
+        const wishlistedProductIds = new Set(wishlist.map(w => w.productId));
+
         const mappedProducts = products.map(p => {
             const productJson = p.toJSON();
+            productJson.isWishlisted = wishlistedProductIds.has(productJson.id);
+
             if (productJson.variants) {
                 productJson.variants = productJson.variants.map(v => {
                     if (v.baseUnitRef && v.baseUnitRef.name) {
-                        // Get first available name from multilingual object
                         v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
                     }
                     if (v.innerUnitRef && v.innerUnitRef.name) {
