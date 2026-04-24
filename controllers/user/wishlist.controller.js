@@ -23,7 +23,9 @@ export const getWishlist = async (req, res) => {
                             model: ProductVariant,
                             as: 'variants',
                             include: [
-                                { model: Volume, as: 'volumeRef' },
+                                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { 
                                     model: ProductPricing, 
                                     as: 'pricings',
@@ -37,7 +39,23 @@ export const getWishlist = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Wishlist fetched successfully", wishlistItems);
+        const formattedWishlist = wishlistItems.map(item => {
+            const itemJson = item.toJSON();
+            if (itemJson.product && itemJson.product.variants) {
+                itemJson.product.variants = itemJson.product.variants.map(v => {
+                    if (v.baseUnitRef && v.baseUnitRef.name) {
+                        v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
+                    }
+                    if (v.innerUnitRef && v.innerUnitRef.name) {
+                        v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
+                    }
+                    return v;
+                });
+            }
+            return itemJson;
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Wishlist fetched successfully", formattedWishlist);
     } catch (error) {
         logger.error(`Error in getWishlist: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
