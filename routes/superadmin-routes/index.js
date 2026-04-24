@@ -18,6 +18,7 @@ import purchaseRoutes from './purchase.routes.js';
 import settingsRoutes from './settings.routes.js';
 import userRoutes from './user.routes.js';
 import bannerRoutes from './banner.routes.js';
+import orderRoutes from './order.routes.js';
 
 const router = express.Router();
 
@@ -40,5 +41,6 @@ router.use('/purchase', purchaseRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/users', userRoutes);
 router.use('/banners', bannerRoutes);
+router.use('/orders', orderRoutes);
 
 export default router;
