@@ -212,7 +212,7 @@ const startServer = async () => {
             await sequelize.query(`
                 UPDATE product_variants 
                 SET "baseUnitLabel" = NULL 
-                WHERE "baseUnitLabel" NOT SIMILAR TO '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+                WHERE "baseUnitLabel"::TEXT NOT SIMILAR TO '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
             `);
 
             // 3. Manually cast to UUID type (PostgreSQL)
