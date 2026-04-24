@@ -6,6 +6,7 @@ import ProductVariant from '../../models/superadmin-models/ProductVariant.js';
 import ProductPricing from '../../models/superadmin-models/ProductPricing.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
+import Banner from '../../models/superadmin-models/Banner.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -181,4 +182,22 @@ export const getProductsBySubCategory = async (req, res) => {
 export const getProductsByCompanyCategory = async (req, res) => {
     req.query.companyCategoryId = req.params.id;
     return getProducts(req, res);
+};
+
+/**
+ * @desc    Get all active banners
+ * @route   GET /api/user/banners
+ * @access  Private (User)
+ */
+export const getBanners = async (req, res) => {
+    try {
+        const banners = await Banner.findAll({
+            where: { status: 'Active' },
+            order: [['position', 'ASC']]
+        });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Banners fetched successfully", banners);
+    } catch (error) {
+        logger.error(`[Get Banners Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch banners");
+    }
 };

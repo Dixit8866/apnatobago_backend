@@ -25,6 +25,7 @@ import PurchaseBill from './superadmin-models/PurchaseBill.js';
 import Cart from './user/Cart.js';
 import Wishlist from './user/Wishlist.js';
 import AppSettings from './superadmin-models/AppSettings.js';
+import Banner from './superadmin-models/Banner.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Godown -> GodownStaff (One Godown has many Staff members)
@@ -156,4 +157,5 @@ export {
     Cart,
     Wishlist,
     AppSettings,
+    Banner,
 };
