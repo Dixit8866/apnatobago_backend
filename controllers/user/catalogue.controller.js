@@ -12,6 +12,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import sequelize from '../../config/db.js';
+import { Op } from 'sequelize';
 
 /**
  * @desc    Get all active main categories
@@ -257,5 +258,114 @@ export const getBanners = async (req, res) => {
     } catch (error) {
         logger.error(`[Get Banners Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch banners");
+    }
+};
+/**
+ * @desc    Search catalogue (Products and Categories)
+ * @route   GET /api/user/search
+ * @access  Private (User)
+ */
+export const searchCatalogue = async (req, res) => {
+    try {
+        const { query } = req.query;
+        const user = req.user;
+
+        if (!query || query.trim() === '') {
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Search query is empty", {
+                products: [],
+                categories: { main: [], sub: [], company: [] }
+            });
+        }
+
+        const searchLower = query.toLowerCase();
+
+        // 1. Search Main Categories
+        const mainCategories = await MainCategory.findAll({
+            where: {
+                status: 'Active',
+                [Op.or]: [
+                    sequelize.where(sequelize.cast(sequelize.col('MainCategory.title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                ]
+            },
+            limit: 10
+        });
+
+        // 2. Search Sub Categories
+        const subCategories = await SubCategory.findAll({
+            where: {
+                status: 'Active',
+                [Op.or]: [
+                    sequelize.where(sequelize.cast(sequelize.col('SubCategory.title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                ]
+            },
+            limit: 10
+        });
+
+        // 3. Search Company Categories
+        const companyCategories = await CompanyCategory.findAll({
+            where: {
+                status: 'Active',
+                [Op.or]: [
+                    sequelize.where(sequelize.cast(sequelize.col('CompanyCategory.title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                ]
+            },
+            limit: 10
+        });
+
+        // 4. Search Products
+        const productWhere = {
+            status: 'Active',
+            [Op.or]: [
+                sequelize.where(sequelize.cast(sequelize.col('Product.name'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+            ]
+        };
+
+        if (user && !user.showtabacco) {
+            productWhere.isTobaccoProduct = false;
+        }
+
+        const products = await Product.findAll({
+            where: productWhere,
+            limit: 20,
+            include: [
+                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+                { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
+                {
+                    model: ProductVariant,
+                    as: 'variants',
+                    include: [
+                        { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                    ]
+                }
+            ]
+        });
+
+        // Map wishlist status for products
+        const wishlist = await Wishlist.findAll({
+            where: { userId: user.id },
+            attributes: ['productId']
+        });
+        const wishlistedProductIds = new Set(wishlist.map(w => w.productId));
+
+        const mappedProducts = products.map(p => {
+            const productJson = p.toJSON();
+            productJson.isWishlisted = wishlistedProductIds.has(productJson.id);
+            return productJson;
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Search results fetched successfully", {
+            products: mappedProducts,
+            categories: {
+                main: mainCategories,
+                sub: subCategories,
+                company: companyCategories
+            }
+        });
+    } catch (error) {
+        logger.error(`[Search Catalogue Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to search catalogue");
     }
 };
