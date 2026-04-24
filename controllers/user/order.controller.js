@@ -1,9 +1,11 @@
-import { Order, OrderItem, Product, ProductVariant, ProductPricing, Cart, User } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, ProductPricing, Cart, User, AppSettings } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import sequelize from '../../config/db.js';
 import { Op } from 'sequelize';
+import Razorpay from 'razorpay';
+import crypto from 'crypto';
 
 /**
  * Generate a unique human-readable Order ID
@@ -93,16 +95,38 @@ export const createOrder = async (req, res) => {
             });
         }
 
+        // 2.5 Check Credit Line if payment method is creditpurchase
+        if (paymentMethod === 'creditpurchase') {
+            const user = await User.findByPk(userId, { transaction: t });
+            if (!user) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
+            }
+
+            const currentCredit = parseFloat(user.creditline) || 0;
+            if (currentCredit < totalAmount) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ${currentCredit}, Required: ${totalAmount}`);
+            }
+
+            // Deduct from credit line
+            user.creditline = currentCredit - totalAmount;
+            await user.save({ transaction: t });
+        }
+
         // 3. Create the Order
         const newOrder = await Order.create({
             orderId: generateUniqueOrderId(),
             userId,
             totalAmount,
             paymentMethod,
-            paymentStatus: paymentMethod === 'COD' ? 'Pending' : 'Pending', // Adjust based on gateway
+            paymentStatus: (paymentMethod === 'COD' || paymentMethod === 'Razorpay') ? 'Pending' : (paymentMethod === 'creditpurchase' ? 'Paid' : 'Pending'),
             orderStatus: 'Pending',
             shippingAddress,
-            notes
+            notes,
+            // If it's a Razorpay order, these might be provided in the body if already paid or verified
+            razorpayOrderId: req.body.razorpayOrderId || null,
+            razorpayPaymentId: req.body.razorpayPaymentId || null
         }, { transaction: t });
 
         // 4. Create Order Items
@@ -220,6 +244,85 @@ export const cancelOrder = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order cancelled successfully.", order);
     } catch (error) {
         logger.error(`[Cancel Order Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Initialize Razorpay Order
+ * @route   POST /api/user/orders/razorpay/initialize
+ * @access  Private
+ */
+export const initializeRazorpayOrder = async (req, res) => {
+    try {
+        const { amount } = req.body; // Amount in Rupees
+
+        if (!amount || isNaN(amount) || amount <= 0) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid amount.");
+        }
+
+        // Fetch Razorpay Keys from AppSettings
+        const settings = await AppSettings.findOne();
+        if (!settings || !settings.razorpayKeyId || !settings.razorpaySecretKey) {
+            return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Razorpay is not configured in settings.");
+        }
+
+        const razorpay = new Razorpay({
+            key_id: settings.razorpayKeyId,
+            key_secret: settings.razorpaySecretKey,
+        });
+
+        const options = {
+            amount: Math.round(amount * 100), // Razorpay expects amount in paise (Rupees * 100)
+            currency: "INR",
+            receipt: `receipt_${Date.now()}`,
+        };
+
+        const razorpayOrder = await razorpay.orders.create(options);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Razorpay order initialized.", {
+            id: razorpayOrder.id,
+            amount: razorpayOrder.amount,
+            currency: razorpayOrder.currency,
+            keyId: settings.razorpayKeyId // Send Key ID to frontend for the Checkout SDK
+        });
+    } catch (error) {
+        logger.error(`[Razorpay Initialize Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Verify Razorpay Payment Signature
+ * @route   POST /api/user/orders/razorpay/verify
+ * @access  Private
+ */
+export const verifyRazorpayPayment = async (req, res) => {
+    try {
+        const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+
+        if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing payment details.");
+        }
+
+        const settings = await AppSettings.findOne();
+        if (!settings || !settings.razorpaySecretKey) {
+            return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Razorpay secret key not found.");
+        }
+
+        const body = razorpayOrderId + "|" + razorpayPaymentId;
+        const expectedSignature = crypto
+            .createHmac("sha256", settings.razorpaySecretKey)
+            .update(body.toString())
+            .digest("hex");
+
+        if (expectedSignature === razorpaySignature) {
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment verified successfully.", { verified: true });
+        } else {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid payment signature.");
+        }
+    } catch (error) {
+        logger.error(`[Razorpay Verify Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

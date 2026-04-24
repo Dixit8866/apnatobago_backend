@@ -3,7 +3,9 @@ import {
     createOrder, 
     getOrders, 
     getOrderDetails, 
-    cancelOrder 
+    cancelOrder,
+    initializeRazorpayOrder,
+    verifyRazorpayPayment
 } from '../../controllers/user/order.controller.js';
 import { protectUser } from '../../middlewares/userAuth.middleware.js';
 
@@ -16,5 +18,9 @@ router.post('/', createOrder);
 router.get('/', getOrders);
 router.get('/:id', getOrderDetails);
 router.put('/:id/cancel', cancelOrder);
+
+// Razorpay Payments
+router.post('/razorpay/initialize', initializeRazorpayOrder);
+router.post('/razorpay/verify', verifyRazorpayPayment);
 
 export default router;
