@@ -1,4 +1,4 @@
-import { Cart, Product, ProductVariant, ProductPricing, MainCategory, SubCategory, CompanyCategory, Volume, CustomLevel } from '../../models/index.js';
+import { Cart, Product, ProductVariant, ProductPricing, Volume, Wishlist } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -26,8 +26,8 @@ export const getCart = async (req, res) => {
                     as: 'variant',
                     attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice'],
                     include: [
-                        { 
-                            model: ProductPricing, 
+                        {
+                            model: ProductPricing,
                             as: 'pricings',
                             attributes: ['customLevelId', 'minQty', 'maxQty', 'price', 'mrp']
                         },
@@ -39,21 +39,28 @@ export const getCart = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
+        // Fetch user's wishlist to mark items as wishlisted
+        const wishlist = await Wishlist.findAll({
+            where: { userId },
+            attributes: ['productId']
+        });
+        const wishlistedProductIds = new Set(wishlist.map(w => w.productId));
+
         let itemTotal = 0;
         let totalMrp = 0;
 
         const formattedItems = cartItemsRaw.map(item => {
             const variant = item.variant;
             const product = item.product;
-            
+
             if (!variant || !product) return null;
 
             const quantity = Number(item.quantity);
 
             // Find applicable pricing based on user's applevel and quantity
-            let applicablePricing = variant.pricings.find(p => 
-                p.customLevelId === userAppLevel && 
-                quantity >= Number(p.minQty) && 
+            let applicablePricing = variant.pricings.find(p =>
+                p.customLevelId === userAppLevel &&
+                quantity >= Number(p.minQty) &&
                 (p.maxQty === null || quantity <= Number(p.maxQty))
             );
 
@@ -69,7 +76,7 @@ export const getCart = async (req, res) => {
 
             const unitPrice = applicablePricing ? Number(applicablePricing.price) : Number(variant.purchasePrice);
             const unitMrp = applicablePricing ? Number(applicablePricing.mrp) : unitPrice;
-            
+
             const totalPrice = unitPrice * quantity;
             const totalItemMrp = unitMrp * quantity;
 
@@ -81,8 +88,10 @@ export const getCart = async (req, res) => {
                 productId: product.id,
                 variantId: variant.id,
                 name: product.name,
+                image: variant.image || product.thumbnail,
                 thumbnail: variant.image || product.thumbnail,
-                volumeLabel: variant.volume, 
+                isWishlisted: wishlistedProductIds.has(product.id),
+                volumeLabel: variant.volume,
                 baseUnitLabel: variant.baseUnitRef?.name ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel) : variant.baseUnitLabel,
                 innerUnitLabel: variant.innerUnitRef?.name ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel) : variant.innerUnitLabel,
                 quantity: quantity,
@@ -94,7 +103,7 @@ export const getCart = async (req, res) => {
         }).filter(item => item !== null);
 
         // Simple delivery logic (can be adjusted based on requirements)
-        const deliveryCharges = 0; 
+        const deliveryCharges = 0;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", {
             items: formattedItems,
