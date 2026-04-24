@@ -52,6 +52,14 @@ const Order = sequelize.define(
             type: DataTypes.TEXT,
             allowNull: true,
         },
+        deliveryOnRoundCharge: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
+        },
+        expressDeliveryCharge: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
+        },
     },
     {
         timestamps: true,

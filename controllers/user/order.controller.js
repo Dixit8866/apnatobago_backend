@@ -24,7 +24,14 @@ const generateUniqueOrderId = () => {
 export const createOrder = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { items, paymentMethod, shippingAddress, notes } = req.body;
+        const { 
+            items, 
+            paymentMethod, 
+            deliveryOnRoundCharge = 0, 
+            expressDeliveryCharge = 0,
+            totalAmount: frontendTotalAmount // Total sent from frontend for validation
+        } = req.body;
+        
         const userId = req.user.id;
         const userAppLevel = req.user.applevel;
 
@@ -32,7 +39,11 @@ export const createOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Order must contain at least one item.");
         }
 
-        let totalAmount = 0;
+        if (frontendTotalAmount === undefined || frontendTotalAmount === null) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Total amount is required for validation.");
+        }
+
+        let calculatedSubtotal = 0;
         const orderItemsData = [];
 
         for (const item of items) {
@@ -54,19 +65,17 @@ export const createOrder = async (req, res) => {
                 order: [['minQty', 'ASC']]
             });
 
-            // Find applicable pricing based on user's applevel and quantity (Same logic as Cart)
+            // Find applicable pricing based on user's applevel and quantity
             let applicablePricing = pricings.find(p =>
                 p.customLevelId === userAppLevel &&
                 quantity >= Number(p.minQty) &&
                 (p.maxQty === null || quantity <= Number(p.maxQty))
             );
 
-            // Fallback 1: If no match for quantity, find any pricing for this level
+            // Fallback logic
             if (!applicablePricing) {
                 applicablePricing = pricings.find(p => p.customLevelId === userAppLevel);
             }
-
-            // Fallback 2: Ultimate fallback to first pricing available if still no match
             if (!applicablePricing && pricings.length > 0) {
                 applicablePricing = pricings[0];
             }
@@ -75,12 +84,11 @@ export const createOrder = async (req, res) => {
             if (applicablePricing) {
                 itemPrice = parseFloat(applicablePricing.price);
             } else {
-                // Last resort: use variant's purchasePrice if no pricing configured at all
                 itemPrice = parseFloat(variant.purchasePrice) || 0;
             }
 
             const itemSubtotal = itemPrice * parseFloat(quantity);
-            totalAmount += itemSubtotal;
+            calculatedSubtotal += itemSubtotal;
 
             orderItemsData.push({
                 productId,
@@ -98,8 +106,20 @@ export const createOrder = async (req, res) => {
             });
         }
 
-        // 2.5 Check Credit Line if payment method is creditpurchase
-        if (paymentMethod === 'creditpurchase') {
+        // Calculate final total including delivery charges
+        const deliveryCharge = parseFloat(deliveryOnRoundCharge) + parseFloat(expressDeliveryCharge);
+        const finalCalculatedTotal = calculatedSubtotal + deliveryCharge;
+
+        // Validation: Compare calculated total with frontend total
+        // We use .toFixed(2) to avoid floating point comparison issues
+        if (finalCalculatedTotal.toFixed(2) !== parseFloat(frontendTotalAmount).toFixed(2)) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Price mismatch! Calculated: ${finalCalculatedTotal.toFixed(2)}, Received: ${parseFloat(frontendTotalAmount).toFixed(2)}`);
+        }
+
+        // 3. Handle Payment and Credit Line
+        let paymentStatus = 'Pending';
+        if (paymentMethod === 'Credit') {
             const user = await User.findByPk(userId, { transaction: t });
             if (!user) {
                 await t.rollback();
@@ -107,32 +127,34 @@ export const createOrder = async (req, res) => {
             }
 
             const currentCredit = parseFloat(user.creditline) || 0;
-            if (currentCredit < totalAmount) {
+            if (currentCredit < finalCalculatedTotal) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ${currentCredit}, Required: ${totalAmount}`);
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ${currentCredit}, Required: ${finalCalculatedTotal}`);
             }
 
             // Deduct from credit line
-            user.creditline = currentCredit - totalAmount;
+            user.creditline = currentCredit - finalCalculatedTotal;
             await user.save({ transaction: t });
+            paymentStatus = 'Paid';
+        } else if (paymentMethod === 'Online') {
+            paymentStatus = 'Paid'; // Marking as paid directly as requested
+        } else {
+            paymentStatus = 'Pending'; // For COD
         }
 
-        // 3. Create the Order
+        // 4. Create the Order
         const newOrder = await Order.create({
             orderId: generateUniqueOrderId(),
             userId,
-            totalAmount,
+            totalAmount: finalCalculatedTotal,
             paymentMethod,
-            paymentStatus: (paymentMethod === 'COD' || paymentMethod === 'Razorpay') ? 'Pending' : (paymentMethod === 'creditpurchase' ? 'Paid' : 'Pending'),
+            paymentStatus,
             orderStatus: 'Pending',
-            shippingAddress,
-            notes,
-            // If it's a Razorpay order, these might be provided in the body if already paid or verified
-            razorpayOrderId: req.body.razorpayOrderId || null,
-            razorpayPaymentId: req.body.razorpayPaymentId || null
+            deliveryOnRoundCharge: parseFloat(deliveryOnRoundCharge),
+            expressDeliveryCharge: parseFloat(expressDeliveryCharge)
         }, { transaction: t });
 
-        // 4. Create Order Items
+        // 5. Create Order Items
         const finalOrderItems = orderItemsData.map(item => ({
             ...item,
             orderId: newOrder.id
@@ -140,17 +162,14 @@ export const createOrder = async (req, res) => {
 
         await OrderItem.bulkCreate(finalOrderItems, { transaction: t });
 
-        // 5. Clear Cart (Optional: only if checkout is from cart)
-        // If items are coming from cart, we might want to clear them
-        // For now, let's assume if it's a direct purchase we don't clear everything, 
-        // but typically checkout clears the cart.
+        // 6. Clear Cart
         await Cart.destroy({ where: { userId }, transaction: t });
 
         await t.commit();
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Order placed successfully.", newOrder);
     } catch (error) {
-        await t.rollback();
+        if (t) await t.rollback();
         logger.error(`[Create Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
