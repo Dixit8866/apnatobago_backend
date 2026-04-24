@@ -4,6 +4,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { Op } from 'sequelize';
+import sequelize from '../../config/db.js';
 
 // -------------------------------------------------------------
 // CREATE SUB CATEGORY
@@ -72,6 +73,21 @@ export const getSubCategories = async (req, res, next) => {
         if (req.query.paginate === 'false') {
             const categories = await SubCategory.findAll({
                 where: whereWithSearch,
+                attributes: {
+                    include: [
+                        [
+                            sequelize.literal(`(
+                                SELECT COUNT(*)
+                                FROM products AS product
+                                WHERE
+                                    product."subCategoryId" = "SubCategory".id
+                                    AND product.status != 'Deleted'
+                                    AND product."deletedAt" IS NULL
+                            )`),
+                            'productCount'
+                        ]
+                    ]
+                },
                 order: [['position', 'ASC'], ['createdAt', 'DESC']],
                 include: [includeMainCategory]
             });
@@ -83,6 +99,21 @@ export const getSubCategories = async (req, res, next) => {
 
         const result = await SubCategory.findAndCountAll({
             where: whereWithSearch,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM products AS product
+                            WHERE
+                                product."subCategoryId" = "SubCategory".id
+                                AND product.status != 'Deleted'
+                                AND product."deletedAt" IS NULL
+                        )`),
+                        'productCount'
+                    ]
+                ]
+            },
             limit: queryLimit,
             offset,
             order: [['position', 'ASC'], ['createdAt', 'DESC']],

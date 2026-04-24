@@ -6,6 +6,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { Op } from 'sequelize';
+import sequelize from '../../config/db.js';
 
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createCompanyCategory = async (req, res, next) => {
@@ -68,6 +69,21 @@ export const getCompanyCategories = async (req, res, next) => {
         if (req.query.paginate === 'false') {
             const categories = await CompanyCategory.findAll({
                 where: whereWithSearch,
+                attributes: {
+                    include: [
+                        [
+                            sequelize.literal(`(
+                                SELECT COUNT(*)
+                                FROM products AS product
+                                WHERE
+                                    product."companyCategoryId" = "CompanyCategory".id
+                                    AND product.status != 'Deleted'
+                                    AND product."deletedAt" IS NULL
+                            )`),
+                            'productCount'
+                        ]
+                    ]
+                },
                 include,
                 order: [['position', 'ASC'], ['createdAt', 'DESC']]
             });
@@ -79,6 +95,21 @@ export const getCompanyCategories = async (req, res, next) => {
 
         const result = await CompanyCategory.findAndCountAll({
             where: whereWithSearch,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM products AS product
+                            WHERE
+                                product."companyCategoryId" = "CompanyCategory".id
+                                AND product.status != 'Deleted'
+                                AND product."deletedAt" IS NULL
+                        )`),
+                        'productCount'
+                    ]
+                ]
+            },
             include,
             limit,
             offset,

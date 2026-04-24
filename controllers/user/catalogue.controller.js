@@ -11,6 +11,7 @@ import Wishlist from '../../models/user/Wishlist.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
+import sequelize from '../../config/db.js';
 
 /**
  * @desc    Get all active main categories
@@ -21,6 +22,22 @@ export const getMainCategories = async (req, res) => {
     try {
         const categories = await MainCategory.findAll({
             where: { status: 'Active' },
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM products AS product
+                            WHERE
+                                product."mainCategoryId" = "MainCategory".id
+                                AND product.status = 'Active'
+                                AND product."deletedAt" IS NULL
+                                ${req.user && !req.user.showtabacco ? 'AND product."isTobaccoProduct" = false' : ''}
+                        )`),
+                        'productCount'
+                    ]
+                ]
+            },
             order: [['position', 'ASC']]
         });
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Main categories fetched successfully", categories);
@@ -43,6 +60,22 @@ export const getSubCategories = async (req, res) => {
 
         const categories = await SubCategory.findAll({
             where: whereClause,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM products AS product
+                            WHERE
+                                product."subCategoryId" = "SubCategory".id
+                                AND product.status = 'Active'
+                                AND product."deletedAt" IS NULL
+                                ${req.user && !req.user.showtabacco ? 'AND product."isTobaccoProduct" = false' : ''}
+                        )`),
+                        'productCount'
+                    ]
+                ]
+            },
             order: [['position', 'ASC']]
         });
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Sub categories fetched successfully", categories);
@@ -66,6 +99,22 @@ export const getCompanyCategories = async (req, res) => {
 
         const categories = await CompanyCategory.findAll({
             where: whereClause,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM products AS product
+                            WHERE
+                                product."companyCategoryId" = "CompanyCategory".id
+                                AND product.status = 'Active'
+                                AND product."deletedAt" IS NULL
+                                ${req.user && !req.user.showtabacco ? 'AND product."isTobaccoProduct" = false' : ''}
+                        )`),
+                        'productCount'
+                    ]
+                ]
+            },
             order: [['position', 'ASC']]
         });
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company categories fetched successfully", categories);

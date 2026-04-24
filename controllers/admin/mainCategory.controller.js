@@ -3,6 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { Op } from 'sequelize';
+import sequelize from '../../config/db.js';
 
 export const createMainCategory = async (req, res, next) => {
     try {
@@ -53,13 +54,46 @@ export const getMainCategories = async (req, res, next) => {
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
         if (req.query.paginate === 'false') {
-            const categories = await MainCategory.findAll({ where: whereClause, order: [['position', 'ASC'], ['createdAt', 'DESC']] });
+            const categories = await MainCategory.findAll({ 
+                where: whereClause, 
+                attributes: {
+                    include: [
+                        [
+                            sequelize.literal(`(
+                                SELECT COUNT(*)
+                                FROM products AS product
+                                WHERE
+                                    product."mainCategoryId" = "MainCategory".id
+                                    AND product.status != 'Deleted'
+                                    AND product."deletedAt" IS NULL
+                            )`),
+                            'productCount'
+                        ]
+                    ]
+                },
+                order: [['position', 'ASC'], ['createdAt', 'DESC']] 
+            });
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Main Categories fetched successfully.", { categories, statusCounts });
         }
 
         const { limit, offset, page } = pagination;
         const result = await MainCategory.findAndCountAll({
             where: whereClause,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM products AS product
+                            WHERE
+                                product."mainCategoryId" = "MainCategory".id
+                                AND product.status != 'Deleted'
+                                AND product."deletedAt" IS NULL
+                        )`),
+                        'productCount'
+                    ]
+                ]
+            },
             limit,
             offset,
             order: [['position', 'ASC'], ['createdAt', 'DESC']]
