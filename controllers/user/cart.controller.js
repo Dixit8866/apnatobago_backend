@@ -24,7 +24,7 @@ export const getCart = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variant',
-                    attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice'],
+                    attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume'],
                     include: [
                         {
                             model: ProductPricing,
@@ -94,6 +94,7 @@ export const getCart = async (req, res) => {
                 volumeLabel: variant.volume,
                 baseUnitLabel: variant.baseUnitRef?.name ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel) : variant.baseUnitLabel,
                 innerUnitLabel: variant.innerUnitRef?.name ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel) : variant.innerUnitLabel,
+                sellingVolume: variant.sellingVolume,
                 quantity: quantity,
                 unitPrice: unitPrice,
                 mrp: unitMrp,
