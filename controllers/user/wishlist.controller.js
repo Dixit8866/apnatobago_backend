@@ -43,13 +43,16 @@ export const getWishlist = async (req, res) => {
             const itemJson = item.toJSON();
             if (itemJson.product && itemJson.product.variants) {
                 itemJson.product.variants = itemJson.product.variants.map(v => {
-                    if (v.baseUnitRef && v.baseUnitRef.name) {
-                        v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
-                    }
-                    if (v.innerUnitRef && v.innerUnitRef.name) {
-                        v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
-                    }
-                    return v;
+                    const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
+                    const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
+                    
+                    return {
+                        ...v,
+                        baseUnitLabel: baseUnitName || v.baseUnitLabel,
+                        innerUnitLabel: innerUnitName || v.innerUnitLabel,
+                        image: v.image || itemJson.product.thumbnail,
+                        thumbnail: v.image || itemJson.product.thumbnail
+                    };
                 });
             }
             return itemJson;
