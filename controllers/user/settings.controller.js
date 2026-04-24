@@ -24,7 +24,10 @@ export const getAppSettings = async (req, res) => {
             });
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", settings);
+        const settingsData = settings.toJSON();
+        delete settingsData.razorpaySecretKey;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", settingsData);
     } catch (error) {
         logger.error(`[Get App Settings Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch app settings");

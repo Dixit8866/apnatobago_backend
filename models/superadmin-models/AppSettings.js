@@ -30,6 +30,14 @@ const AppSettings = sequelize.define('AppSettings', {
     forceUpdate: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
+    },
+    razorpayKeyId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    razorpaySecretKey: {
+        type: DataTypes.STRING,
+        allowNull: true,
     }
 }, {
     timestamps: true,
