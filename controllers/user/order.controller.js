@@ -90,7 +90,10 @@ export const createOrder = async (req, res) => {
                 variantInfo: {
                     productName: variant.product.name,
                     volume: variant.volume,
-                    image: variant.image || variant.product.thumbnail
+                    image: variant.image || variant.product.thumbnail,
+                    innerUnitLabel: variant.innerUnitLabel,
+                    baseUnitLabel: variant.baseUnitLabel,
+                    sellingVolume: variant.sellingVolume
                 }
             });
         }

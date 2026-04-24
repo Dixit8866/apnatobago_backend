@@ -53,7 +53,7 @@ export const getAllOrders = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image'] }
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'] }
                     ]
                 }
             ],
@@ -133,7 +133,7 @@ export const getOrderDetails = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image'] }
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'] }
                     ]
                 }
             ]
