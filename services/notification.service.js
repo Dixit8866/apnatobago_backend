@@ -1,5 +1,5 @@
-import admin from 'firebase-admin';
-import { credential } from 'firebase-admin';
+import { initializeApp, cert, getApp, getApps } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -7,6 +7,8 @@ import logger from '../logger/apiLogger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+let firebaseApp;
 
 // Initialize Firebase Admin
 try {
@@ -24,11 +26,10 @@ try {
     }
     // 3. Try loading from individual env variables
     else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && !process.env.FIREBASE_PRIVATE_KEY.includes('...')) {
-        // Clean up the private key (remove literal \n strings, extra quotes, and trim)
         const privateKey = process.env.FIREBASE_PRIVATE_KEY
-            ?.replace(/\\n/g, '\n')      // Replace literal \n with real newline
-            .replace(/"/g, '')           // Remove any extra double quotes
-            .replace(/'/g, '')           // Remove any extra single quotes
+            ?.replace(/\\n/g, '\n')
+            .replace(/"/g, '')
+            .replace(/'/g, '')
             .trim();
 
         serviceAccount = {
@@ -39,12 +40,16 @@ try {
     }
 
     if (serviceAccount) {
-        admin.initializeApp({
-            credential: credential.cert(serviceAccount)
-        });
-        logger.info('Firebase Admin initialized successfully');
+        if (getApps().length === 0) {
+            firebaseApp = initializeApp({
+                credential: cert(serviceAccount)
+            });
+            logger.info('Firebase Admin initialized successfully');
+        } else {
+            firebaseApp = getApp();
+        }
     } else {
-        logger.warn('Firebase Admin: No credentials provided');
+        logger.warn('Firebase Admin: No credentials provided or placeholder detected');
     }
 } catch (error) {
     logger.error(`Firebase Admin initialization failed: ${error.message}`);
@@ -55,6 +60,8 @@ try {
  */
 export const sendToDevice = async (token, title, body, imageUrl = null, data = {}) => {
     try {
+        if (!firebaseApp) throw new Error('Firebase Admin not initialized');
+
         const message = {
             token,
             notification: {
@@ -86,7 +93,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
             }
         };
 
-        const response = await admin.messaging().send(message);
+        const response = await getMessaging(firebaseApp).send(message);
         return { success: true, response };
     } catch (error) {
         logger.error(`Error sending device notification: ${error.message}`);
@@ -99,6 +106,8 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
  */
 export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}) => {
     try {
+        if (!firebaseApp) throw new Error('Firebase Admin not initialized');
+
         const message = {
             topic,
             notification: {
@@ -130,7 +139,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
             }
         };
 
-        const response = await admin.messaging().send(message);
+        const response = await getMessaging(firebaseApp).send(message);
         return { success: true, response };
     } catch (error) {
         logger.error(`Error sending topic notification: ${error.message}`);
@@ -138,4 +147,4 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
     }
 };
 
-export default admin;
+export default firebaseApp;
