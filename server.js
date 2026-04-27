@@ -23,10 +23,9 @@ const startServer = async () => {
         // Connect to Database
         await connectDB();
 
-        // Sync Sequelize Models with Database
-        // Note: force: false won't drop existing tables. alter: { drop: false } adds new columns safely.
-        await sequelize.sync({ force: false, alter: { drop: false } });
-        console.log('[Database] Sequelize Models Synced');
+        // Note: Automatic sync is disabled since schema is already established.
+        // await sequelize.sync({ force: false, alter: { drop: false } });
+        // console.log('[Database] Sequelize Models Synced');
 
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);
