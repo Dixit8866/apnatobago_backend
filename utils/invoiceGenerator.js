@@ -96,12 +96,24 @@ export const generateOrderInvoice = async (order) => {
                 doc.text(`${idx + 1}.`, 30, itemY);
                 
                 const pName = it.product?.name || it.variantInfo?.productName;
-                const nameStr = typeof pName === 'object' ? pName.EN || pName.GU : (pName || 'Product');
+                let nameStr = 'Product';
+                if (pName) {
+                    if (typeof pName === 'object') {
+                        nameStr = pName.EN || pName.en || pName.GU || pName.gu || Object.values(pName)[0] || 'Product';
+                    } else {
+                        nameStr = String(pName);
+                    }
+                }
                 const volume = it.variant?.volume || it.variantInfo?.volume || '';
+                
+                // Determine unit label (pcs vs carton)
+                const sellUnit = it.sellUnit || 'Base';
+                const vInfo = it.variantInfo || {};
+                const unitLabel = sellUnit === 'Inner' ? (vInfo.innerUnitLabel || 'Pcs') : (vInfo.baseUnitLabel || 'Carton');
                 
                 doc.font('Helvetica').text(`${nameStr} (${volume})`, 60, itemY, { width: width - 250 });
                 doc.text(`₹${Number(it.price).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
-                doc.text(String(it.quantity), doc.page.width - 120, itemY, { width: 30, align: 'center' });
+                doc.text(`${it.quantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
                 doc.font('Helvetica-Bold').text(`₹${(it.price * it.quantity).toFixed(2)}`, doc.page.width - 85, itemY, { width: 60, align: 'right' });
                 
                 subtotal += it.price * it.quantity;

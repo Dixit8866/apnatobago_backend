@@ -218,8 +218,13 @@ export const createProduct = async (req, res, next) => {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Valid purchasePrice is required for each volume.');
             }
 
-            const volumeUnit = volumeMap.get(volumeId);
-            const normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
+            const volumeUnit = volumeMap.get(volumeId) || '';
+            let normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
+            
+            // If the user already typed the unit in the value (e.g. "300ml"), don't double it
+            if (volumeUnit && volumeValue.toLowerCase().endsWith(volumeUnit.toLowerCase())) {
+                normalizedVolume = volumeValue.trim();
+            }
 
             const variant = await ProductVariant.create(
                 {
@@ -480,8 +485,13 @@ export const updateProduct = async (req, res, next) => {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Valid purchasePrice is required for each volume.');
             }
 
-            const volumeUnit = volumeMap.get(volumeId);
-            const normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
+            const volumeUnit = volumeMap.get(volumeId) || '';
+            let normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
+            
+            // If the user already typed the unit in the value (e.g. "300ml"), don't double it
+            if (volumeUnit && volumeValue.toLowerCase().endsWith(volumeUnit.toLowerCase())) {
+                normalizedVolume = volumeValue.trim();
+            }
 
             const variant = await ProductVariant.create(
                 {
