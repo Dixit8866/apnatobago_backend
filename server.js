@@ -204,25 +204,36 @@ const startServer = async () => {
 
         // Pre-sync: Drop NOT NULL and Nullify non-UUID 'pcs' in baseUnitLabel to avoid cast errors when changing type to UUID
         try {
-            // 1. Drop DEFAULT and NOT NULL constraints
-            await sequelize.query(`ALTER TABLE product_variants ALTER COLUMN "baseUnitLabel" DROP DEFAULT`);
-            await sequelize.query(`ALTER TABLE product_variants ALTER COLUMN "baseUnitLabel" DROP NOT NULL`);
-            
-            // 2. Nullify non-uuid values like 'pcs'
-            await sequelize.query(`
-                UPDATE product_variants 
-                SET "baseUnitLabel" = NULL 
-                WHERE "baseUnitLabel"::TEXT !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            // Check if column exists and its type
+            const [columnInfo] = await sequelize.query(`
+                SELECT data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'product_variants' AND column_name = 'baseUnitLabel'
             `);
 
-            // 3. Manually cast to UUID type (PostgreSQL)
-            await sequelize.query(`
-                ALTER TABLE product_variants 
-                ALTER COLUMN "baseUnitLabel" TYPE UUID 
-                USING "baseUnitLabel"::UUID
-            `);
-            
-            console.log('[PreSync] baseUnitLabel prepared and cast to UUID ✓');
+            if (columnInfo.length > 0 && columnInfo[0].data_type !== 'uuid') {
+                console.log('[PreSync] Converting baseUnitLabel to UUID...');
+                // 1. Drop DEFAULT and NOT NULL constraints
+                await sequelize.query(`ALTER TABLE product_variants ALTER COLUMN "baseUnitLabel" DROP DEFAULT`);
+                await sequelize.query(`ALTER TABLE product_variants ALTER COLUMN "baseUnitLabel" DROP NOT NULL`);
+                
+                // 2. Nullify non-uuid values like 'pcs'
+                await sequelize.query(`
+                    UPDATE product_variants 
+                    SET "baseUnitLabel" = NULL 
+                    WHERE "baseUnitLabel"::TEXT !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                `);
+
+                // 3. Manually cast to UUID type (PostgreSQL)
+                await sequelize.query(`
+                    ALTER TABLE product_variants 
+                    ALTER COLUMN "baseUnitLabel" TYPE UUID 
+                    USING "baseUnitLabel"::UUID
+                `);
+                console.log('[PreSync] baseUnitLabel prepared and cast to UUID ✓');
+            } else {
+                console.log('[PreSync] baseUnitLabel is already UUID or table does not exist, skipping conversion.');
+            }
         } catch (e) {
             console.warn('[PreSync] Warning: Could not prepare baseUnitLabel:', e.message);
         }
