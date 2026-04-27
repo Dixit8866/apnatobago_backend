@@ -13,9 +13,30 @@ const server = http.createServer(app);
 import { initSocket } from './socket.js';
 initSocket(server);
 
-// Initialize Cron Jobs
 import { initReminderCron } from './utils/reminderCron.js';
 initReminderCron();
+
+// Import Admin model for seeding
+import Admin from './models/superadmin-models/Admin.js';
+
+// ─── Seed Admin Function ──────────────────────────────────────────────────────
+const seedAdmin = async () => {
+    try {
+        const adminCount = await Admin.count();
+        if (adminCount === 0) {
+            await Admin.create({
+                name: 'Super Admin',
+                email: 'apnatobacco@gmail.com',
+                password: 'apnatobacco123', // Will be hashed by model hook
+                role: 'superadmin',
+                status: 'Active'
+            });
+            console.log('[Seed] SuperAdmin created successfully ✓');
+        }
+    } catch (error) {
+        console.error('[Seed Error] Failed to seed admin:', error.message);
+    }
+};
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const startServer = async () => {
@@ -23,9 +44,13 @@ const startServer = async () => {
         // Connect to Database
         await connectDB();
 
-        // Note: Automatic sync is disabled since schema is already established.
-        // await sequelize.sync({ force: false, alter: { drop: false } });
-        // console.log('[Database] Sequelize Models Synced');
+        // Sync Sequelize Models with Database
+        // Note: We are enabling this temporarily to create tables in your new database.
+        await sequelize.sync({ force: false, alter: { drop: false } });
+        console.log('[Database] Sequelize Models Synced');
+        
+        // Seed SuperAdmin if database is empty
+        await seedAdmin();
 
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);
