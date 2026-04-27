@@ -1,4 +1,5 @@
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
+import { credential } from 'firebase-admin';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -39,7 +40,7 @@ try {
 
     if (serviceAccount) {
         admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
+            credential: credential.cert(serviceAccount)
         });
         logger.info('Firebase Admin initialized successfully');
     } else {
