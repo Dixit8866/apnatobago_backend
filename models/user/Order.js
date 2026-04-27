@@ -17,7 +17,22 @@ const Order = sequelize.define(
         },
         userId: {
             type: DataTypes.UUID,
-            allowNull: false,
+            allowNull: true,
+        },
+        saleType: {
+            type: DataTypes.STRING,
+            defaultValue: 'Online',
+            validate: {
+                isIn: [['Online', 'Direct']]
+            }
+        },
+        customerName: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        customerNumber: {
+            type: DataTypes.STRING,
+            allowNull: true,
         },
         totalAmount: {
             type: DataTypes.DECIMAL(10, 2),
@@ -25,16 +40,30 @@ const Order = sequelize.define(
             defaultValue: 0,
         },
         orderStatus: {
-            type: DataTypes.ENUM('Pending', 'Packed', 'Shipped', 'Delivered', 'Cancelled'),
+            type: DataTypes.STRING,
             defaultValue: 'Pending',
+            validate: {
+                isIn: [['Pending', 'Packed', 'Shipped', 'Delivered', 'Cancelled']]
+            }
         },
         paymentMethod: {
             type: DataTypes.STRING, // COD, ONLINE, CREDIT.
             allowNull: false,
         },
         paymentStatus: {
-            type: DataTypes.ENUM('Pending', 'Paid', 'Failed', 'Refunded'),
+            type: DataTypes.STRING,
             defaultValue: 'Pending',
+            validate: {
+                isIn: [['Pending', 'Paid', 'Partial', 'Failed', 'Refunded']]
+            }
+        },
+        paidAmount: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
+        },
+        dueAmount: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
         },
         shippingAddress: {
             type: DataTypes.JSONB,
@@ -53,8 +82,11 @@ const Order = sequelize.define(
             allowNull: true,
         },
         deliveryMode: {
-            type: DataTypes.ENUM('Round', 'Express'),
+            type: DataTypes.STRING,
             allowNull: true,
+            validate: {
+                isIn: [['Round', 'Express']]
+            }
         },
         deliveryCharge: {
             type: DataTypes.DECIMAL(10, 2),

@@ -9,6 +9,14 @@ const PORT = process.env.PORT || 5000;
 // Create HTTP server
 const server = http.createServer(app);
 
+// Initialize Socket.io
+import { initSocket } from './socket.js';
+initSocket(server);
+
+// Initialize Cron Jobs
+import { initReminderCron } from './utils/reminderCron.js';
+initReminderCron();
+
 // ─── Auto Migration: Backfill volumeId for old product_variants records ──────
 // Runs every startup — safe/idempotent (only updates rows where volumeId IS NULL)
 // Needed for production records created before volumeId column was added.
@@ -64,15 +72,7 @@ async function runAutoMigrations() {
         console.log(`[AutoMigrate] product_variants volumeId backfill done — Fixed: ${fixed} | Skipped: ${skipped}`);
 
         // ─── 3. Auto Seed: Backfill ProductVariant.baseUnit* ──────────────────────
-        const [varUnit1] = await sequelize.query(`
-            UPDATE product_variants 
-            SET "baseUnitLabel" = 'pcs'
-            WHERE "baseUnitLabel" IS NULL OR "baseUnitLabel" = ''
-            RETURNING id;
-        `);
-        if (varUnit1 && varUnit1.length) {
-            console.log(`[AutoSeed] Seeded baseUnitLabel='pcs' for ${varUnit1.length} variants ✓`);
-        }
+        // (Removed outdated 'pcs' string seed as baseUnitLabel is now UUID)
 
         const [varUnit2] = await sequelize.query(`
             UPDATE product_variants 
@@ -212,7 +212,7 @@ const startServer = async () => {
             await sequelize.query(`
                 UPDATE product_variants 
                 SET "baseUnitLabel" = NULL 
-                WHERE "baseUnitLabel"::TEXT NOT SIMILAR TO '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+                WHERE "baseUnitLabel"::TEXT !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
             `);
 
             // 3. Manually cast to UUID type (PostgreSQL)
@@ -227,6 +227,14 @@ const startServer = async () => {
             console.warn('[PreSync] Warning: Could not prepare baseUnitLabel:', e.message);
         }
 
+        // Pre-sync: Allow NULL for userId in orders table (for Guest/Direct Sales)
+        try {
+            await sequelize.query('ALTER TABLE orders ALTER COLUMN "userId" DROP NOT NULL');
+            console.log('[PreSync] orders.userId set to allow NULL ✓');
+        } catch (e) {
+            // Ignore if table doesn't exist yet
+        }
+
         // Sync Sequelize Models with Database
         // Note: force: false won't drop existing tables. alter: { drop: false } adds new columns safely.
         await sequelize.sync({ force: false, alter: { drop: false } });
@@ -235,8 +243,9 @@ const startServer = async () => {
         // Run auto migrations (safe, idempotent — only fixes NULL rows)
         await runAutoMigrations();
 
-        server.listen(PORT, () => {
+        server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+            console.log(`[Network] Access at http://192.168.1.50:${PORT}`);
         });
     } catch (error) {
         console.error(`[Server Error] Failed to start server:`, error.message);

@@ -4,6 +4,8 @@
  */
 
 import Admin from './superadmin-models/Admin.js';
+import DeliveryBoy from './superadmin-models/DeliveryBoy.js';
+import OrderAssignment from './superadmin-models/OrderAssignment.js';
 import Godown from './superadmin-models/Godown.js';
 import GodownStaff from './superadmin-models/GodownStaff.js';
 import Language from './superadmin-models/Language.js';
@@ -28,8 +30,20 @@ import AppSettings from './superadmin-models/AppSettings.js';
 import Banner from './superadmin-models/Banner.js';
 import Order from './user/Order.js';
 import OrderItem from './user/OrderItem.js';
+import Notification from './superadmin-models/Notification.js';
+import AdminNotification from './superadmin-models/AdminNotification.js';
+import BusinessProfile from './user/BusinessProfile.js';
+import HelpSupport from './user/HelpSupport.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
+// User -> HelpSupport (One User can have many help requests)
+User.hasMany(HelpSupport, { foreignKey: 'userId', as: 'helpRequests' });
+HelpSupport.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+// User -> BusinessProfile (One-to-One)
+User.hasOne(BusinessProfile, { foreignKey: 'userId', as: 'businessProfile' });
+BusinessProfile.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
 // Godown -> GodownStaff (One Godown has many Staff members)
 Godown.hasMany(GodownStaff, { foreignKey: 'godownId', as: 'staffs' });
 GodownStaff.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
@@ -149,8 +163,23 @@ OrderItem.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 ProductVariant.hasMany(OrderItem, { foreignKey: 'variantId', as: 'orderItems' });
 OrderItem.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
 
+// Order Assignment Associations
+Order.hasOne(OrderAssignment, { foreignKey: 'orderId', as: 'assignment' });
+OrderAssignment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
+
+DeliveryBoy.hasMany(OrderAssignment, { foreignKey: 'deliveryBoyId', as: 'assignments' });
+OrderAssignment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
+
+// Notification Associations
+Admin.hasMany(Notification, { foreignKey: 'sentBy', as: 'sentNotifications' });
+Notification.belongsTo(Admin, { foreignKey: 'sentBy', as: 'admin' });
+
 export {
     Admin,
+    DeliveryBoy,
+    OrderAssignment,
+    Notification,
+    AdminNotification,
     Godown,
     GodownStaff,
     Language,
@@ -175,4 +204,6 @@ export {
     Banner,
     Order,
     OrderItem,
+    BusinessProfile,
+    HelpSupport,
 };

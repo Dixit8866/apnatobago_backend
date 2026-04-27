@@ -2,7 +2,9 @@ import express from 'express';
 import { 
     getAllOrders, 
     updateOrderStatus, 
-    getOrderDetails 
+    getOrderDetails,
+    downloadInvoice,
+    downloadDeliveryLabel
 } from '../../controllers/admin/order.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 
@@ -13,6 +15,8 @@ router.use(protect);
 
 router.get('/', getAllOrders);
 router.get('/:id', getOrderDetails);
+router.get('/:id/invoice', downloadInvoice);
+router.get('/:id/delivery-label', downloadDeliveryLabel);
 router.put('/:id/status', updateOrderStatus);
 
 export default router;

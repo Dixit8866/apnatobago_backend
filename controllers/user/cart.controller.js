@@ -24,7 +24,7 @@ export const getCart = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variant',
-                    attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume'],
+                    attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
                     include: [
                         {
                             model: ProductPricing,
@@ -70,12 +70,19 @@ export const getCart = async (req, res) => {
             }
 
             // Ultimate fallback to first pricing
-            if (!applicablePricing && variant.pricings.length > 0) {
-                applicablePricing = variant.pricings[0];
-            }
+            let packLabel = variant.baseUnitLabel || 'pcs';
+            let trueBaseLabelName = variant.innerUnitRef?.name 
+              ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel)
+              : (variant.volume || 'Unit');
+            let bUPP = Number(variant.baseUnitsPerPack || 1);
+            
+            const rawPrice = applicablePricing ? Number(applicablePricing.price) : Number(variant.purchasePrice);
+            const rawMrp = applicablePricing ? Number(applicablePricing.mrp) : rawPrice;
 
-            const unitPrice = applicablePricing ? Number(applicablePricing.price) : Number(variant.purchasePrice);
-            const unitMrp = applicablePricing ? Number(applicablePricing.mrp) : unitPrice;
+            // Price in DB is for 1 PACK (Dando). User buys in UNITS (Box).
+            // So unitPrice = Price / Multiplier
+            const unitPrice = rawPrice / bUPP;
+            const unitMrp = rawMrp / bUPP;
 
             const totalPrice = unitPrice * quantity;
             const totalItemMrp = unitMrp * quantity;

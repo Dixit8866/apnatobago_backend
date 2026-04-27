@@ -341,7 +341,7 @@ export const deleteAccount = async (req, res) => {
  */
 export const editProfile = async (req, res) => {
     try {
-        const { fullname, email, city, postcode } = req.body;
+        const { fullname, email, city, postcode, orderReminder, reminderTime } = req.body;
         const user = await User.findByPk(req.user.id);
         
         if (!user) {
@@ -352,6 +352,14 @@ export const editProfile = async (req, res) => {
         user.email = email || user.email;
         user.city = city || user.city;
         user.postcode = postcode || user.postcode;
+        
+        if (orderReminder !== undefined) {
+            user.orderReminder = orderReminder;
+        }
+        
+        if (reminderTime !== undefined) {
+            user.reminderTime = reminderTime;
+        }
 
         await user.save();
 

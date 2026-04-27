@@ -276,8 +276,8 @@ export const createProduct = async (req, res, next) => {
 
 export const getProducts = async (req, res, next) => {
     try {
-        const { search = '', status } = req.query;
-
+        const { search = '', status, mainCategoryId } = req.query;
+        
         const searchWhere = search
             ? { name: { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } }
             : {};
@@ -289,14 +289,18 @@ export const getProducts = async (req, res, next) => {
             whereWithFilters.status = { [Op.ne]: 'Deleted' };
         }
 
+        if (mainCategoryId) {
+            whereWithFilters.mainCategoryId = mainCategoryId;
+        }
+
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
         const [activeCount, inactiveCount, deletedCount, totalCount] = await Promise.all([
-            Product.count({ where: { ...searchWhere, status: 'Active' } }),
-            Product.count({ where: { ...searchWhere, status: 'Inactive' } }),
-            Product.count({ where: { ...searchWhere, status: 'Deleted' } }),
-            Product.count({ where: searchWhere }),
+            Product.count({ where: { ...searchWhere, status: 'Active', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+            Product.count({ where: { ...searchWhere, status: 'Inactive', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+            Product.count({ where: { ...searchWhere, status: 'Deleted', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+            Product.count({ where: { ...searchWhere, ...(mainCategoryId ? { mainCategoryId } : {}) } }),
         ]);
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
@@ -304,6 +308,23 @@ export const getProducts = async (req, res, next) => {
             { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
             { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
             { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
+            {
+                model: ProductVariant,
+                as: 'variants',
+                required: false,
+                include: [
+                    {
+                        model: ProductPricing,
+                        as: 'pricings',
+                        required: false,
+                        include: [
+                            { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }
+                        ]
+                    },
+                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                ]
+            }
         ];
 
         if (req.query.paginate === 'false') {
@@ -317,6 +338,7 @@ export const getProducts = async (req, res, next) => {
             limit,
             offset,
             order: [['position', 'ASC'], ['createdAt', 'DESC']],
+            distinct: true // Required when including hasMany associations with pagination
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -588,4 +610,50 @@ export const moveProductToTop = async (req, res, next) => {
         next(error);
     }
 };
+
+// ─── UPDATE PRICES (INLINE EDIT) ─────────────────────────────────────────────
+export const updateProductPrices = async (req, res, next) => {
+    const t = await sequelize.transaction();
+    try {
+        const { productId, purchasePrice, pricings } = req.body;
+
+        // Update first variant's purchasePrice
+        const variant = await ProductVariant.findOne({ 
+            where: { productId }, 
+            order: [['createdAt', 'ASC']], 
+            transaction: t 
+        });
+
+        if (!variant) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product variant not found.');
+        }
+
+        await variant.update({ purchasePrice }, { transaction: t });
+        
+        if (Array.isArray(pricings)) {
+            for (const p of pricings) {
+                // Update all pricing ranges for this level for simple inline editing
+                await ProductPricing.update(
+                    { price: p.price, mrp: p.mrp, purchasePrice },
+                    { 
+                        where: { 
+                            variantId: variant.id, 
+                            customLevelId: p.customLevelId 
+                        }, 
+                        transaction: t 
+                    }
+                );
+            }
+        }
+
+        await t.commit();
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Prices updated successfully.');
+    } catch (error) {
+        await t.rollback();
+        console.error('[Product API UpdatePrices] ERROR:', error);
+        next(error);
+    }
+};
+
 

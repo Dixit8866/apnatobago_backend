@@ -1,9 +1,61 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML } from '../../utils/invoiceGenerator.js';
+// ... (rest of imports)
+
+/**
+ * @desc    Generate Delivery Label PDF
+ * @route   GET /api/admin/orders/:id/delivery-label
+ * @access  Private (Admin)
+ */
+export const downloadDeliveryLabel = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const order = await Order.findByPk(id, {
+            include: [
+                { model: User, as: 'user' },
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name'] },
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] }
+                    ]
+                },
+                {
+                    model: OrderAssignment,
+                    as: 'assignment',
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy' }]
+                }
+            ]
+        });
+
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        // Return HTML if requested
+        if (req.query.format === 'html') {
+            const html = generateDeliveryLabelHTML(order);
+            res.setHeader('Content-Type', 'text/html');
+            return res.send(html);
+        }
+
+        const pdfBuffer = await generateDeliveryLabel(order);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename=Label-${order.orderId}.pdf`);
+        return res.send(pdfBuffer);
+    } catch (error) {
+        logger.error(`[Admin Label Generation Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
 
 /**
  * @desc    Get all orders for admin
@@ -63,6 +115,11 @@ export const getAllOrders = async (req, res) => {
                             ]
                         }
                     ]
+                },
+                {
+                    model: OrderAssignment,
+                    as: 'assignment',
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone'] }]
                 }
             ],
             limit,
@@ -79,10 +136,11 @@ export const getAllOrders = async (req, res) => {
         const endOfToday = new Date(todayStr);
         endOfToday.setHours(23, 59, 59, 999);
 
-        const [pendingCount, packedCount, shippedCount, cancelledCount, todayCount] = await Promise.all([
+        const [pendingCount, packedCount, shippedCount, deliveredCount, cancelledCount, todayCount] = await Promise.all([
             Order.count({ where: { orderStatus: 'Pending' } }),
             Order.count({ where: { orderStatus: 'Packed' } }),
             Order.count({ where: { orderStatus: 'Shipped' } }),
+            Order.count({ where: { orderStatus: 'Delivered' } }),
             Order.count({ where: { orderStatus: 'Cancelled' } }),
             Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] } } })
         ]);
@@ -96,6 +154,7 @@ export const getAllOrders = async (req, res) => {
             Pending: pendingCount,
             Packed: packedCount,
             Shipped: shippedCount,
+            Delivered: deliveredCount,
             Cancelled: cancelledCount
         };
 
@@ -114,7 +173,7 @@ export const getAllOrders = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { orderStatus, paymentStatus } = req.body;
+        const { orderStatus, paymentStatus, paidAmount: newPaidAmount } = req.body;
 
         const order = await Order.findByPk(id);
 
@@ -130,12 +189,35 @@ export const updateOrderStatus = async (req, res) => {
             order.orderStatus = orderStatus;
         }
 
-        if (paymentStatus) {
-            const validPaymentStatuses = ['Pending', 'Paid', 'Failed', 'Refunded'];
+        // Handle Payment Updates
+        if (newPaidAmount !== undefined) {
+            const total = parseFloat(order.totalAmount);
+            const paid = parseFloat(newPaidAmount);
+            
+            order.paidAmount = paid;
+            order.dueAmount = Math.max(0, total - paid);
+
+            if (paid >= total) {
+                order.paymentStatus = 'Paid';
+            } else if (paid > 0) {
+                order.paymentStatus = 'Partial';
+            } else {
+                order.paymentStatus = 'Pending';
+            }
+        } else if (paymentStatus) {
+            const validPaymentStatuses = ['Pending', 'Paid', 'Partial', 'Failed', 'Refunded'];
             if (!validPaymentStatuses.includes(paymentStatus)) {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid payment status.");
             }
             order.paymentStatus = paymentStatus;
+            
+            if (paymentStatus === 'Paid') {
+                order.paidAmount = order.totalAmount;
+                order.dueAmount = 0;
+            } else if (paymentStatus === 'Pending') {
+                order.paidAmount = 0;
+                order.dueAmount = order.totalAmount;
+            }
         }
 
         await order.save();
@@ -177,6 +259,11 @@ export const getOrderDetails = async (req, res) => {
                             ]
                         }
                     ]
+                },
+                {
+                    model: OrderAssignment,
+                    as: 'assignment',
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone', 'vehicleNumber'] }]
                 }
             ]
         });
@@ -188,6 +275,43 @@ export const getOrderDetails = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", order);
     } catch (error) {
         logger.error(`[Admin Get Order Details Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Generate Invoice PDF
+ * @route   GET /api/admin/orders/:id/invoice
+ * @access  Private (Admin)
+ */
+export const downloadInvoice = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const order = await Order.findByPk(id, {
+            include: [
+                { model: User, as: 'user' },
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        { model: Product, as: 'product' },
+                        { model: ProductVariant, as: 'variant' }
+                    ]
+                }
+            ]
+        });
+
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const pdfBuffer = await generateOrderInvoice(order);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=Invoice-${order.orderId}.pdf`);
+        return res.send(pdfBuffer);
+    } catch (error) {
+        logger.error(`[Admin Invoice Generation Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

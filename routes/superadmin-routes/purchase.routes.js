@@ -8,6 +8,7 @@ router.use(protect, admin);
 
 router.get('/', purchaseController.getPurchaseBills);
 router.get('/:id', purchaseController.getPurchaseBillById);
+router.get('/bills/:id/download', purchaseController.downloadPurchaseBill);
 router.post('/convert', purchaseController.convertToBill);
 
 export default router;

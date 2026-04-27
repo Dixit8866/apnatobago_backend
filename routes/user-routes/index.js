@@ -28,6 +28,8 @@ import { protectUser } from '../../middlewares/userAuth.middleware.js';
 import cartRoutes from './cart.routes.js';
 import wishlistRoutes from './wishlist.routes.js';
 import orderRoutes from './order.routes.js';
+import businessProfileRoutes from './businessProfile.routes.js';
+import helpSupportRoutes from './helpSupport.routes.js';
 
 const router = express.Router();
 
@@ -65,5 +67,9 @@ router.use('/wishlist', wishlistRoutes);
 
 // Orders
 router.use('/orders', orderRoutes);
+
+// Business Profile
+router.use('/business-profile', businessProfileRoutes);
+router.use('/help-support', helpSupportRoutes);
 
 export default router;

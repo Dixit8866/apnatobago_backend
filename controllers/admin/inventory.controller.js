@@ -94,6 +94,8 @@ export const getInventoryOptions = async (req, res, next) => {
                                 required: false,
                                 order: [['minQty', 'ASC']],
                             },
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
                         ],
                     },
                 ],
@@ -380,7 +382,19 @@ export const getInventoryTransactions = async (req, res, next) => {
             order: [['createdAt', 'DESC']],
         });
 
-        const responseData = formatPaginatedResponse(result, page, limit);
+        const rows = result.rows || [];
+        const unitIds = [...new Set(rows.flatMap(r => [r.primaryUnitId, r.secondaryUnitId]).filter(Boolean))];
+        const volumeRows = unitIds.length ? await Volume.findAll({ where: { id: { [Op.in]: unitIds } }, attributes: ['id', 'name'] }) : [];
+        const unitMap = new Map(volumeRows.map(v => [v.id, v.name?.en || Object.values(v.name || {})[0] || 'Unit']));
+
+        const enriched = rows.map(r => {
+            const data = r.toJSON();
+            data.primaryUnitName = unitMap.get(r.primaryUnitId) || 'Unit';
+            data.secondaryUnitName = r.secondaryUnitId ? unitMap.get(r.secondaryUnitId) : null;
+            return data;
+        });
+
+        const responseData = formatPaginatedResponse({ ...result, rows: enriched }, page, limit);
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Inventory transactions fetched successfully.', responseData);
     } catch (error) {
         next(error);
@@ -423,30 +437,42 @@ export const createPurchaseTransaction = async (req, res, next) => {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid product/variant selection.');
         }
+
+        // Correct: Use Base Unit (Outer Unit, e.g., Dando) as Primary
+        // and Inner Unit (Selling Unit, e.g., Box) as Secondary
+        const finalPrimaryUnitId = valid.variant.baseUnitLabel || primaryUnitId;
+        const finalSecondaryUnitId = valid.variant.innerUnitLabel || secondaryUnitId || valid.variant.volumeId;
+        const finalFactor = Number(valid.variant.baseUnitsPerPack || secondaryPerPrimary || 1);
+
         const validGodown = await validateGodown(godownId, t);
         if (!validGodown) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid godown selection.');
         }
-        const validUnits = await validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction: t });
+        const validUnits = await validateVolumeIds({ 
+            primaryUnitId: finalPrimaryUnitId, 
+            secondaryUnitId: finalSecondaryUnitId, 
+            transaction: t 
+        });
         if (!validUnits) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
 
+        const finalTotalBaseUnits = qtyToBaseUnits(qtyPrimary, qtySecondary, finalFactor);
+
         // Create NEW stock record for each purchase (batch tracking)
-        // Each purchase creates a separate entry with its own purchase price
         const stock = await InventoryStock.create(
             {
                 productId,
                 variantId,
                 godownId,
-                primaryUnitId,
-                secondaryUnitId,
-                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
-                totalBaseUnits: qtyTotalBaseUnits,
-                avgPurchasePricePerBaseUnit: unitPrice, // This batch's purchase price
-                lastPurchasePricePerBaseUnit: unitPrice, // For this specific batch
+                primaryUnitId: finalPrimaryUnitId,
+                secondaryUnitId: finalSecondaryUnitId,
+                secondaryPerPrimary: finalFactor,
+                totalBaseUnits: finalTotalBaseUnits,
+                avgPurchasePricePerBaseUnit: unitPrice, 
+                lastPurchasePricePerBaseUnit: unitPrice,
                 status: 'Active',
             },
             { transaction: t }
@@ -459,15 +485,15 @@ export const createPurchaseTransaction = async (req, res, next) => {
                 variantId,
                 godownId,
                 type: 'PURCHASE',
-                primaryUnitId,
-                secondaryUnitId,
-                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
+                primaryUnitId: finalPrimaryUnitId,
+                secondaryUnitId: finalSecondaryUnitId,
+                secondaryPerPrimary: finalFactor,
                 qtyPrimary: Number(qtyPrimary || 0),
                 qtySecondary: Number(qtySecondary || 0),
-                totalQtyBaseUnits: qtyTotalBaseUnits,
+                totalQtyBaseUnits: finalTotalBaseUnits,
                 purchasePricePerBaseUnit: unitPrice,
-                avgPriceAfterTxn: unitPrice, // This batch's price
-                balanceAfterBaseUnits: qtyTotalBaseUnits,
+                avgPriceAfterTxn: unitPrice,
+                balanceAfterBaseUnits: finalTotalBaseUnits,
                 note: note || null,
             },
             { transaction: t }
@@ -548,9 +574,9 @@ export const createSaleTransaction = async (req, res, next) => {
                 variantId,
                 godownId,
                 type: 'SALE',
-                primaryUnitId,
-                secondaryUnitId,
-                secondaryPerPrimary: Number(secondaryPerPrimary || stock.secondaryPerPrimary || 1),
+                primaryUnitId: stock.primaryUnitId || primaryUnitId,
+                secondaryUnitId: stock.secondaryUnitId || secondaryUnitId,
+                secondaryPerPrimary: Number(stock.secondaryPerPrimary || secondaryPerPrimary || 1),
                 qtyPrimary: Number(qtyPrimary || 0),
                 qtySecondary: Number(qtySecondary || 0),
                 totalQtyBaseUnits: qtyTotalBaseUnits,
@@ -632,14 +658,19 @@ export const updateInventoryStock = async (req, res, next) => {
         const deltaBaseUnits = qtyTotalBaseUnits - previousBaseUnits;
         const deltaAbsSplit = splitBaseUnits(Math.abs(deltaBaseUnits), secondaryPerPrimary);
 
+        // Ensure we use the correct units from variant if not explicitly changed
+        const finalPrimaryUnitId = primaryUnitId;
+        const finalSecondaryUnitId = secondaryUnitId;
+        const finalFactor = Number(secondaryPerPrimary || 1);
+
         await stock.update(
             {
                 productId,
                 variantId,
                 godownId,
-                primaryUnitId,
-                secondaryUnitId: secondaryUnitId || null,
-                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
+                primaryUnitId: finalPrimaryUnitId,
+                secondaryUnitId: finalSecondaryUnitId || null,
+                secondaryPerPrimary: finalFactor,
                 totalBaseUnits: qtyTotalBaseUnits,
                 avgPurchasePricePerBaseUnit: round2(avgPrice),
             },
@@ -653,9 +684,9 @@ export const updateInventoryStock = async (req, res, next) => {
                 variantId,
                 godownId,
                 type: 'ADJUSTMENT',
-                primaryUnitId,
-                secondaryUnitId: secondaryUnitId || null,
-                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
+                primaryUnitId: finalPrimaryUnitId,
+                secondaryUnitId: finalSecondaryUnitId || null,
+                secondaryPerPrimary: finalFactor,
                 qtyPrimary: deltaAbsSplit.qtyPrimary,
                 qtySecondary: deltaAbsSplit.qtySecondary,
                 totalQtyBaseUnits: deltaBaseUnits,

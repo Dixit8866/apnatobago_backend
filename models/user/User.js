@@ -67,6 +67,14 @@ const User = sequelize.define('User', {
     kycverification: {
         type: DataTypes.STRING,
         defaultValue: 'pending', // pending | verified
+    },
+    orderReminder: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    reminderTime: {
+        type: DataTypes.STRING, // Store as "HH:mm" like "08:00"
+        allowNull: true,
     }
 }, {
     timestamps: true,

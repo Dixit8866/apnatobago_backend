@@ -36,6 +36,13 @@ const OrderItem = sequelize.define(
             allowNull: true,
             comment: 'Snapshot of variant details like volume, label etc.',
         },
+        sellUnit: {
+            type: DataTypes.STRING,
+            defaultValue: 'Base',
+            validate: {
+                isIn: [['Base', 'Inner']]
+            }
+        },
     },
     {
         timestamps: true,

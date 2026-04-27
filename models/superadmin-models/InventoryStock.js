@@ -50,6 +50,14 @@ const InventoryStock = sequelize.define(
             allowNull: false,
             defaultValue: 0,
         },
+        expiryDate: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        batchNumber: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
         status: {
             type: DataTypes.STRING,
             defaultValue: 'Active',
@@ -64,6 +72,8 @@ const InventoryStock = sequelize.define(
             { fields: ['godownId', 'productId', 'variantId'], unique: false },
             { fields: ['productId'], unique: false },
             { fields: ['variantId'], unique: false },
+            { fields: ['expiryDate'], unique: false },
+            { fields: ['batchNumber'], unique: false },
         ],
     }
 );

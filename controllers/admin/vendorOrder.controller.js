@@ -155,10 +155,24 @@ export const getAllVendorOrders = async (req, res) => {
             distinct: true,
         });
 
+        // ─── Status Counts ───────────────────────────────────────────────────
+        const startToday = new Date();
+        startToday.setHours(0, 0, 0, 0);
+        const endToday = new Date();
+        endToday.setHours(23, 59, 59, 999);
+
+        const statusCounts = {
+            Today: await VendorOrder.count({ where: { createdAt: { [Op.between]: [startToday, endToday] } } }),
+            Pending: await VendorOrder.count({ where: { status: 'Pending' } }),
+            Received: await VendorOrder.count({ where: { status: 'Received' } }),
+            Cancelled: await VendorOrder.count({ where: { status: 'Cancelled' } }),
+        };
+
         res.status(200).json({
             status: 'success',
             data: {
                 data: orders,
+                statusCounts,
                 pagination: {
                     totalRecords: count,
                     totalPages: Math.ceil(count / limit),

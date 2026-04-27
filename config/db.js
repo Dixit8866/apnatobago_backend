@@ -18,7 +18,7 @@ const sequelize = new Sequelize(
         host: process.env.DB_HOST,
         dialect: 'postgres',
         port: parseInt(process.env.DB_PORT) || 5432,
-        logging: false, // Set to console.log to debug SQL
+        logging: console.log, // Set to console.log to debug SQL
 
         // SSL configuration for remote/managed PostgreSQL (e.g. Hostinger managed DB)
         dialectOptions: useSSL

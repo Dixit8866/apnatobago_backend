@@ -19,6 +19,13 @@ import settingsRoutes from './settings.routes.js';
 import userRoutes from './user.routes.js';
 import bannerRoutes from './banner.routes.js';
 import orderRoutes from './order.routes.js';
+import deliveryBoyRoutes from './delivery-boy.routes.js';
+import orderAssignmentRoutes from './order-assignment.routes.js';
+import notificationRoutes from './notification.routes.js';
+import adminNotificationRoutes from './admin-notification.routes.js';
+import dashboardRoutes from './dashboard.routes.js';
+import helpSupportRoutes from './helpSupport.routes.js';
+import customSaleRoutes from './custom-sale.routes.js';
 
 const router = express.Router();
 
@@ -42,5 +49,12 @@ router.use('/settings', settingsRoutes);
 router.use('/users', userRoutes);
 router.use('/banners', bannerRoutes);
 router.use('/orders', orderRoutes);
+router.use('/delivery-boys', deliveryBoyRoutes);
+router.use('/order-assignments', orderAssignmentRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/admin-notifications', adminNotificationRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/help-support', helpSupportRoutes);
+router.use('/custom-sales', customSaleRoutes);
 
 export default router;

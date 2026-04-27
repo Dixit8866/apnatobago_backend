@@ -4,6 +4,7 @@ import {
     getOrders, 
     getOrderDetails, 
     cancelOrder,
+    getOrdersWithPaymentStatus,
     initializeRazorpayOrder,
     verifyRazorpayPayment
 } from '../../controllers/user/order.controller.js';
@@ -16,6 +17,7 @@ router.use(protectUser);
 
 router.post('/', createOrder);
 router.get('/', getOrders);
+router.get('/payment-status', getOrdersWithPaymentStatus);
 router.get('/:id', getOrderDetails);
 router.put('/:id/cancel', cancelOrder);
 

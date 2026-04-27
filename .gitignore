@@ -156,3 +156,9 @@ services/*/coverage/
 
 # Keep service .env.example files
 !services/*/.env.example
+
+# ============================================
+# CONFIG & SECRETS
+# ============================================
+config/*.json
+firebase-key.json
