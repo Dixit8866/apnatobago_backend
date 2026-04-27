@@ -1,5 +1,5 @@
 import admin from 'firebase-admin';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import logger from '../logger/apiLogger.js';
@@ -10,13 +10,19 @@ const __dirname = dirname(__filename);
 // Initialize Firebase Admin
 try {
     let serviceAccount;
+    const serviceAccountPath = join(__dirname, '../config/apna-tobacco-firebase-adminsdk-fbsvc-ec6226f705.json');
 
-    // 1. Try loading from Environment Variable (Recommended for Production)
+    // 1. Try loading from Full JSON Environment Variable (Recommended for Production/VPS)
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
         serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     } 
-    // 2. Try loading from individual env variables
-    else if (process.env.FIREBASE_PROJECT_ID) {
+    // 2. Try loading from local JSON file (Easiest for Local Dev)
+    else if (existsSync(serviceAccountPath)) {
+        serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+        logger.info('Firebase Admin: Loaded from local JSON file');
+    }
+    // 3. Try loading from individual env variables
+    else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && !process.env.FIREBASE_PRIVATE_KEY.includes('...')) {
         // Clean up the private key (remove literal \n strings, extra quotes, and trim)
         const privateKey = process.env.FIREBASE_PRIVATE_KEY
             ?.replace(/\\n/g, '\n')      // Replace literal \n with real newline
@@ -29,11 +35,6 @@ try {
             private_key: privateKey,
             client_email: process.env.FIREBASE_CLIENT_EMAIL,
         };
-    }
-    // 3. Fallback to local JSON file (Legacy/Local Dev)
-    else {
-        const serviceAccountPath = join(__dirname, '../config/apna-tobacco-firebase-adminsdk-fbsvc-ec6226f705.json');
-        serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
     }
 
     if (serviceAccount) {
