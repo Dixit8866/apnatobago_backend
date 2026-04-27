@@ -17,9 +17,16 @@ try {
     } 
     // 2. Try loading from individual env variables
     else if (process.env.FIREBASE_PROJECT_ID) {
+        // Clean up the private key (remove literal \n strings, extra quotes, and trim)
+        const privateKey = process.env.FIREBASE_PRIVATE_KEY
+            ?.replace(/\\n/g, '\n')      // Replace literal \n with real newline
+            .replace(/"/g, '')           // Remove any extra double quotes
+            .replace(/'/g, '')           // Remove any extra single quotes
+            .trim();
+
         serviceAccount = {
             project_id: process.env.FIREBASE_PROJECT_ID,
-            private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+            private_key: privateKey,
             client_email: process.env.FIREBASE_CLIENT_EMAIL,
         };
     }
