@@ -209,9 +209,9 @@ export const createProduct = async (req, res, next) => {
             const innerUnitLabel = v.innerUnitLabel || null;
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
-            if (!volumeValue || !volumeId) {
+            if (!volumeValue) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue is required for each variant.');
             }
             if (!Number.isFinite(purchasePrice) || purchasePrice < 0) {
                 await t.rollback();
@@ -229,7 +229,7 @@ export const createProduct = async (req, res, next) => {
             const variant = await ProductVariant.create(
                 {
                     productId: product.id,
-                    volumeId,
+                    volumeId: volumeId || null,
                     volume: normalizedVolume,
                     purchasePrice,
                     image,
@@ -476,9 +476,9 @@ export const updateProduct = async (req, res, next) => {
             const innerUnitLabel = v.innerUnitLabel || null;
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
-            if (!volumeValue || !volumeId) {
+            if (!volumeValue) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue and volumeId are required for each variant.');
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue is required for each variant.');
             }
             if (!Number.isFinite(purchasePrice) || purchasePrice < 0) {
                 await t.rollback();
@@ -496,7 +496,7 @@ export const updateProduct = async (req, res, next) => {
             const variant = await ProductVariant.create(
                 {
                     productId: product.id,
-                    volumeId,
+                    volumeId: volumeId || null,
                     volume: normalizedVolume,
                     purchasePrice,
                     image,

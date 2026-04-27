@@ -47,7 +47,7 @@ export const createOrder = async (req, res) => {
         const orderItemsData = [];
 
         for (const item of items) {
-            const { productId, variantId, quantity } = item;
+            const { productId, variantId, quantity, sellUnit } = item;
 
             // 1. Fetch Product and Variant
             const variant = await ProductVariant.findByPk(variantId, {
@@ -93,7 +93,9 @@ export const createOrder = async (req, res) => {
                 rawPrice = parseFloat(variant.purchasePrice) || 0;
             }
 
-            const itemPrice = rawPrice / bUPP;
+            // Logic: Price per pack vs Price per piece
+            // If selling in pieces (Inner), we use price/bUPP. If in cartons (Base), we use rawPrice.
+            const itemPrice = sellUnit === 'Inner' ? (rawPrice / bUPP) : rawPrice;
             const itemSubtotal = itemPrice * parseFloat(quantity);
             calculatedSubtotal += itemSubtotal;
 
@@ -102,6 +104,7 @@ export const createOrder = async (req, res) => {
                 variantId,
                 quantity,
                 price: itemPrice,
+                sellUnit, // Important: Store the unit purchased
                 variantInfo: {
                     productName: variant.product.name,
                     volume: variant.volume,
@@ -215,7 +218,11 @@ export const createOrder = async (req, res) => {
                 if (!variant) continue;
 
                 // How many base units to deduct?
-                const deductionRequired = item.quantity * (variant.baseUnitsPerPack || 1);
+                // If selling pieces (Inner), deduct quantity directly. 
+                // If selling cartons (Base), deduct quantity * unitsPerPack.
+                const deductionRequired = item.sellUnit === 'Inner' 
+                    ? item.quantity 
+                    : item.quantity * (variant.baseUnitsPerPack || 1);
                 
                 // Find available stock batches for this variant in the target godown (FIFO)
                 const stocks = await InventoryStock.findAll({
