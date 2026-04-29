@@ -151,7 +151,11 @@ export const getProducts = async (req, res) => {
 
         const products = await Product.findAll({
             where: whereClause,
-            order: [['position', 'ASC']],
+            order: [
+                ['position', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
+            ],
             attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
@@ -330,6 +334,11 @@ export const searchCatalogue = async (req, res) => {
         const products = await Product.findAll({
             where: productWhere,
             limit: 20,
+            order: [
+                ['position', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
+            ],
             attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },

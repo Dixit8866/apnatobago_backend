@@ -44,7 +44,11 @@ export const getWishlist = async (req, res) => {
                     ]
                 }
             ],
-            order: [['createdAt', 'DESC']]
+            order: [
+                ['createdAt', 'DESC'],
+                [{ model: Product, as: 'product' }, { model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
+                [{ model: Product, as: 'product' }, { model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
+            ]
         });
 
         const formattedWishlist = wishlistItems.map(item => {
