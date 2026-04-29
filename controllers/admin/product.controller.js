@@ -219,14 +219,11 @@ export const createProduct = async (req, res, next) => {
             }
 
             const volumeUnit = volumeMap.get(volumeId) || '';
-            // Build the normalized volume string stored in DB.
-            // If user already typed the unit in volumeValue (e.g. "300 ml"), don't append again.
-            let normalizedVolume;
-            if (!volumeUnit || volumeValue.toLowerCase().includes(volumeUnit.toLowerCase())) {
-                normalizedVolume = volumeValue.trim();
-            } else {
-                normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
-            }
+            // Store the user's raw input as-is in the volume column.
+            // The volumeId column already references the unit — no need to append it.
+            // Appending the unit caused edit-load issues ("1 packet cartton" parsed back as "1").
+            const normalizedVolume = volumeValue.trim() || (volumeUnit ? `${volumeUnit}` : '');
+
 
             const variant = await ProductVariant.create(
                 {
@@ -488,14 +485,11 @@ export const updateProduct = async (req, res, next) => {
             }
 
             const volumeUnit = volumeMap.get(volumeId) || '';
-            // Build the normalized volume string stored in DB.
-            // If user already typed the unit in volumeValue (e.g. "300 ml"), don't append again.
-            let normalizedVolume;
-            if (!volumeUnit || volumeValue.toLowerCase().includes(volumeUnit.toLowerCase())) {
-                normalizedVolume = volumeValue.trim();
-            } else {
-                normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
-            }
+            // Store the user's raw input as-is in the volume column.
+            // The volumeId column already references the unit — no need to append it.
+            // Appending the unit caused edit-load issues ("1 packet cartton" parsed back as "1").
+            const normalizedVolume = volumeValue.trim() || (volumeUnit ? `${volumeUnit}` : '');
+
 
             const variant = await ProductVariant.create(
                 {
