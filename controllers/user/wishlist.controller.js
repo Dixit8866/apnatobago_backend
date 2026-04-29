@@ -36,7 +36,8 @@ export const getWishlist = async (req, res) => {
                                     where: pricingWhere,
                                     required: false,
                                     attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt', 'customLevelId'] },
-                                    include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }]
+                                    include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }],
+                                    order: [['minQty', 'ASC']]
                                 }
                             ]
                         }
