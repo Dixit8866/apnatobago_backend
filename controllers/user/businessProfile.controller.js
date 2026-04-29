@@ -32,15 +32,37 @@ export const getBusinessProfile = async (req, res) => {
 export const upsertBusinessProfile = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { 
-            bannerImage, 
-            profileImage, 
-            shopName, 
-            gstNumber, 
-            shopAddress, 
-            city, 
-            postcode 
-        } = req.body;
+        
+        // Handle multipart data: if fields are JSON strings, parse them
+        let body = { ...req.body };
+        
+        // Helper to parse JSON strings safely
+        const safeParse = (val) => {
+            if (typeof val === 'string' && (val.startsWith('{') || val.startsWith('['))) {
+                try { return JSON.parse(val); } catch (e) { return val; }
+            }
+            return val;
+        };
+
+        const shopName = body.shopName;
+        const gstNumber = body.gstNumber;
+        const shopAddress = safeParse(body.shopAddress);
+        const city = body.city;
+        const postcode = body.postcode;
+
+        // Image Handling: Support both URL strings in body OR file uploads in req.files
+        let bannerImage = body.bannerImage;
+        let profileImage = body.profileImage;
+
+        if (req.files) {
+            if (req.files.bannerImage) {
+                // If it's an array of files (from multer/s3 middleware)
+                bannerImage = req.files.bannerImage[0].location || req.files.bannerImage[0].path;
+            }
+            if (req.files.profileImage) {
+                profileImage = req.files.profileImage[0].location || req.files.profileImage[0].path;
+            }
+        }
 
         if (!shopName || !shopAddress || !city || !postcode) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Required fields: shopName, shopAddress, city, postcode.");
@@ -48,29 +70,25 @@ export const upsertBusinessProfile = async (req, res) => {
 
         let profile = await BusinessProfile.findOne({ where: { userId } });
 
+        const profileData = {
+            bannerImage,
+            profileImage,
+            shopName,
+            gstNumber,
+            shopAddress,
+            city,
+            postcode
+        };
+
         if (profile) {
             // Update existing profile
-            await profile.update({
-                bannerImage,
-                profileImage,
-                shopName,
-                gstNumber,
-                shopAddress,
-                city,
-                postcode
-            });
+            await profile.update(profileData);
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile updated successfully.", profile);
         } else {
             // Create new profile
             profile = await BusinessProfile.create({
                 userId,
-                bannerImage,
-                profileImage,
-                shopName,
-                gstNumber,
-                shopAddress,
-                city,
-                postcode
+                ...profileData
             });
             return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Business profile created successfully.", profile);
         }
