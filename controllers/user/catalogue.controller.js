@@ -134,10 +134,7 @@ export const getProducts = async (req, res) => {
     try {
         const { mainCategoryId, subCategoryId, companyCategoryId } = req.query;
         const user = req.user;
-
-        console.log('[DEBUG] getProducts called');
-        console.log('[DEBUG] Query params:', { mainCategoryId, subCategoryId, companyCategoryId });
-        console.log('[DEBUG] User:', { id: user?.id, showtabacco: user?.showtabacco });
+        const userLevel = user?.applevel || null;
 
         const whereClause = { status: 'Active' };
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
@@ -148,9 +145,9 @@ export const getProducts = async (req, res) => {
         if (user && !user.showtabacco) {
             whereClause.isTobaccoProduct = false;
         }
-        // If user has showtabacco = true, show all products (no isTobaccoProduct filter)
 
-        console.log('[DEBUG] whereClause:', whereClause);
+        // Only fetch pricings for the user's assigned level
+        const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
 
         const products = await Product.findAll({
             where: whereClause,
@@ -171,7 +168,9 @@ export const getProducts = async (req, res) => {
                         {
                             model: ProductPricing,
                             as: 'pricings',
-                            attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                            where: pricingWhere,
+                            required: false,
+                            attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt', 'customLevelId'] },
                             include: [
                                 { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] },
                             ]
@@ -180,9 +179,6 @@ export const getProducts = async (req, res) => {
                 }
             ]
         });
-
-        console.log('[DEBUG] Products found:', products.length);
-        console.log('[DEBUG] First product (if any):', products[0] ? { id: products[0].id, name: products[0].name, status: products[0].status, mainCategoryId: products[0].mainCategoryId } : 'No products');
 
         // Fetch user's wishlist to mark items as wishlisted
         const wishlist = await Wishlist.findAll({
@@ -272,6 +268,7 @@ export const searchCatalogue = async (req, res) => {
     try {
         const { query } = req.query;
         const user = req.user;
+        const userLevel = user?.applevel || null;
 
         if (!query || query.trim() === '') {
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Search query is empty", {
@@ -327,6 +324,9 @@ export const searchCatalogue = async (req, res) => {
             productWhere.isTobaccoProduct = false;
         }
 
+        // Only fetch pricings for the user's assigned level
+        const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
+
         const products = await Product.findAll({
             where: productWhere,
             limit: 20,
@@ -346,7 +346,9 @@ export const searchCatalogue = async (req, res) => {
                         {
                             model: ProductPricing,
                             as: 'pricings',
-                            attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                            where: pricingWhere,
+                            required: false,
+                            attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt', 'customLevelId'] },
                             include: [
                                 { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] },
                             ]

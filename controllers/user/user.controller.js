@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import User from '../../models/user/User.js';
 import OTP from '../../models/user/Otp.js';
+import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import APP_MESSAGES from '../../constants/messages.js';
@@ -173,6 +174,13 @@ export const registerUser = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "User with this number already exists");
         }
 
+        // Auto-assign Basic level to new users
+        let defaultAppLevel = null;
+        try {
+            const basicLevel = await CustomLevel.findOne({ where: { name: { [Op.iLike]: 'Basic' }, status: 'Active' } });
+            if (basicLevel) defaultAppLevel = basicLevel.id;
+        } catch (_) { /* silent — don't block registration if level fetch fails */ }
+
         const user = await User.create({
             fullname,
             email,
@@ -182,6 +190,7 @@ export const registerUser = async (req, res) => {
             postcode,
             password,
             fcmtoken,
+            applevel: defaultAppLevel,
             showtabacco: false,
             creditline: 0,
             status: 'Inactive',
