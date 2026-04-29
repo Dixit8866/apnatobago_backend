@@ -10,7 +10,8 @@ import logger from '../../logger/apiLogger.js';
  */
 export const getWishlist = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userLevel = req.user.applevel || null;
+        const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
 
         const wishlistItems = await Wishlist.findAll({
             where: { userId },
@@ -31,7 +32,9 @@ export const getWishlist = async (req, res) => {
                                 { 
                                     model: ProductPricing, 
                                     as: 'pricings',
-                                    attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                                    where: pricingWhere,
+                                    required: false,
+                                    attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt', 'customLevelId'] },
                                     include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }]
                                 }
                             ]
