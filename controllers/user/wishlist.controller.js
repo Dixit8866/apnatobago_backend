@@ -9,6 +9,7 @@ import logger from '../../logger/apiLogger.js';
  * @access  Private (User)
  */
 export const getWishlist = async (req, res) => {
+    try {
         const userId = req.user.id;
         const userLevel = req.user.applevel || null;
         const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
