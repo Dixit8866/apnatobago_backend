@@ -155,6 +155,7 @@ export const getProducts = async (req, res) => {
         const products = await Product.findAll({
             where: whereClause,
             order: [['position', 'ASC']],
+            attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
                 { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
@@ -162,6 +163,7 @@ export const getProducts = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variants',
+                    attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
                     include: [
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                         { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -169,6 +171,7 @@ export const getProducts = async (req, res) => {
                         {
                             model: ProductPricing,
                             as: 'pricings',
+                            attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt'] },
                             include: [
                                 { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] },
                             ]
@@ -327,6 +330,7 @@ export const searchCatalogue = async (req, res) => {
         const products = await Product.findAll({
             where: productWhere,
             limit: 20,
+            attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
                 { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
@@ -334,6 +338,7 @@ export const searchCatalogue = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variants',
+                    attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
                     include: [
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                         { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -341,6 +346,7 @@ export const searchCatalogue = async (req, res) => {
                         {
                             model: ProductPricing,
                             as: 'pricings',
+                            attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt'] },
                             include: [
                                 { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] },
                             ]

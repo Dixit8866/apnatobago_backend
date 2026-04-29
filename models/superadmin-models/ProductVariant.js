@@ -51,7 +51,10 @@ const ProductVariant = sequelize.define(
             defaultValue: 1,
         },
         sellingVolume: {
-            type: DataTypes.DECIMAL(10, 2),
+            // Represents selling qty in terms of Packing Unit (Outer).
+            // e.g. 0.5 = half pack, 1 = full pack, 0.2 = 1/5th pack
+            // Actual inner units = sellingVolume × baseUnitsPerPack
+            type: DataTypes.DECIMAL(10, 3),
             allowNull: true,
         },
         status: {

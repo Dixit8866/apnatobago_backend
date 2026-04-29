@@ -219,11 +219,13 @@ export const createProduct = async (req, res, next) => {
             }
 
             const volumeUnit = volumeMap.get(volumeId) || '';
-            let normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
-            
-            // If the user already typed the unit in the value (e.g. "300ml"), don't double it
-            if (volumeUnit && volumeValue.toLowerCase().endsWith(volumeUnit.toLowerCase())) {
+            // Build the normalized volume string stored in DB.
+            // If user already typed the unit in volumeValue (e.g. "300 ml"), don't append again.
+            let normalizedVolume;
+            if (!volumeUnit || volumeValue.toLowerCase().includes(volumeUnit.toLowerCase())) {
                 normalizedVolume = volumeValue.trim();
+            } else {
+                normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
             }
 
             const variant = await ProductVariant.create(
@@ -486,11 +488,13 @@ export const updateProduct = async (req, res, next) => {
             }
 
             const volumeUnit = volumeMap.get(volumeId) || '';
-            let normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
-            
-            // If the user already typed the unit in the value (e.g. "300ml"), don't double it
-            if (volumeUnit && volumeValue.toLowerCase().endsWith(volumeUnit.toLowerCase())) {
+            // Build the normalized volume string stored in DB.
+            // If user already typed the unit in volumeValue (e.g. "300 ml"), don't append again.
+            let normalizedVolume;
+            if (!volumeUnit || volumeValue.toLowerCase().includes(volumeUnit.toLowerCase())) {
                 normalizedVolume = volumeValue.trim();
+            } else {
+                normalizedVolume = `${volumeValue} ${volumeUnit}`.trim();
             }
 
             const variant = await ProductVariant.create(

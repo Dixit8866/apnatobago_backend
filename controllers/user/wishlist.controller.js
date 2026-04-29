@@ -18,10 +18,12 @@ export const getWishlist = async (req, res) => {
                 {
                     model: Product,
                     as: 'product',
+                    attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
                     include: [
                         {
                             model: ProductVariant,
                             as: 'variants',
+                            attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
                             include: [
                                 { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -29,7 +31,8 @@ export const getWishlist = async (req, res) => {
                                 { 
                                     model: ProductPricing, 
                                     as: 'pricings',
-                                    include: [{ model: CustomLevel, as: 'customLevel' }]
+                                    attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                                    include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }]
                                 }
                             ]
                         }
