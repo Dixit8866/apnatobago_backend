@@ -1,4 +1,5 @@
 import { BusinessProfile } from '../../models/index.js';
+import { uploadToS3 } from '../../utils/aws.s3.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -56,11 +57,23 @@ export const upsertBusinessProfile = async (req, res) => {
 
         if (req.files) {
             if (req.files.bannerImage) {
-                // If it's an array of files (from multer/s3 middleware)
-                bannerImage = req.files.bannerImage[0].location || req.files.bannerImage[0].path;
+                const file = req.files.bannerImage[0];
+                const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
+                if (uploadResult.success) {
+                    bannerImage = uploadResult.url;
+                    
+                } else {
+                    logger.error(`[Banner Image Upload Error]: ${uploadResult.error}`);
+                }
             }
             if (req.files.profileImage) {
-                profileImage = req.files.profileImage[0].location || req.files.profileImage[0].path;
+                const file = req.files.profileImage[0];
+                const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
+                if (uploadResult.success) {
+                    profileImage = uploadResult.url;
+                } else {
+                    logger.error(`[Profile Image Upload Error]: ${uploadResult.error}`);
+                }
             }
         }
 
