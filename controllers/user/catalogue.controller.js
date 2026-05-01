@@ -288,7 +288,7 @@ export const searchCatalogue = async (req, res) => {
             where: {
                 status: 'Active',
                 [Op.or]: [
-                    sequelize.where(sequelize.cast(sequelize.col('MainCategory.title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                    sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
             },
             limit: 10
@@ -299,7 +299,7 @@ export const searchCatalogue = async (req, res) => {
             where: {
                 status: 'Active',
                 [Op.or]: [
-                    sequelize.where(sequelize.cast(sequelize.col('SubCategory.title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                    sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
             },
             limit: 10
@@ -310,7 +310,7 @@ export const searchCatalogue = async (req, res) => {
             where: {
                 status: 'Active',
                 [Op.or]: [
-                    sequelize.where(sequelize.cast(sequelize.col('CompanyCategory.title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                    sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
             },
             limit: 10
@@ -320,7 +320,7 @@ export const searchCatalogue = async (req, res) => {
         const productWhere = {
             status: 'Active',
             [Op.or]: [
-                sequelize.where(sequelize.cast(sequelize.col('Product.name'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${searchLower}%` })
             ]
         };
 
