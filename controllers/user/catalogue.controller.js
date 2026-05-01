@@ -291,7 +291,8 @@ export const searchCatalogue = async (req, res) => {
                     sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
             },
-            limit: 10
+            limit: 10,
+            order: [[sequelize.col('position'), 'ASC']]
         });
 
         // 2. Search Sub Categories
@@ -302,7 +303,8 @@ export const searchCatalogue = async (req, res) => {
                     sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
             },
-            limit: 10
+            limit: 10,
+            order: [[sequelize.col('position'), 'ASC']]
         });
 
         // 3. Search Company Categories
@@ -313,7 +315,8 @@ export const searchCatalogue = async (req, res) => {
                     sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
             },
-            limit: 10
+            limit: 10,
+            order: [[sequelize.col('position'), 'ASC']]
         });
 
         // 4. Search Products
@@ -335,7 +338,7 @@ export const searchCatalogue = async (req, res) => {
             where: productWhere,
             limit: 20,
             order: [
-                ['position', 'ASC'],
+                [sequelize.col('position'), 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
             ],
