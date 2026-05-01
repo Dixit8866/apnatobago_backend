@@ -81,14 +81,16 @@ export const upsertBusinessProfile = async (req, res) => {
         let profile = await BusinessProfile.findOne({ where: { userId } });
 
         const profileData = {
-            bannerImage,
-            profileImage,
             shopName,
             gstNumber,
             shopAddress,
             city,
             postcode
         };
+
+        // Only update images if provided (either as URL in body or as file)
+        if (bannerImage !== undefined) profileData.bannerImage = bannerImage;
+        if (profileImage !== undefined) profileData.profileImage = profileImage;
 
         if (profile) {
             await profile.update(profileData);
