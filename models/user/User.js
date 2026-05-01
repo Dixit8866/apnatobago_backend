@@ -75,6 +75,15 @@ const User = sequelize.define('User', {
     reminderTime: {
         type: DataTypes.STRING, // Store as "HH:mm" like "08:00"
         allowNull: true,
+    },
+    credit: {
+        type: DataTypes.VIRTUAL,
+        get() {
+            return this.creditline;
+        },
+        set(value) {
+            this.creditline = value;
+        }
     }
 }, {
     timestamps: true,

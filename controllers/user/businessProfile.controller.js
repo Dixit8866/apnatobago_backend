@@ -33,25 +33,23 @@ export const getBusinessProfile = async (req, res) => {
 export const upsertBusinessProfile = async (req, res) => {
     try {
         const userId = req.user.id;
-        
-        // Handle multipart data: if fields are JSON strings, parse them
         let body = { ...req.body };
-        
-        // Helper to parse JSON strings safely
-        const safeParse = (val) => {
-            if (typeof val === 'string' && (val.startsWith('{') || val.startsWith('['))) {
-                try { return JSON.parse(val); } catch (e) { return val; }
+
+        // Helper to ensure data is a string for TEXT fields if it comes as an object
+        const ensureString = (val) => {
+            if (typeof val === 'object' && val !== null) {
+                return JSON.stringify(val);
             }
             return val;
         };
 
         const shopName = body.shopName;
         const gstNumber = body.gstNumber;
-        const shopAddress = safeParse(body.shopAddress);
+        const shopAddress = ensureString(body.shopAddress);
         const city = body.city;
         const postcode = body.postcode;
 
-        // Image Handling: Support both URL strings in body OR file uploads in req.files
+        // Image Handling
         let bannerImage = body.bannerImage;
         let profileImage = body.profileImage;
 
@@ -61,7 +59,6 @@ export const upsertBusinessProfile = async (req, res) => {
                 const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
                 if (uploadResult.success) {
                     bannerImage = uploadResult.url;
-                    
                 } else {
                     logger.error(`[Banner Image Upload Error]: ${uploadResult.error}`);
                 }
@@ -94,11 +91,9 @@ export const upsertBusinessProfile = async (req, res) => {
         };
 
         if (profile) {
-            // Update existing profile
             await profile.update(profileData);
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile updated successfully.", profile);
         } else {
-            // Create new profile
             profile = await BusinessProfile.create({
                 userId,
                 ...profileData
@@ -125,7 +120,30 @@ export const updateBusinessProfile = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Business profile not found.");
         }
 
-        await profile.update(req.body);
+        let updateData = { ...req.body };
+
+        // Handle Image Uploads for PATCH
+        if (req.files) {
+            if (req.files.bannerImage) {
+                const file = req.files.bannerImage[0];
+                const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
+                if (uploadResult.success) updateData.bannerImage = uploadResult.url;
+            }
+            if (req.files.profileImage) {
+                const file = req.files.profileImage[0];
+                const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
+                if (uploadResult.success) updateData.profileImage = uploadResult.url;
+            }
+        }
+
+        // Ensure shopAddress is a string if provided
+        if (updateData.shopAddress) {
+            if (typeof updateData.shopAddress === 'object' && updateData.shopAddress !== null) {
+                updateData.shopAddress = JSON.stringify(updateData.shopAddress);
+            }
+        }
+
+        await profile.update(updateData);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile updated successfully.", profile);
     } catch (error) {

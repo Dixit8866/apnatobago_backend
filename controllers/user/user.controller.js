@@ -223,7 +223,6 @@ export const registerUser = async (req, res) => {
             });
         }
     } catch (error) {
-        console.error(`[Auth Debug] Error in registerUser:`, error.message);
         logger.error(`[User Register Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
