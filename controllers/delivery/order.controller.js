@@ -104,29 +104,56 @@ export const updateMyAssignmentStatus = async (req, res) => {
 };
 
 /**
- * @desc    Bulk update assignment positions for drag-and-drop reordering
+ * @desc    Bulk update assignment positions or single item shifting
  * @route   PUT /api/delivery/orders/reorder
  * @access  Private (Delivery Boy)
  */
 export const reorderAssignments = async (req, res) => {
+    const transaction = await OrderAssignment.sequelize.transaction();
     try {
-        const { assignments } = req.body; // Array of { id, position }
+        const { id, fromIndex, toIndex } = req.body;
         const deliveryBoyId = req.user.id;
 
-        if (!assignments || !Array.isArray(assignments)) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid assignments data.");
+        if (id === undefined || fromIndex === undefined || toIndex === undefined) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "id, fromIndex, and toIndex are required.");
         }
 
-        // Perform updates in parallel
-        await Promise.all(assignments.map(item => {
-            return OrderAssignment.update(
-                { position: item.position },
-                { where: { id: item.id, deliveryBoyId } }
-            );
-        }));
+        if (fromIndex === toIndex) {
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "No changes needed.");
+        }
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders reordered successfully.");
+        if (toIndex < fromIndex) {
+            // Moving UP: Shift items in between DOWN
+            await OrderAssignment.increment('position', {
+                by: 1,
+                where: {
+                    deliveryBoyId,
+                    position: { [Op.gte]: toIndex, [Op.lt]: fromIndex }
+                },
+                transaction
+            });
+        } else {
+            // Moving DOWN: Shift items in between UP
+            await OrderAssignment.increment('position', {
+                by: -1,
+                where: {
+                    deliveryBoyId,
+                    position: { [Op.gt]: fromIndex, [Op.lte]: toIndex }
+                },
+                transaction
+            });
+        }
+
+        // Update the target item's position
+        await OrderAssignment.update(
+            { position: toIndex },
+            { where: { id, deliveryBoyId }, transaction }
+        );
+
+        await transaction.commit();
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order reordered and shifted successfully.");
     } catch (error) {
+        if (transaction) await transaction.rollback();
         logger.error(`[Reorder Assignments Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
