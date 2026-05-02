@@ -156,7 +156,7 @@ export const getProducts = async (req, res) => {
                 [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
             ],
-            attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
+            attributes: { exclude: ['isTobaccoProduct', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
                 { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
@@ -292,7 +292,7 @@ export const searchCatalogue = async (req, res) => {
                 ]
             },
             limit: 10,
-            order: [[sequelize.col('position'), 'ASC']]
+            order: [['position', 'ASC']]
         });
 
         // 2. Search Sub Categories
@@ -304,7 +304,7 @@ export const searchCatalogue = async (req, res) => {
                 ]
             },
             limit: 10,
-            order: [[sequelize.col('position'), 'ASC']]
+            order: [['position', 'ASC']]
         });
 
         // 3. Search Company Categories
@@ -316,7 +316,7 @@ export const searchCatalogue = async (req, res) => {
                 ]
             },
             limit: 10,
-            order: [[sequelize.col('position'), 'ASC']]
+            order: [['position', 'ASC']]
         });
 
         // 4. Search Products
@@ -338,11 +338,11 @@ export const searchCatalogue = async (req, res) => {
             where: productWhere,
             limit: 20,
             order: [
-                [sequelize.col('position'), 'ASC'],
+                ['position', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
             ],
-            attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
+            attributes: { exclude: ['isTobaccoProduct', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
                 { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
