@@ -23,12 +23,12 @@ const ProductPricing = sequelize.define(
             defaultValue: null,
         },
         minQty: {
-            type: DataTypes.INTEGER,
+            type: DataTypes.DECIMAL(10, 2),
             allowNull: true,
             defaultValue: null,
         },
         maxQty: {
-            type: DataTypes.INTEGER,
+            type: DataTypes.DECIMAL(10, 2),
             allowNull: true,
             defaultValue: null,
         },

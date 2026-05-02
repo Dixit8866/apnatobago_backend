@@ -45,8 +45,8 @@ function getLocalizedText(multilingualField) {
 
 function parseQuantityBounds(p) {
     const sanitize = (val) => {
-        const onlyDigits = String(val ?? '').replace(/\D/g, '');
-        const num = Number(onlyDigits);
+        if (val === null || val === undefined || val === '') return null;
+        const num = Number(val);
         return Number.isFinite(num) && num > 0 ? num : null;
     };
 
