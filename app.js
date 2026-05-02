@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import superadminRoutes from './routes/superadmin-routes/index.js';
 import godownpanelRoutes from './routes/godownpanel-routes/index.js';
 import userRoutes from './routes/user-routes/index.js';
+import deliveryRoutes from './routes/delivery-routes/index.js';
 import { sendSuccessResponse, sendErrorResponse } from './utils/response.util.js';
 import HTTP_STATUS from './constants/httpStatusCodes.js';
 import APP_MESSAGES from './constants/messages.js';
@@ -60,6 +61,7 @@ app.use(helmet());
 app.use('/api/admin', superadminRoutes);
 app.use('/api/godown-panel', godownpanelRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/delivery', deliveryRoutes);
 
 // Health Check Route
 app.get('/api/health', (req, res) => {

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import Admin from '../models/superadmin-models/Admin.js';
 import GodownStaff from '../models/superadmin-models/GodownStaff.js';
+import DeliveryBoy from '../models/superadmin-models/DeliveryBoy.js';
 import { sendErrorResponse } from '../utils/response.util.js';
 import HTTP_STATUS from '../constants/httpStatusCodes.js';
 import APP_MESSAGES from '../constants/messages.js';
@@ -96,5 +97,30 @@ export const godownAdmin = (req, res, next) => {
         next();
     } else {
         return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, "Access Denied: Godown Admin only.");
+    }
+};
+
+/**
+ * Middleware to protect routes and verify JWT token specifically for Delivery Boys
+ */
+export const protectDeliveryBoy = async (req, res, next) => {
+    let token = req.cookies?.apna_tobacco_admin || (req.headers.authorization?.startsWith('Bearer') ? req.headers.authorization.split(' ')[1] : null);
+
+    if (!token) return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.UNAUTHORIZED_NO_TOKEN);
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const currentBoy = await DeliveryBoy.findByPk(decoded.id, { attributes: { exclude: ['password'] } });
+
+        if (!currentBoy) return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.UNAUTHORIZED_USER_DELETED);
+
+        if (currentBoy.status !== 'Active') {
+            return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, "Your account is inactive. Please contact admin.");
+        }
+
+        req.user = currentBoy;
+        next();
+    } catch (error) {
+        return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.UNAUTHORIZED_INVALID_TOKEN);
     }
 };
