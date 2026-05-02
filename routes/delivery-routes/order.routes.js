@@ -1,5 +1,5 @@
 import express from 'express';
-import { getMyAssignedOrders } from '../../controllers/delivery/order.controller.js';
+import { getMyAssignedOrders, updateMyAssignmentStatus, reorderAssignments } from '../../controllers/delivery/order.controller.js';
 import { protectDeliveryBoy } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
@@ -8,5 +8,7 @@ const router = express.Router();
 router.use(protectDeliveryBoy);
 
 router.get('/', getMyAssignedOrders);
+router.put('/reorder', reorderAssignments);
+router.put('/:assignmentId/status', updateMyAssignmentStatus);
 
 export default router;

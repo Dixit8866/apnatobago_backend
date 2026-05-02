@@ -26,6 +26,10 @@ const OrderAssignment = sequelize.define('OrderAssignment', {
     notes: {
         type: DataTypes.TEXT,
         allowNull: true,
+    },
+    position: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
     }
 }, {
     timestamps: true,
