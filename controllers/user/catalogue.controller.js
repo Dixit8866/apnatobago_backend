@@ -169,9 +169,24 @@ export const getProducts = async (req, res) => {
             ],
             attributes: { exclude: ['isTobaccoProduct', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
-                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
-                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
-                { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
+                { 
+                    model: MainCategory, 
+                    as: 'mainCategory', 
+                    attributes: ['id', 'title', 'isTobacco'],
+                    where: user && !user.showtabacco ? { isTobacco: false } : {}
+                },
+                { 
+                    model: SubCategory, 
+                    as: 'subCategory', 
+                    attributes: ['id', 'title', 'isTobacco'],
+                    where: user && !user.showtabacco ? { isTobacco: false } : {}
+                },
+                { 
+                    model: CompanyCategory, 
+                    as: 'companyCategory', 
+                    attributes: ['id', 'title', 'isTobacco'],
+                    where: user && !user.showtabacco ? { isTobacco: false } : {}
+                },
                 {
                     model: ProductVariant,
                     as: 'variants',
@@ -358,9 +373,24 @@ export const searchCatalogue = async (req, res) => {
             ],
             attributes: { exclude: ['isTobaccoProduct', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
-                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
-                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
-                { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
+                { 
+                    model: MainCategory, 
+                    as: 'mainCategory', 
+                    attributes: ['id', 'title', 'isTobacco'],
+                    where: user && !user.showtabacco ? { isTobacco: false } : {}
+                },
+                { 
+                    model: SubCategory, 
+                    as: 'subCategory', 
+                    attributes: ['id', 'title', 'isTobacco'],
+                    where: user && !user.showtabacco ? { isTobacco: false } : {}
+                },
+                { 
+                    model: CompanyCategory, 
+                    as: 'companyCategory', 
+                    attributes: ['id', 'title', 'isTobacco'],
+                    where: user && !user.showtabacco ? { isTobacco: false } : {}
+                },
                 {
                     model: ProductVariant,
                     as: 'variants',

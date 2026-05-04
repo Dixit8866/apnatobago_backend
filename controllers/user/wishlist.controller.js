@@ -20,6 +20,7 @@ export const getWishlist = async (req, res) => {
                 {
                     model: Product,
                     as: 'product',
+                    where: req.user && !req.user.showtabacco ? { isTobaccoProduct: false } : {},
                     attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
                     include: [
                         {
