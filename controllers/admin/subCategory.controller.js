@@ -11,7 +11,7 @@ import sequelize from '../../config/db.js';
 // -------------------------------------------------------------
 export const createSubCategory = async (req, res, next) => {
     try {
-        const { mainCategoryId, image, title, description, status } = req.body;
+        const { mainCategoryId, image, title, description, status, isTobacco } = req.body;
 
         if (!mainCategoryId) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "mainCategoryId is required");
         if (!title || Object.keys(title).length === 0) {
@@ -26,6 +26,7 @@ export const createSubCategory = async (req, res, next) => {
             title,
             description,
             status,
+            isTobacco,
             position: maxPos + 1
         });
 
@@ -158,7 +159,7 @@ export const getSubCategoryById = async (req, res, next) => {
 // -------------------------------------------------------------
 export const updateSubCategory = async (req, res, next) => {
     try {
-        const { mainCategoryId, image, title, description, status } = req.body;
+        const { mainCategoryId, image, title, description, status, isTobacco } = req.body;
 
         const category = await SubCategory.findByPk(req.params.id);
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Sub Category not found");
@@ -168,6 +169,7 @@ export const updateSubCategory = async (req, res, next) => {
         if (title) category.title = title;
         if (description !== undefined) category.description = description;
         if (status) category.status = status;
+        if (isTobacco !== undefined) category.isTobacco = isTobacco;
 
         await category.save();
 

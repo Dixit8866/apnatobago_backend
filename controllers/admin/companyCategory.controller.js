@@ -11,7 +11,7 @@ import sequelize from '../../config/db.js';
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createCompanyCategory = async (req, res, next) => {
     try {
-        const { title, description, image, status, mainCategoryId, subCategoryId } = req.body;
+        const { title, description, image, status, mainCategoryId, subCategoryId, isTobacco } = req.body;
         if (!title || typeof title !== 'object' || !Object.values(title).some(v => v?.trim())) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide a title in at least one language.");
         }
@@ -23,6 +23,7 @@ export const createCompanyCategory = async (req, res, next) => {
             status: status || 'Active',
             mainCategoryId: mainCategoryId || null,
             subCategoryId: subCategoryId || null,
+            isTobacco: isTobacco || false
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Company Category created successfully.", category);
@@ -156,7 +157,7 @@ export const getCompanyCategoryById = async (req, res, next) => {
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
 export const updateCompanyCategory = async (req, res, next) => {
     try {
-        const { title, description, image, status, mainCategoryId, subCategoryId } = req.body;
+        const { title, description, image, status, mainCategoryId, subCategoryId, isTobacco } = req.body;
         const category = await CompanyCategory.findByPk(req.params.id);
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Company Category not found.");
 
@@ -167,6 +168,7 @@ export const updateCompanyCategory = async (req, res, next) => {
             status: status ?? category.status,
             mainCategoryId: mainCategoryId !== undefined ? mainCategoryId : category.mainCategoryId,
             subCategoryId: subCategoryId !== undefined ? subCategoryId : category.subCategoryId,
+            isTobacco: isTobacco !== undefined ? isTobacco : category.isTobacco,
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category updated successfully.", category);

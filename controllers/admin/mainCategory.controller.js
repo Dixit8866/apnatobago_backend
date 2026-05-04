@@ -7,13 +7,13 @@ import sequelize from '../../config/db.js';
 
 export const createMainCategory = async (req, res, next) => {
     try {
-        const { image, title, description, status } = req.body;
+        const { image, title, description, status, isTobacco } = req.body;
         // title is expected to be an object: { en: "Name", gu: "નામ" }
 
         // Get max position for auto-increment
         const maxPos = await MainCategory.max('position') || 0;
         const mainCategory = await MainCategory.create({
-            image, title, description, status,
+            image, title, description, status, isTobacco,
             position: maxPos + 1
         });
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Main Category created successfully.", mainCategory);
@@ -121,11 +121,11 @@ export const getMainCategoryById = async (req, res, next) => {
 
 export const updateMainCategory = async (req, res, next) => {
     try {
-        const { image, title, description, status } = req.body;
+        const { image, title, description, status, isTobacco } = req.body;
         const category = await MainCategory.findByPk(req.params.id);
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Main Category not found.");
 
-        await category.update({ image, title, description, status });
+        await category.update({ image, title, description, status, isTobacco });
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Main Category updated successfully.", category);
     } catch (error) {
         next(error);
