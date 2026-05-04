@@ -35,6 +35,10 @@ const CompanyCategory = sequelize.define('CompanyCategory', {
         type: DataTypes.STRING,
         defaultValue: 'Active'
     },
+    isTobacco: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
     position: {
         type: DataTypes.INTEGER,
         defaultValue: 0,

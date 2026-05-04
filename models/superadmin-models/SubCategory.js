@@ -36,6 +36,10 @@ const SubCategory = sequelize.define('SubCategory', {
     status: {
         type: DataTypes.STRING,
         defaultValue: 'Active'
+    },
+    isTobacco: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
     }
 }, {
     timestamps: true,

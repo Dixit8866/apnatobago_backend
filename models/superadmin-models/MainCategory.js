@@ -27,6 +27,10 @@ const MainCategory = sequelize.define('MainCategory', {
     status: {
         type: DataTypes.STRING,
         defaultValue: 'Active'
+    },
+    isTobacco: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
     }
 }, {
     timestamps: true,

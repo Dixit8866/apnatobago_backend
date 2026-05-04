@@ -21,8 +21,13 @@ import { Op } from 'sequelize';
  */
 export const getMainCategories = async (req, res) => {
     try {
+        const whereClause = { status: 'Active' };
+        if (req.user && !req.user.showtabacco) {
+            whereClause.isTobacco = false;
+        }
+
         const categories = await MainCategory.findAll({
-            where: { status: 'Active' },
+            where: whereClause,
             attributes: {
                 include: [
                     [
@@ -58,6 +63,9 @@ export const getSubCategories = async (req, res) => {
         const { mainCategoryId } = req.query;
         const whereClause = { status: 'Active' };
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
+        if (req.user && !req.user.showtabacco) {
+            whereClause.isTobacco = false;
+        }
 
         const categories = await SubCategory.findAll({
             where: whereClause,
@@ -97,6 +105,9 @@ export const getCompanyCategories = async (req, res) => {
         const whereClause = { status: 'Active' };
         if (subCategoryId) whereClause.subCategoryId = subCategoryId;
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
+        if (req.user && !req.user.showtabacco) {
+            whereClause.isTobacco = false;
+        }
 
         const categories = await CompanyCategory.findAll({
             where: whereClause,
@@ -287,6 +298,7 @@ export const searchCatalogue = async (req, res) => {
         const mainCategories = await MainCategory.findAll({
             where: {
                 status: 'Active',
+                ...(req.user && !req.user.showtabacco ? { isTobacco: false } : {}),
                 [Op.or]: [
                     sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
@@ -299,6 +311,7 @@ export const searchCatalogue = async (req, res) => {
         const subCategories = await SubCategory.findAll({
             where: {
                 status: 'Active',
+                ...(req.user && !req.user.showtabacco ? { isTobacco: false } : {}),
                 [Op.or]: [
                     sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]
@@ -311,6 +324,7 @@ export const searchCatalogue = async (req, res) => {
         const companyCategories = await CompanyCategory.findAll({
             where: {
                 status: 'Active',
+                ...(req.user && !req.user.showtabacco ? { isTobacco: false } : {}),
                 [Op.or]: [
                     sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${searchLower}%` })
                 ]

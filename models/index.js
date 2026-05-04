@@ -170,9 +170,23 @@ OrderAssignment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 DeliveryBoy.hasMany(OrderAssignment, { foreignKey: 'deliveryBoyId', as: 'assignments' });
 OrderAssignment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
 
-// Notification Associations
-Admin.hasMany(Notification, { foreignKey: 'sentBy', as: 'sentNotifications' });
-Notification.belongsTo(Admin, { foreignKey: 'sentBy', as: 'admin' });
+// ─── Manual Migrations (Production Safe) ───────────────────────────────────
+// These ensure that new columns are added if they don't exist yet
+import sequelize from '../config/db.js';
+
+const runManualMigrations = async () => {
+    try {
+        await sequelize.query('ALTER TABLE main_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
+        await sequelize.query('ALTER TABLE sub_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
+        await sequelize.query('ALTER TABLE company_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
+        console.log('[Migration] category tobacco flags added if missing ✓');
+    } catch (error) {
+        console.error('[Migration Error] Failed to update category tables:', error.message);
+    }
+};
+
+// Run migrations (Non-blocking)
+runManualMigrations();
 
 export {
     Admin,
