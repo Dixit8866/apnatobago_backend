@@ -242,7 +242,13 @@ export const completeOrderAndSettlePayment = async (req, res) => {
     const t = await OrderAssignment.sequelize.transaction();
     try {
         const { assignmentId } = req.params;
-        const { payments, notes } = req.body; // payments: [{ orderId: 'UUID', amount: 500 }]
+        const { 
+            cashAmount = 0, 
+            onlineAmount = 0, 
+            creditAmount = 0, 
+            onlineTransactionId, 
+            notes 
+        } = req.body;
         const deliveryBoyId = req.user.id;
 
         const assignment = await OrderAssignment.findOne({
@@ -256,48 +262,153 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment not found.");
         }
 
-        if (payments && Array.isArray(payments)) {
-            for (const payment of payments) {
-                const { orderId, amount } = payment;
-                const payAmount = parseFloat(amount);
-                if (isNaN(payAmount) || payAmount <= 0) continue;
+        const userId = assignment.order.userId;
 
-                const order = await Order.findByPk(orderId, { transaction: t });
-                if (order) {
-                    const currentPaid = parseFloat(order.paidAmount) || 0;
-                    const total = parseFloat(order.totalAmount) || 0;
-                    
-                    const newPaidAmount = currentPaid + payAmount;
-                    const newDueAmount = total - newPaidAmount;
-                    
-                    let newPaymentStatus = order.paymentStatus;
-                    if (newDueAmount <= 1e-7) {
-                        newPaymentStatus = 'Paid';
-                    } else if (newPaidAmount > 0) {
-                        newPaymentStatus = 'Partial';
-                    }
-
-                    await order.update({
-                        paidAmount: newPaidAmount,
-                        dueAmount: Math.max(0, newDueAmount),
-                        paymentStatus: newPaymentStatus
-                    }, { transaction: t });
-                }
+        // Verify user credit if creditAmount is used
+        let user;
+        if (creditAmount > 0) {
+            if (!userId) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot use credit: User not associated with this order.");
+            }
+            user = await User.findByPk(userId, { transaction: t });
+            if (!user) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
+            }
+            if (parseFloat(user.creditline) < parseFloat(creditAmount)) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit. Available: ${user.creditline}, Attempted: ${creditAmount}`);
             }
         }
+
+        // Fetch all past due orders for this user
+        let pastDueOrders = [];
+        if (userId) {
+            pastDueOrders = await Order.findAll({
+                where: {
+                    userId,
+                    dueAmount: { [Op.gt]: 0 },
+                    orderStatus: { [Op.ne]: 'Cancelled' },
+                    id: { [Op.ne]: assignment.orderId } // Exclude current order as we'll add it manually
+                },
+                order: [['createdAt', 'ASC']], // Oldest first
+                transaction: t
+            });
+        }
+
+        // We want to clear oldest past dues first, then current order
+        const ordersToSettle = [...pastDueOrders];
+        // If current order has due amount, add it to the end
+        if (parseFloat(assignment.order.dueAmount) > 0) {
+            ordersToSettle.push(assignment.order);
+        }
+
+        let remainingCash = parseFloat(cashAmount) || 0;
+        let remainingOnline = parseFloat(onlineAmount) || 0;
+        let remainingCredit = parseFloat(creditAmount) || 0;
+
+        for (const order of ordersToSettle) {
+            let due = parseFloat(order.dueAmount);
+            if (due <= 0) continue;
+
+            let orderNotes = [];
+            let paymentMethodsUsed = [];
+            let rzpId = order.razorpayPaymentId;
+
+            // Try Cash
+            if (remainingCash > 0 && due > 0) {
+                const deduction = Math.min(remainingCash, due);
+                remainingCash -= deduction;
+                due -= deduction;
+                order.paidAmount = parseFloat(order.paidAmount) + deduction;
+                orderNotes.push(`Paid ${deduction} via Cash`);
+                paymentMethodsUsed.push('CASH');
+            }
+
+            // Try Online
+            if (remainingOnline > 0 && due > 0) {
+                const deduction = Math.min(remainingOnline, due);
+                remainingOnline -= deduction;
+                due -= deduction;
+                order.paidAmount = parseFloat(order.paidAmount) + deduction;
+                if (onlineTransactionId) {
+                    rzpId = onlineTransactionId;
+                    orderNotes.push(`Paid ${deduction} via Online (Txn: ${onlineTransactionId})`);
+                } else {
+                    orderNotes.push(`Paid ${deduction} via Online`);
+                }
+                paymentMethodsUsed.push('ONLINE');
+            }
+
+            // Try Credit
+            if (remainingCredit > 0 && due > 0) {
+                const deduction = Math.min(remainingCredit, due);
+                remainingCredit -= deduction;
+                due -= deduction;
+                order.paidAmount = parseFloat(order.paidAmount) + deduction;
+                orderNotes.push(`Paid ${deduction} via Credit`);
+                paymentMethodsUsed.push('CREDIT');
+                
+                // Deduct from User's creditline
+                if (user) {
+                    user.creditline = parseFloat(user.creditline) - deduction;
+                }
+            }
+
+            // Update order record
+            order.dueAmount = due;
+            
+            let newPaymentStatus = order.paymentStatus;
+            if (due <= 1e-7) {
+                newPaymentStatus = 'Paid';
+            } else if (parseFloat(order.paidAmount) > 0) {
+                newPaymentStatus = 'Partial';
+            }
+            order.paymentStatus = newPaymentStatus;
+
+            // Combine methods if multiple, else keep primary
+            let finalMethod = order.paymentMethod;
+            if (paymentMethodsUsed.length === 1) {
+                finalMethod = paymentMethodsUsed[0];
+            } else if (paymentMethodsUsed.length > 1) {
+                finalMethod = 'SPLIT';
+            }
+
+            let newNotes = order.notes ? order.notes + '\n' : '';
+            if (orderNotes.length > 0) {
+                newNotes += `[${new Date().toLocaleString()}] Adjustments: ${orderNotes.join(', ')}`;
+            } else {
+                newNotes = order.notes;
+            }
+
+            await order.update({
+                paidAmount: order.paidAmount,
+                dueAmount: order.dueAmount,
+                paymentStatus: order.paymentStatus,
+                razorpayPaymentId: rzpId,
+                paymentMethod: finalMethod,
+                notes: newNotes
+            }, { transaction: t });
+        }
+
+        if (user) {
+            await user.save({ transaction: t });
+        }
+
+        // Ensure current order status is updated to Delivered
+        await Order.update(
+            { orderStatus: 'Delivered' }, 
+            { where: { id: assignment.orderId }, transaction: t }
+        );
 
         await assignment.update({ 
             status: 'Completed', 
             notes: notes || assignment.notes 
         }, { transaction: t });
 
-        await Order.update(
-            { orderStatus: 'Delivered' }, 
-            { where: { id: assignment.orderId }, transaction: t }
-        );
-
         await t.commit();
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order completed and payments settled successfully.");
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order delivered and payments auto-adjusted successfully.");
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Complete Order Settle Error]: ${error.message}`);

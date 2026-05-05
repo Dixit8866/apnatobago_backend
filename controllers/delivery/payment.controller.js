@@ -18,8 +18,11 @@ export const initializeRazorpayOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Valid Order ID and amount are required.");
         }
 
-        let order = await Order.findByPk(orderId);
-        if (!order) {
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(orderId);
+        let order;
+        if (isUUID) {
+            order = await Order.findByPk(orderId);
+        } else {
             order = await Order.findOne({ where: { orderId: orderId } });
         }
 
@@ -89,8 +92,11 @@ export const verifyRazorpayPayment = async (req, res) => {
 
         if (expectedSignature === razorpaySignature) {
             // Update Order Payment Status
-            let order = await Order.findByPk(orderId);
-            if (!order) {
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(orderId);
+            let order;
+            if (isUUID) {
+                order = await Order.findByPk(orderId);
+            } else {
                 order = await Order.findOne({ where: { orderId: orderId } });
             }
 
