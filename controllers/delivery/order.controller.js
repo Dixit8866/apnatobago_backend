@@ -88,6 +88,7 @@ export const getAssignmentDetails = async (req, res) => {
                     as: 'order',
                     include: [
                         { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode'] },
+                        { model: OrderPayment, as: 'payments' },
                         { 
                             model: OrderItem, 
                             as: 'items',
@@ -347,9 +348,10 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             let orderNotes = [];
             let paymentMethodsUsed = [];
             
-            // If this is the current order and online was already applied, include it in methods
+            // If this is the current order and online was already applied, include it in methods and notes
             if (order.id === assignment.orderId && onlineAppliedToCurrent) {
                 paymentMethodsUsed.push('ONLINE');
+                orderNotes.push(`Paid ${onlineAmount} via Online (Already Verified)`);
             }
             
             let rzpId = order.razorpayPaymentId;
