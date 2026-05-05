@@ -108,7 +108,7 @@ export const verifyRazorpayPayment = async (req, res) => {
                 const newDueAmount = Math.max(0, parseFloat(order.totalAmount) - newPaidAmount);
                 
                 await order.update({
-                    paymentStatus: newDueAmount <= 0 ? 'Paid' : 'Partial',
+                    paymentStatus: newDueAmount <= 0 ? 'Paid' : 'Pending',
                     paidAmount: newPaidAmount,
                     dueAmount: newDueAmount,
                     razorpayPaymentId: razorpayPaymentId,

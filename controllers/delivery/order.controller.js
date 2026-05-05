@@ -359,11 +359,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             // Update order record
             order.dueAmount = due;
             
-            let newPaymentStatus = order.paymentStatus;
+            let newPaymentStatus = 'Pending';
             if (due <= 1e-7) {
                 newPaymentStatus = 'Paid';
-            } else if (parseFloat(order.paidAmount) > 0) {
-                newPaymentStatus = 'Partial';
             }
             order.paymentStatus = newPaymentStatus;
 
