@@ -320,9 +320,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         let remainingCredit = parseFloat(creditAmount) || 0;
 
         // ─── FIX: PREVENT DOUBLE COUNTING OF ONLINE PAYMENTS ────────────────────────
-        // If the online payment was already verified (via verifyRazorpayPayment), 
-        // the order.dueAmount is already reduced. We record the entry here for 
-        // tracking, but we set remainingOnline to 0 to prevent a second deduction.
+        let onlineAppliedToCurrent = false;
         if (remainingOnline > 0 && onlineTransactionId && assignment.order.razorpayPaymentId === onlineTransactionId) {
             logger.info(`[Complete Order Settle]: Online payment ${onlineTransactionId} already reflected. Recording entry without double deduction.`);
             
@@ -335,6 +333,8 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 notes: 'Recorded during delivery settlement (already verified)'
             }, { transaction: t });
 
+            // Mark that online was applied so we can include it in paymentMethodsUsed later
+            onlineAppliedToCurrent = true;
             // Reset to 0 so the loop below doesn't subtract it again from the dueAmount
             remainingOnline = 0;
         }
@@ -346,6 +346,12 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let orderNotes = [];
             let paymentMethodsUsed = [];
+            
+            // If this is the current order and online was already applied, include it in methods
+            if (order.id === assignment.orderId && onlineAppliedToCurrent) {
+                paymentMethodsUsed.push('ONLINE');
+            }
+            
             let rzpId = order.razorpayPaymentId;
 
             // Try Cash
