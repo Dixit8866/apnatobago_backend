@@ -1,4 +1,4 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume } from '../../models/index.js';
+import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -324,6 +324,14 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 order.paidAmount = parseFloat(order.paidAmount) + deduction;
                 orderNotes.push(`Paid ${deduction} via Cash`);
                 paymentMethodsUsed.push('CASH');
+                
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: deduction,
+                    paymentMethod: 'CASH',
+                    notes: 'Auto-adjusted during delivery settlement'
+                }, { transaction: t });
             }
 
             // Try Online
@@ -339,6 +347,15 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     orderNotes.push(`Paid ${deduction} via Online`);
                 }
                 paymentMethodsUsed.push('ONLINE');
+                
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: deduction,
+                    paymentMethod: 'ONLINE',
+                    transactionId: onlineTransactionId,
+                    notes: 'Auto-adjusted during delivery settlement'
+                }, { transaction: t });
             }
 
             // Try Credit
@@ -349,6 +366,14 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 order.paidAmount = parseFloat(order.paidAmount) + deduction;
                 orderNotes.push(`Paid ${deduction} via Credit`);
                 paymentMethodsUsed.push('CREDIT');
+                
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: deduction,
+                    paymentMethod: 'CREDIT',
+                    notes: 'Auto-adjusted via User Credit'
+                }, { transaction: t });
                 
                 // Deduct from User's creditline
                 if (user) {

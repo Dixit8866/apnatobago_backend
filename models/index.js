@@ -34,8 +34,16 @@ import Notification from './superadmin-models/Notification.js';
 import AdminNotification from './superadmin-models/AdminNotification.js';
 import BusinessProfile from './user/BusinessProfile.js';
 import HelpSupport from './user/HelpSupport.js';
+import OrderPayment from './user/OrderPayment.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
+// Order -> OrderPayment
+Order.hasMany(OrderPayment, { foreignKey: 'orderId', as: 'payments' });
+OrderPayment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
+
+// User -> OrderPayment (Delivery Boy)
+User.hasMany(OrderPayment, { foreignKey: 'deliveryBoyId', as: 'collectedPayments' });
+OrderPayment.belongsTo(User, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
 // User -> HelpSupport (One User can have many help requests)
 User.hasMany(HelpSupport, { foreignKey: 'userId', as: 'helpRequests' });
 HelpSupport.belongsTo(User, { foreignKey: 'userId', as: 'user' });
