@@ -42,8 +42,8 @@ Order.hasMany(OrderPayment, { foreignKey: 'orderId', as: 'payments' });
 OrderPayment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 
 // DeliveryBoy -> OrderPayment
-DeliveryBoy.hasMany(OrderPayment, { foreignKey: 'deliveryBoyId', as: 'collectedPayments' });
-OrderPayment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
+// DeliveryBoy.hasMany(OrderPayment, { foreignKey: 'deliveryBoyId', as: 'collectedPayments' });
+// OrderPayment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
 // User -> HelpSupport (One User can have many help requests)
 User.hasMany(HelpSupport, { foreignKey: 'userId', as: 'helpRequests' });
 HelpSupport.belongsTo(User, { foreignKey: 'userId', as: 'user' });

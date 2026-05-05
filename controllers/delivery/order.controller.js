@@ -435,6 +435,16 @@ export const completeOrderAndSettlePayment = async (req, res) => {
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Complete Order Settle Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+        
+        // Return debug info in the error response for troubleshooting
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+            debug: {
+                deliveryBoyId: req.user?.id,
+                userObject: req.user ? { id: req.user.id, name: req.user.fullname || req.user.name } : null,
+                assignmentId: req.params.assignmentId
+            }
+        });
     }
 };
