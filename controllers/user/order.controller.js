@@ -160,7 +160,7 @@ export const createOrder = async (req, res) => {
             await user.save({ transaction: t });
             paymentStatus = 'Paid';
         } else if (method === 'ONLINE') {
-            paymentStatus = 'Paid';
+            paymentStatus = 'Pending';
         } else {
             paymentStatus = 'Pending';
         }
