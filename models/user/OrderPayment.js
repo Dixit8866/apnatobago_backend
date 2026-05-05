@@ -19,7 +19,7 @@ const OrderPayment = sequelize.define('OrderPayment', {
         type: DataTypes.UUID,
         allowNull: true,
         references: {
-            model: 'users',
+            model: 'delivery_boys',
             key: 'id',
         }
     },
