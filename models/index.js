@@ -228,4 +228,5 @@ export {
     OrderItem,
     BusinessProfile,
     HelpSupport,
+    OrderPayment,
 };
