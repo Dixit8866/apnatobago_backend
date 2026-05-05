@@ -61,8 +61,9 @@ export const initializeRazorpayOrder = async (req, res) => {
             humanReadableOrderId: order.orderId
         });
     } catch (error) {
-        logger.error(`[Delivery Razorpay Initialize Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+        const errMsg = error.message || (error.error && error.error.description) || JSON.stringify(error);
+        logger.error(`[Delivery Razorpay Initialize Error]: ${errMsg}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, errMsg || "An unknown error occurred during Razorpay initialization");
     }
 };
 
