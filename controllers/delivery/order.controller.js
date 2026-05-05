@@ -30,6 +30,7 @@ export const getMyAssignedOrders = async (req, res) => {
 
         const result = await OrderAssignment.findAndCountAll({
             where: whereClause,
+            attributes: { exclude: ['orderId'] },
             include: [
                 {
                     model: Order,
@@ -77,6 +78,7 @@ export const getAssignmentDetails = async (req, res) => {
 
         const assignment = await OrderAssignment.findOne({
             where: { id: assignmentId, deliveryBoyId },
+            attributes: { exclude: ['orderId'] },
             include: [
                 {
                     model: Order,

@@ -1,4 +1,5 @@
 import { OrderAssignment, Order, DeliveryBoy, User } from '../../models/index.js';
+import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -34,7 +35,14 @@ export const bulkAssignOrders = async (req, res) => {
             }
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, `${orderIds.length} orders assigned successfully.`, assignments);
+        // Re-fetch assignments without the internal orderId to avoid confusion in the response
+        const finalAssignments = await OrderAssignment.findAll({
+            where: { orderId: { [Op.in]: orderIds } },
+            attributes: { exclude: ['orderId'] },
+            include: [{ model: Order, as: 'order', attributes: ['id', 'orderId'] }]
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `${orderIds.length} orders assigned successfully.`, finalAssignments);
     } catch (error) {
         logger.error(`[Bulk Assign Orders Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -51,6 +59,7 @@ export const getAllAssignments = async (req, res) => {
         const { limit, offset, page } = pagination;
 
         const result = await OrderAssignment.findAndCountAll({
+            attributes: { exclude: ['orderId'] },
             include: [
                 {
                     model: Order,
