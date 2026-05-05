@@ -305,12 +305,12 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             });
         }
 
-        // We want to clear oldest past dues first, then current order
-        const ordersToSettle = [...pastDueOrders];
-        // If current order has due amount, add it to the end
+        // Prioritize current order first, then past dues
+        const ordersToSettle = [];
         if (parseFloat(assignment.order.dueAmount) > 0) {
             ordersToSettle.push(assignment.order);
         }
+        ordersToSettle.push(...pastDueOrders);
 
         let remainingCash = parseFloat(cashAmount) || 0;
         let remainingOnline = parseFloat(onlineAmount) || 0;
