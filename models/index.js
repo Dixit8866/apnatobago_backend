@@ -187,14 +187,20 @@ const runManualMigrations = async () => {
         await sequelize.query('ALTER TABLE main_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
         await sequelize.query('ALTER TABLE sub_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
         await sequelize.query('ALTER TABLE company_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
-        console.log('[Migration] category tobacco flags added if missing ✓');
+        
+        // Fix deliveryBoyId in order_payments (ensure column exists and has correct constraint)
+        await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID');
+        await sequelize.query('ALTER TABLE order_payments DROP CONSTRAINT IF EXISTS "order_payments_deliveryBoyId_fkey" CASCADE');
+        await sequelize.query('ALTER TABLE order_payments ADD CONSTRAINT "order_payments_deliveryBoyId_fkey" FOREIGN KEY ("deliveryBoyId") REFERENCES delivery_boys(id) ON UPDATE CASCADE ON DELETE SET NULL');
+        
+        console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);
     }
 };
 
 // Run migrations (Non-blocking)
-runManualMigrations();
+// runManualMigrations();
 
 export {
     Admin,
@@ -229,4 +235,5 @@ export {
     BusinessProfile,
     HelpSupport,
     OrderPayment,
+    runManualMigrations
 };

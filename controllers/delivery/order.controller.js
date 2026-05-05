@@ -14,6 +14,7 @@ export const getMyAssignedOrders = async (req, res) => {
     try {
         const deliveryBoyId = req.user.id;
         const { status, search } = req.query; // 'Pending', 'Assigned', 'Cancelled', 'Completed'
+        logger.info(`[Get My Assigned Orders]: Fetching orders for delivery boy ${deliveryBoyId}, status: ${status || 'Any'}`);
 
         const whereClause = { deliveryBoyId };
         if (status) {
@@ -59,6 +60,7 @@ export const getMyAssignedOrders = async (req, res) => {
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
+        logger.info(`[Get My Assigned Orders]: Found ${result.count} orders for delivery boy ${deliveryBoyId}`);
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Assigned orders fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Get My Assigned Orders Error]: ${error.message}`);
@@ -75,6 +77,7 @@ export const getAssignmentDetails = async (req, res) => {
     try {
         const { assignmentId } = req.params;
         const deliveryBoyId = req.user.id;
+        logger.info(`[Get Assignment Details]: Fetching assignment ${assignmentId} for delivery boy ${deliveryBoyId}`);
 
         const assignment = await OrderAssignment.findOne({
             where: { id: assignmentId, deliveryBoyId },
@@ -149,6 +152,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
         const { assignmentId } = req.params;
         const { status, notes } = req.body;
         const deliveryBoyId = req.user.id;
+        logger.info(`[Update Assignment Status]: Assignment ${assignmentId}, New Status: ${status}, Boy: ${deliveryBoyId}`);
 
         const assignment = await OrderAssignment.findOne({
             where: { id: assignmentId, deliveryBoyId }
@@ -187,6 +191,7 @@ export const reorderAssignments = async (req, res) => {
     try {
         const { id, fromIndex, toIndex } = req.body;
         const deliveryBoyId = req.user.id;
+        logger.info(`[Reorder Assignments]: Boy: ${deliveryBoyId}, ID: ${id}, from ${fromIndex} to ${toIndex}`);
 
         if (id === undefined || fromIndex === undefined || toIndex === undefined) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "id, fromIndex, and toIndex are required.");

@@ -13,6 +13,7 @@ import crypto from 'crypto';
 export const initializeRazorpayOrder = async (req, res) => {
     try {
         const { orderId, amount } = req.body; // orderId can be UUID or human-readable ORD-ID
+        logger.info(`[Delivery Razorpay Initialize]: OrderID: ${orderId}, Amount: ${amount}`);
 
         if (!orderId || !amount || isNaN(amount) || amount <= 0) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Valid Order ID and amount are required.");
@@ -51,6 +52,7 @@ export const initializeRazorpayOrder = async (req, res) => {
 
         // Update order with razorpayOrderId
         await order.update({ razorpayOrderId: razorpayOrder.id });
+        logger.info(`[Delivery Razorpay Initialize]: Razorpay Order ${razorpayOrder.id} created for order ${order.id}`);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Razorpay order initialized.", {
             id: razorpayOrder.id,
@@ -75,6 +77,7 @@ export const initializeRazorpayOrder = async (req, res) => {
 export const verifyRazorpayPayment = async (req, res) => {
     try {
         const { razorpayOrderId, razorpayPaymentId, razorpaySignature, orderId, amount } = req.body;
+        logger.info(`[Delivery Razorpay Verify]: OrderID: ${orderId}, RazorpayPaymentID: ${razorpayPaymentId}, Amount: ${amount}`);
 
         if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature || !orderId) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing payment details.");
@@ -114,6 +117,7 @@ export const verifyRazorpayPayment = async (req, res) => {
                     razorpayPaymentId: razorpayPaymentId,
                     paymentMethod: 'ONLINE'
                 });
+                logger.info(`[Delivery Razorpay Verify]: Order ${order.id} updated with payment ${razorpayPaymentId}. New Due: ${newDueAmount}`);
             }
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment verified successfully.", { verified: true });

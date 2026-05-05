@@ -1,7 +1,7 @@
 import http from 'http';
 import app from './app.js';
 import sequelize, { connectDB } from './config/db.js';
-import './models/index.js'; // Import models to ensure all associations are registered before sync
+import { runManualMigrations } from './models/index.js'; // Import models and migration
 
 // Setup Port
 const PORT = process.env.PORT || 5000;
@@ -43,6 +43,9 @@ const startServer = async () => {
     try {
         // Connect to Database
         await connectDB();
+
+        // Run manual migrations for missing columns/constraints
+        await runManualMigrations();
 
         // Sync Sequelize Models with Database
         // Note: We are enabling this temporarily to create tables in your new database.
