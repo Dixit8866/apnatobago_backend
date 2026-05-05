@@ -258,9 +258,12 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         });
 
         if (!assignment) {
+            logger.warn(`[Complete Order Settle]: Assignment ${assignmentId} not found for delivery boy ${deliveryBoyId}`);
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment not found.");
         }
+
+        logger.info(`[Complete Order Settle]: Starting settlement for assignment ${assignmentId}, delivery boy ${deliveryBoyId}`);
 
         const userId = assignment.order.userId;
 
@@ -325,6 +328,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 orderNotes.push(`Paid ${deduction} via Cash`);
                 paymentMethodsUsed.push('CASH');
                 
+                logger.info(`[Complete Order Settle]: Creating CASH payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
                 await OrderPayment.create({
                     orderId: order.id,
                     deliveryBoyId,
@@ -348,6 +352,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 }
                 paymentMethodsUsed.push('ONLINE');
                 
+                logger.info(`[Complete Order Settle]: Creating ONLINE payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
                 await OrderPayment.create({
                     orderId: order.id,
                     deliveryBoyId,
@@ -367,6 +372,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 orderNotes.push(`Paid ${deduction} via Credit`);
                 paymentMethodsUsed.push('CREDIT');
                 
+                logger.info(`[Complete Order Settle]: Creating CREDIT payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
                 await OrderPayment.create({
                     orderId: order.id,
                     deliveryBoyId,

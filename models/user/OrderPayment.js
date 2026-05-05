@@ -18,6 +18,10 @@ const OrderPayment = sequelize.define('OrderPayment', {
     deliveryBoyId: {
         type: DataTypes.UUID,
         allowNull: true,
+        references: {
+            model: 'delivery_boys',
+            key: 'id',
+        }
     },
     amount: {
         type: DataTypes.DECIMAL(10, 2),
