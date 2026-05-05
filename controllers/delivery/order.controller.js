@@ -305,16 +305,40 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             });
         }
 
-        // Prioritize current order first, then past dues
+        // ─── FIX: PRIORITIZE CURRENT ORDER (BILL-WISE) ──────────────────────────────
+        // We now put the current order first in the settlement queue so that 
+        // payments are applied to this bill before any older past due bills.
         const ordersToSettle = [];
         if (parseFloat(assignment.order.dueAmount) > 0) {
             ordersToSettle.push(assignment.order);
         }
         ordersToSettle.push(...pastDueOrders);
+        // ─────────────────────────────────────────────────────────────────────────────
 
         let remainingCash = parseFloat(cashAmount) || 0;
         let remainingOnline = parseFloat(onlineAmount) || 0;
         let remainingCredit = parseFloat(creditAmount) || 0;
+
+        // ─── FIX: PREVENT DOUBLE COUNTING OF ONLINE PAYMENTS ────────────────────────
+        // If the online payment was already verified (via verifyRazorpayPayment), 
+        // the order.dueAmount is already reduced. We record the entry here for 
+        // tracking, but we set remainingOnline to 0 to prevent a second deduction.
+        if (remainingOnline > 0 && onlineTransactionId && assignment.order.razorpayPaymentId === onlineTransactionId) {
+            logger.info(`[Complete Order Settle]: Online payment ${onlineTransactionId} already reflected. Recording entry without double deduction.`);
+            
+            await OrderPayment.create({
+                orderId: assignment.order.id,
+                deliveryBoyId,
+                amount: remainingOnline,
+                paymentMethod: 'ONLINE',
+                transactionId: onlineTransactionId,
+                notes: 'Recorded during delivery settlement (already verified)'
+            }, { transaction: t });
+
+            // Reset to 0 so the loop below doesn't subtract it again from the dueAmount
+            remainingOnline = 0;
+        }
+        // ─────────────────────────────────────────────────────────────────────────────
 
         for (const order of ordersToSettle) {
             let due = parseFloat(order.dueAmount);
