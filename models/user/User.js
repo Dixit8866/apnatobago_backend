@@ -48,6 +48,10 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(10, 2),
         defaultValue: 0,
     },
+    blockcredit: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
     applevel: {
         type: DataTypes.UUID,
         allowNull: true,

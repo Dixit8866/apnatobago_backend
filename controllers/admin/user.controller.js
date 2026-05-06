@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
+import { Order, OrderItem, Product } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -9,7 +10,7 @@ const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
 export const createUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, applevel, status, kycverification } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification } = req.body;
 
         if (!fullname || !number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Fullname, number, and password are required.');
@@ -35,6 +36,7 @@ export const createUser = async (req, res, next) => {
             fullname, email, dialcode: dialcode || '+91', number, city, postcode, password,
             showtabacco: showtabacco ?? false,
             creditline: creditline || 0,
+            blockcredit: blockcredit ?? false,
             applevel: finalAppLevel || null,
             status: status || 'Active',
             kycverification: kycverification || 'pending',
@@ -98,7 +100,7 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, applevel, status, kycverification } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
@@ -116,6 +118,7 @@ export const updateUser = async (req, res, next) => {
             postcode: postcode ?? user.postcode,
             showtabacco: showtabacco !== undefined ? showtabacco : user.showtabacco,
             creditline: creditline !== undefined ? creditline : user.creditline,
+            blockcredit: blockcredit !== undefined ? blockcredit : user.blockcredit,
             applevel: (applevel === '' || applevel === undefined) ? (applevel === '' ? null : user.applevel) : applevel,
             status: status ?? user.status,
             kycverification: kycverification ?? user.kycverification,
@@ -146,22 +149,47 @@ export const deleteUser = async (req, res, next) => {
 
 export const getUserAnalytics = async (req, res, next) => {
     try {
-        const user = await User.findByPk(req.params.id, { 
+        const userId = req.params.id;
+        const user = await User.findByPk(userId, { 
             attributes: SAFE_ATTRIBUTES,
             include: [{ model: CustomLevel, as: 'rewardLevel', attributes: ['id', 'name'] }]
         });
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
+        const totalOrders = await Order.count({
+            where: { userId, orderStatus: { [Op.ne]: 'Cancelled' } }
+        });
+
+        const totalSpent = await Order.sum('totalAmount', {
+            where: { userId, orderStatus: { [Op.ne]: 'Cancelled' } }
+        }) || 0;
+
+        const recentOrders = await Order.findAll({
+            where: { userId, orderStatus: { [Op.ne]: 'Cancelled' } },
+            order: [['createdAt', 'DESC']],
+            limit: 5,
+            include: [
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [{ model: Product, as: 'product', attributes: ['name'] }]
+                }
+            ]
+        });
+
+        const avgOrderValue = totalOrders > 0 ? Math.round(totalSpent / totalOrders) : 0;
+        const lastOrderDate = recentOrders.length > 0 ? recentOrders[0].createdAt : null;
+
         const analytics = {
             user,
             stats: {
-                totalSpent: 0,
-                totalOrders: 0,
-                avgOrderValue: 0,
-                lastOrderDate: null,
+                totalSpent,
+                totalOrders,
+                avgOrderValue,
+                lastOrderDate,
                 preferredCategory: 'N/A'
             },
-            recentOrders: []
+            recentOrders
         };
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User analytics fetched.', analytics);

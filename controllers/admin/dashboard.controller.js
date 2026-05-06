@@ -62,6 +62,29 @@ export const getDashboardStats = async (req, res) => {
         // 6. Payables (Outstanding to vendors)
         const totalPayable = totalPurchase; 
 
+        // 6.1 New Order Count
+        const newOrderCount = await Order.count({
+            where: { ...dateFilter, orderStatus: 'Pending' }
+        });
+
+        // 6.2 Delivered Order Count
+        const deliveredOrderCount = await Order.count({
+            where: { ...dateFilter, orderStatus: 'Delivered' }
+        });
+
+        // 6.3 Today Total Order
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        const todayTotalOrder = await Order.count({
+            where: {
+                createdAt: {
+                    [Op.between]: [todayStart, todayEnd]
+                }
+            }
+        });
+
         // 6. Top Selling Products
         const topSellingProducts = await OrderItem.findAll({
             attributes: [
@@ -178,6 +201,9 @@ export const getDashboardStats = async (req, res) => {
                 totalOutstanding,
                 totalReceived,
                 totalPayable,
+                newOrderCount,
+                deliveredOrderCount,
+                todayTotalOrder
             },
             paymentBifurcation: paymentStats,
             topProducts: enrichedProducts,

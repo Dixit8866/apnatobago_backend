@@ -87,7 +87,7 @@ export const getAssignmentDetails = async (req, res) => {
                     model: Order,
                     as: 'order',
                     include: [
-                        { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode'] },
+                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'postcode'] },
                         { model: OrderPayment, as: 'payments' },
                         { 
                             model: OrderItem, 
@@ -120,7 +120,7 @@ export const getAssignmentDetails = async (req, res) => {
                 where: {
                     userId,
                     dueAmount: { [Op.gt]: 0 },
-                    orderStatus: { [Op.ne]: 'Cancelled' },
+                    orderStatus: 'Delivered',
                     orderId: { [Op.ne]: assignment.order.orderId } // Exclude current order
                 },
                 attributes: ['id', 'orderId', 'totalAmount', 'dueAmount', 'paymentStatus'],
@@ -298,7 +298,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 where: {
                     userId,
                     dueAmount: { [Op.gt]: 0 },
-                    orderStatus: { [Op.ne]: 'Cancelled' },
+                    orderStatus: 'Delivered',
                     id: { [Op.ne]: assignment.orderId } // Exclude current order as we'll add it manually
                 },
                 order: [['createdAt', 'ASC']], // Oldest first
@@ -306,14 +306,14 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             });
         }
 
-        // ─── FIX: PRIORITIZE CURRENT ORDER (BILL-WISE) ──────────────────────────────
-        // We now put the current order first in the settlement queue so that 
-        // payments are applied to this bill before any older past due bills.
+        // ─── PRIORITIZE PAST DUE ORDERS ──────────────────────────────────────────────
+        // We now put past due orders first in the settlement queue so that 
+        // payments are applied to older bills before the current bill.
         const ordersToSettle = [];
+        ordersToSettle.push(...pastDueOrders);
         if (parseFloat(assignment.order.dueAmount) > 0) {
             ordersToSettle.push(assignment.order);
         }
-        ordersToSettle.push(...pastDueOrders);
         // ─────────────────────────────────────────────────────────────────────────────
 
         let remainingCash = parseFloat(cashAmount) || 0;
@@ -489,5 +489,34 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 assignmentId: req.params.assignmentId
             }
         });
+    }
+};
+
+/**
+ * @desc    Get user credit details (creditline and blockcredit)
+ * @route   GET /api/delivery/orders/user-credit/:userId
+ * @access  Private (Delivery Boy)
+ */
+export const getUserCreditDetails = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        logger.info(`[Get User Credit]: Fetching credit info for user ${userId}`);
+
+        const user = await User.findByPk(userId, {
+            attributes: ['id', 'creditline', 'blockcredit']
+        });
+
+        if (!user) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "User credit details fetched.", {
+            id: user.id,
+            creditline: parseFloat(user.creditline || 0),
+            blockcredit: user.blockcredit || false
+        });
+    } catch (error) {
+        logger.error(`[Get User Credit Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
