@@ -330,13 +330,16 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         }
 
         // ─── PRIORITIZE PAST DUE ORDERS ──────────────────────────────────────────────
-        // We now put past due orders first in the settlement queue so that 
-        // payments are applied to older bills before the current bill.
+        // We now put past due orders and the current order in the settlement queue,
+        // and explicitly sort them chronologically (oldest first, down to milliseconds)
+        // so that payments are always applied to older bills before newer ones.
         const ordersToSettle = [];
         ordersToSettle.push(...pastDueOrders);
         if (parseFloat(assignment.order.dueAmount) > 0) {
             ordersToSettle.push(assignment.order);
         }
+
+        ordersToSettle.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
         // ─────────────────────────────────────────────────────────────────────────────
 
         let remainingCash = parseFloat(cashAmount) || 0;
