@@ -131,6 +131,30 @@ export const getAssignmentDetails = async (req, res) => {
         }
 
         const data = assignment.toJSON();
+        
+        // Dynamically adjust CREDIT payments based on real (CASH/ONLINE) repayments
+        if (data.order && data.order.payments) {
+            const payments = data.order.payments || [];
+            const totalCredit = payments.filter(p => p.paymentMethod === 'CREDIT').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+            const totalReal = payments.filter(p => p.paymentMethod === 'CASH' || p.paymentMethod === 'ONLINE').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+            const orderTotal = parseFloat(data.order.totalAmount || 0);
+
+            const nonCreditPortion = Math.max(0, orderTotal - totalCredit);
+            const realPaidToCredit = Math.max(0, totalReal - nonCreditPortion);
+            const outstandingCredit = Math.max(0, totalCredit - realPaidToCredit);
+
+            let remainingCreditToDistribute = outstandingCredit;
+            for (const payment of payments) {
+                if (payment.paymentMethod === 'CREDIT') {
+                    const currentAmount = parseFloat(payment.amount || 0);
+                    const allowedAmount = Math.min(currentAmount, remainingCreditToDistribute);
+                    payment.amount = allowedAmount.toFixed(2);
+                    remainingCreditToDistribute -= allowedAmount;
+                }
+            }
+            data.order.payments = payments;
+        }
+
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
         data.currentOrderAmount = parseFloat(assignment.order.totalAmount).toFixed(2);
