@@ -404,8 +404,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             if (remainingCredit > 0 && due > 0) {
                 const deduction = Math.min(remainingCredit, due);
                 remainingCredit -= deduction;
-                due -= deduction;
-                order.paidAmount = parseFloat(order.paidAmount) + deduction;
+                // Note: Credit payment represents giving goods on credit (baki), 
+                // so the order's dueAmount remains unchanged for the credit portion 
+                // and is still considered a pending due.
                 orderNotes.push(`Paid ${deduction} via Credit`);
                 paymentMethodsUsed.push('CREDIT');
                 
@@ -418,9 +419,10 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     notes: 'Auto-adjusted via User Credit'
                 }, { transaction: t });
                 
-                // Deduct from User's creditline
+                // Deduct from User's creditline and block their credit
                 if (user) {
                     user.creditline = parseFloat(user.creditline) - deduction;
+                    user.blockcredit = true;
                 }
             }
 
