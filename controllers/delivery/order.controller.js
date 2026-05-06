@@ -400,8 +400,8 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 }, { transaction: t });
             }
 
-            // Try Credit
-            if (remainingCredit > 0 && due > 0) {
+            // Try Credit (ONLY for the current order of this assignment!)
+            if (remainingCredit > 0 && due > 0 && order.id === assignment.order.id) {
                 const deduction = Math.min(remainingCredit, due);
                 remainingCredit -= deduction;
                 // Note: Credit payment represents giving goods on credit (baki), 
