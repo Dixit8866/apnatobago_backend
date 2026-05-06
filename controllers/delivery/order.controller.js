@@ -274,16 +274,15 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         const userId = assignment.order.userId;
 
         // Verify user credit if creditAmount is used
-        let user;
-        if (creditAmount > 0) {
-            if (!userId) {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot use credit: User not associated with this order.");
-            }
+        let user = null;
+        if (userId) {
             user = await User.findByPk(userId, { transaction: t });
+        }
+
+        if (creditAmount > 0) {
             if (!user) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot use credit: User not associated with this order.");
             }
             if (parseFloat(user.creditline) < parseFloat(creditAmount)) {
                 await t.rollback();
@@ -348,6 +347,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 logger.info(`[Complete Order Settle]: Payment entry for online txn ${onlineTransactionId} already exists. Skipping duplicate creation.`);
             }
 
+            // Restore user's credit from this online payment
+            await restoreUserCreditFromPayment(assignment.order.id, remainingOnline, user, t);
+
             // Mark that online was applied so we can include it in paymentMethodsUsed later
             onlineAppliedToCurrent = true;
             // Reset to 0 so the loop below doesn't subtract it again from the dueAmount
@@ -387,6 +389,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     paymentMethod: 'CASH',
                     notes: 'Auto-adjusted during delivery settlement'
                 }, { transaction: t });
+
+                // Restore user's credit from this cash payment
+                await restoreUserCreditFromPayment(order.id, deduction, user, t);
             }
 
             // Try Online
@@ -412,6 +417,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     transactionId: onlineTransactionId,
                     notes: 'Auto-adjusted during delivery settlement'
                 }, { transaction: t });
+
+                // Restore user's credit from this online payment
+                await restoreUserCreditFromPayment(order.id, deduction, user, t);
             }
 
             // Try Credit (ONLY for the current order of this assignment!)
@@ -651,6 +659,9 @@ export const settleSingleOrderPayment = async (req, res) => {
                     paymentMethod: 'CASH',
                     notes: 'Settle Single Payment (Cash)'
                 }, { transaction: t });
+
+                // Restore user's credit from this cash payment
+                await restoreUserCreditFromPayment(order.id, deduction, user, t);
             }
 
             // Try Online
@@ -672,6 +683,9 @@ export const settleSingleOrderPayment = async (req, res) => {
                     transactionId: onlineTransactionId,
                     notes: 'Settle Single Payment (Online)'
                 }, { transaction: t });
+
+                // Restore user's credit from this online payment
+                await restoreUserCreditFromPayment(order.id, deduction, user, t);
             }
 
             // Try Credit
@@ -763,5 +777,51 @@ export const settleSingleOrderPayment = async (req, res) => {
         if (t) await t.rollback();
         logger.error(`[Settle Single Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * Helper to restore user's creditline when CASH or ONLINE payment is made towards an order that has CREDIT payments.
+ */
+export const restoreUserCreditFromPayment = async (orderId, paymentAmount, user, transaction) => {
+    try {
+        if (!user || paymentAmount <= 0) return;
+
+        // 1. Get all CREDIT payments for this order
+        const creditPayments = await OrderPayment.findAll({
+            where: { orderId, paymentMethod: 'CREDIT' },
+            transaction
+        });
+
+        const totalCreditPaid = creditPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        if (totalCreditPaid <= 0) return;
+
+        // 2. Get all CASH/ONLINE payments for this order
+        const realPayments = await OrderPayment.findAll({
+            where: { 
+                orderId, 
+                paymentMethod: { [Op.in]: ['CASH', 'ONLINE'] } 
+            },
+            transaction
+        });
+
+        const totalRealPaid = realPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+
+        // Calculate how much of previous credit has already been restored
+        const alreadyRestored = Math.min(Math.max(0, totalRealPaid - paymentAmount), totalCreditPaid);
+        const unrestoredCredit = Math.max(0, totalCreditPaid - alreadyRestored);
+
+        const restoreAmount = Math.min(paymentAmount, unrestoredCredit);
+
+        if (restoreAmount > 0) {
+            user.creditline = parseFloat(user.creditline) + restoreAmount;
+            // Also unblock credit if they have positive creditline
+            if (parseFloat(user.creditline) > 0) {
+                user.blockcredit = false;
+            }
+            logger.info(`[Restore Credit]: Restored ${restoreAmount} to user ${user.id} creditline. New creditline: ${user.creditline}`);
+        }
+    } catch (error) {
+        logger.error(`[Restore Credit Error]: ${error.message}`);
     }
 };

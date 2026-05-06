@@ -1,4 +1,5 @@
-import { Order, AppSettings, OrderPayment } from '../../models/index.js';
+import { Order, AppSettings, OrderPayment, User } from '../../models/index.js';
+import { restoreUserCreditFromPayment } from './order.controller.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -209,6 +210,15 @@ export const verifyRazorpayPayment = async (req, res) => {
                     transactionId: razorpayPaymentId,
                     notes: 'Auto-adjusted via online payment collection'
                 });
+
+                // Restore user's credit from this online payment
+                if (order.userId) {
+                    const user = await User.findByPk(order.userId);
+                    if (user) {
+                        await restoreUserCreditFromPayment(order.id, deduction, user);
+                        await user.save();
+                    }
+                }
 
                 logger.info(`[Delivery Razorpay Verify]: Order ${order.id} updated with payment ${razorpayPaymentId}. New Due: ${due}`);
             }
