@@ -3,12 +3,19 @@ import { User, Order, OrderPayment } from './models/index.js';
 
 async function test() {
   try {
-    const user = await User.findOne({
-      where: { fullname: 'Dixit Mathukiya' }
+    const { Op } = sequelize;
+    let user = await User.findOne({
+      where: { number: '9106681629' }
     });
     
     if (!user) {
-      console.log("User Dixit Mathukiya not found!");
+      user = await User.findOne({
+        where: { fullname: { [Op.iLike]: '%Dixit%' } }
+      });
+    }
+    
+    if (!user) {
+      console.log("User with phone 9106681629 or containing name Dixit not found!");
       process.exit(0);
     }
     
