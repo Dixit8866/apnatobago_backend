@@ -524,7 +524,7 @@ export const getUserCreditDetails = async (req, res) => {
 };
 
 /**
- * @desc    Settle a single specific order by Order ID or UUID
+ * @desc    Settle a single or multiple specific orders by Order ID or UUID
  * @route   PUT /api/delivery/orders/settle-single
  * @access  Private (Delivery Boy)
  */
@@ -546,38 +546,41 @@ export const settleSingleOrderPayment = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "orderId is required.");
         }
 
-        logger.info(`[Settle Single Order]: Settle request for order ${orderId}, delivery boy ${deliveryBoyId}`);
+        logger.info(`[Settle Single Order]: Settle request for order(s) ${JSON.stringify(orderId)}, delivery boy ${deliveryBoyId}`);
 
-        // 1. Find Order (by UUID id or string orderId)
-        let order = await Order.findOne({
+        // Normalize orderId to array
+        let orderIds = [];
+        if (Array.isArray(orderId)) {
+            orderIds = orderId;
+        } else if (typeof orderId === 'string') {
+            orderIds = orderId.split(',').map(id => id.trim()).filter(Boolean);
+        }
+
+        // Find all specified orders
+        const orders = await Order.findAll({
             where: {
                 [Op.or]: [
-                    { id: orderId },
-                    { orderId: orderId }
+                    { id: orderIds },
+                    { orderId: orderIds }
                 ]
             },
             transaction: t
         });
 
-        if (!order) {
+        if (orders.length === 0) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Order not found with ID ${orderId}`);
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `No orders found with ID(s) ${JSON.stringify(orderId)}`);
         }
 
-        const actualOrderId = order.id;
+        // Sort orders by oldest first for chronological auto-adjustment
+        orders.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-        // 2. Find associated assignment for this delivery boy (if any)
-        const assignment = await OrderAssignment.findOne({
-            where: { orderId: actualOrderId, deliveryBoyId },
-            transaction: t
-        });
-
-        const userId = order.userId;
+        const userId = orders[0].userId;
         let user = null;
         if (parseFloat(creditAmount) > 0) {
             if (!userId) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot use credit: User not associated with this order.");
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot use credit: User not associated with these orders.");
             }
             user = await User.findByPk(userId, { transaction: t });
             if (!user) {
@@ -592,130 +595,141 @@ export const settleSingleOrderPayment = async (req, res) => {
             user = await User.findByPk(userId, { transaction: t });
         }
 
-        let due = parseFloat(order.dueAmount);
         let remainingCash = parseFloat(cashAmount) || 0;
         let remainingOnline = parseFloat(onlineAmount) || 0;
         let remainingCredit = parseFloat(creditAmount) || 0;
 
-        let orderNotes = [];
-        let paymentMethodsUsed = [];
+        for (const order of orders) {
+            let due = parseFloat(order.dueAmount);
+            if (due <= 0) continue;
 
-        // Try Cash
-        if (remainingCash > 0 && due > 0) {
-            const deduction = Math.min(remainingCash, due);
-            remainingCash -= deduction;
-            due -= deduction;
-            order.paidAmount = parseFloat(order.paidAmount) + deduction;
-            orderNotes.push(`Paid ${deduction} via Cash`);
-            paymentMethodsUsed.push('CASH');
+            let orderNotes = [];
+            let paymentMethodsUsed = [];
 
-            logger.info(`[Settle Single]: Creating CASH payment for order ${order.id}, amount ${deduction}`);
-            await OrderPayment.create({
-                orderId: order.id,
-                deliveryBoyId,
-                amount: deduction,
-                paymentMethod: 'CASH',
-                notes: 'Settle Single Payment (Cash)'
+            // Try Cash
+            if (remainingCash > 0 && due > 0) {
+                const deduction = Math.min(remainingCash, due);
+                remainingCash -= deduction;
+                due -= deduction;
+                order.paidAmount = parseFloat(order.paidAmount) + deduction;
+                orderNotes.push(`Paid ${deduction} via Cash`);
+                paymentMethodsUsed.push('CASH');
+
+                logger.info(`[Settle Single]: Creating CASH payment for order ${order.id}, amount ${deduction}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: deduction,
+                    paymentMethod: 'CASH',
+                    notes: 'Settle Single Payment (Cash)'
+                }, { transaction: t });
+            }
+
+            // Try Online
+            if (remainingOnline > 0 && due > 0) {
+                const deduction = Math.min(remainingOnline, due);
+                remainingOnline -= deduction;
+                due -= deduction;
+                order.paidAmount = parseFloat(order.paidAmount) + deduction;
+                const txnIdStr = onlineTransactionId ? ` (Txn: ${onlineTransactionId})` : '';
+                orderNotes.push(`Paid ${deduction} via Online${txnIdStr}`);
+                paymentMethodsUsed.push('ONLINE');
+
+                logger.info(`[Settle Single]: Creating ONLINE payment for order ${order.id}, amount ${deduction}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: deduction,
+                    paymentMethod: 'ONLINE',
+                    transactionId: onlineTransactionId,
+                    notes: 'Settle Single Payment (Online)'
+                }, { transaction: t });
+            }
+
+            // Try Credit
+            if (remainingCredit > 0 && due > 0) {
+                const deduction = Math.min(remainingCredit, due);
+                remainingCredit -= deduction;
+                // Note: Credit payment represents giving goods on credit (baki), 
+                // so the order's dueAmount remains unchanged for the credit portion 
+                // and is still considered a pending due.
+                orderNotes.push(`Paid ${deduction} via Credit`);
+                paymentMethodsUsed.push('CREDIT');
+
+                logger.info(`[Settle Single]: Creating CREDIT payment for order ${order.id}, amount ${deduction}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: deduction,
+                    paymentMethod: 'CREDIT',
+                    notes: 'Settle Single Payment (Credit)'
+                }, { transaction: t });
+
+                // Deduct from User's creditline and block their credit
+                if (user) {
+                    user.creditline = parseFloat(user.creditline) - deduction;
+                    user.blockcredit = true;
+                }
+            }
+
+            // Update order status/payment
+            let newPaymentStatus = 'Pending';
+            if (due <= 1e-7) {
+                newPaymentStatus = 'Paid';
+            } else if (parseFloat(order.paidAmount) > 0) {
+                newPaymentStatus = 'Partial';
+            }
+
+            let finalMethod = order.paymentMethod;
+            if (paymentMethodsUsed.length === 1) {
+                finalMethod = paymentMethodsUsed[0];
+            } else if (paymentMethodsUsed.length > 1) {
+                finalMethod = 'SPLIT';
+            }
+
+            let newNotes = order.notes ? order.notes + '\n' : '';
+            if (orderNotes.length > 0) {
+                newNotes += `[${new Date().toLocaleString()}] Single Settle Adjustments: ${orderNotes.join(', ')}`;
+            } else {
+                newNotes = order.notes;
+            }
+
+            await order.update({
+                paidAmount: order.paidAmount,
+                dueAmount: due,
+                paymentStatus: newPaymentStatus,
+                paymentMethod: finalMethod,
+                orderStatus: 'Delivered',
+                notes: newNotes
             }, { transaction: t });
-        }
 
-        // Try Online
-        if (remainingOnline > 0 && due > 0) {
-            const deduction = Math.min(remainingOnline, due);
-            remainingOnline -= deduction;
-            due -= deduction;
-            order.paidAmount = parseFloat(order.paidAmount) + deduction;
-            const txnIdStr = onlineTransactionId ? ` (Txn: ${onlineTransactionId})` : '';
-            orderNotes.push(`Paid ${deduction} via Online${txnIdStr}`);
-            paymentMethodsUsed.push('ONLINE');
-
-            logger.info(`[Settle Single]: Creating ONLINE payment for order ${order.id}, amount ${deduction}`);
-            await OrderPayment.create({
-                orderId: order.id,
-                deliveryBoyId,
-                amount: deduction,
-                paymentMethod: 'ONLINE',
-                transactionId: onlineTransactionId,
-                notes: 'Settle Single Payment (Online)'
-            }, { transaction: t });
-        }
-
-        // Try Credit
-        if (remainingCredit > 0 && due > 0) {
-            const deduction = Math.min(remainingCredit, due);
-            remainingCredit -= deduction;
-            // Note: Credit payment represents giving goods on credit (baki), 
-            // so the order's dueAmount remains unchanged for the credit portion 
-            // and is still considered a pending due.
-            orderNotes.push(`Paid ${deduction} via Credit`);
-            paymentMethodsUsed.push('CREDIT');
-
-            logger.info(`[Settle Single]: Creating CREDIT payment for order ${order.id}, amount ${deduction}`);
-            await OrderPayment.create({
-                orderId: order.id,
-                deliveryBoyId,
-                amount: deduction,
-                paymentMethod: 'CREDIT',
-                notes: 'Settle Single Payment (Credit)'
-            }, { transaction: t });
-
-            // Deduct from User's creditline and block their credit
-            if (user) {
-                user.creditline = parseFloat(user.creditline) - deduction;
-                user.blockcredit = true;
+            // Complete associated assignment if found
+            const assignment = await OrderAssignment.findOne({
+                where: { orderId: order.id, deliveryBoyId },
+                transaction: t
+            });
+            if (assignment) {
+                await assignment.update({
+                    status: 'Completed',
+                    notes: notes || assignment.notes
+                }, { transaction: t });
             }
         }
-
-        // Update order status/payment
-        let newPaymentStatus = 'Pending';
-        if (due <= 1e-7) {
-            newPaymentStatus = 'Paid';
-        } else if (parseFloat(order.paidAmount) > 0) {
-            newPaymentStatus = 'Partial';
-        }
-
-        let finalMethod = order.paymentMethod;
-        if (paymentMethodsUsed.length === 1) {
-            finalMethod = paymentMethodsUsed[0];
-        } else if (paymentMethodsUsed.length > 1) {
-            finalMethod = 'SPLIT';
-        }
-
-        let newNotes = order.notes ? order.notes + '\n' : '';
-        if (orderNotes.length > 0) {
-            newNotes += `[${new Date().toLocaleString()}] Single Settle Adjustments: ${orderNotes.join(', ')}`;
-        } else {
-            newNotes = order.notes;
-        }
-
-        await order.update({
-            paidAmount: order.paidAmount,
-            dueAmount: due,
-            paymentStatus: newPaymentStatus,
-            paymentMethod: finalMethod,
-            orderStatus: 'Delivered',
-            notes: newNotes
-        }, { transaction: t });
 
         if (user) {
             await user.save({ transaction: t });
         }
 
-        // Complete assignment if found
-        if (assignment) {
-            await assignment.update({
-                status: 'Completed',
-                notes: notes || assignment.notes
-            }, { transaction: t });
-        }
-
         await t.commit();
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order settled successfully.", {
-            orderId: order.orderId,
-            paidAmount: order.paidAmount,
-            dueAmount: due,
-            paymentStatus: newPaymentStatus,
-            paymentMethod: finalMethod
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders settled successfully.", {
+            settledOrders: orders.map(o => ({
+                id: o.id,
+                orderId: o.orderId,
+                paidAmount: o.paidAmount,
+                dueAmount: o.dueAmount,
+                paymentStatus: o.paymentStatus,
+                paymentMethod: o.paymentMethod
+            }))
         });
     } catch (error) {
         if (t) await t.rollback();
