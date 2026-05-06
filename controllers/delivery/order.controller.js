@@ -323,16 +323,30 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         // ─── FIX: PREVENT DOUBLE COUNTING OF ONLINE PAYMENTS ────────────────────────
         let onlineAppliedToCurrent = false;
         if (remainingOnline > 0 && onlineTransactionId && assignment.order.razorpayPaymentId === onlineTransactionId) {
-            logger.info(`[Complete Order Settle]: Online payment ${onlineTransactionId} already reflected. Recording entry without double deduction.`);
+            logger.info(`[Complete Order Settle]: Online payment ${onlineTransactionId} already reflected. Checking for existing payment entry...`);
             
-            await OrderPayment.create({
-                orderId: assignment.order.id,
-                deliveryBoyId,
-                amount: remainingOnline,
-                paymentMethod: 'ONLINE',
-                transactionId: onlineTransactionId,
-                notes: 'Recorded during delivery settlement (already verified)'
-            }, { transaction: t });
+            // Check if the payment entry was already recorded by verifyRazorpayPayment
+            const existingPayment = await OrderPayment.findOne({
+                where: {
+                    transactionId: onlineTransactionId,
+                    paymentMethod: 'ONLINE'
+                },
+                transaction: t
+            });
+
+            if (!existingPayment) {
+                logger.info(`[Complete Order Settle]: Recording missing payment entry for online txn ${onlineTransactionId}`);
+                await OrderPayment.create({
+                    orderId: assignment.order.id,
+                    deliveryBoyId,
+                    amount: remainingOnline,
+                    paymentMethod: 'ONLINE',
+                    transactionId: onlineTransactionId,
+                    notes: 'Recorded during delivery settlement (already verified)'
+                }, { transaction: t });
+            } else {
+                logger.info(`[Complete Order Settle]: Payment entry for online txn ${onlineTransactionId} already exists. Skipping duplicate creation.`);
+            }
 
             // Mark that online was applied so we can include it in paymentMethodsUsed later
             onlineAppliedToCurrent = true;
