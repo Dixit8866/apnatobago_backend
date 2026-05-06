@@ -28,13 +28,26 @@ export const initializeRazorpayOrder = async (req, res) => {
             orderIds = orderId.split(',').map(id => id.trim()).filter(Boolean);
         }
 
+        // Separate UUIDs and non-UUIDs to avoid Postgres casting errors
+        const uuidIds = orderIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
+        const nonUuidIds = orderIds.filter(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
+
+        const orConditions = [];
+        if (uuidIds.length > 0) {
+            orConditions.push({ id: uuidIds });
+        }
+        if (nonUuidIds.length > 0) {
+            orConditions.push({ orderId: nonUuidIds });
+        }
+
+        if (orConditions.length === 0) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "No valid order ID provided.");
+        }
+
         // Find all specified orders
         const orders = await Order.findAll({
             where: {
-                [Op.or]: [
-                    { id: orderIds },
-                    { orderId: orderIds }
-                ]
+                [Op.or]: orConditions
             }
         });
 
@@ -120,14 +133,25 @@ export const verifyRazorpayPayment = async (req, res) => {
                 } else if (typeof orderId === 'string') {
                     orderIds = orderId.split(',').map(id => id.trim()).filter(Boolean);
                 }
-                orders = await Order.findAll({
-                    where: {
-                        [Op.or]: [
-                            { id: orderIds },
-                            { orderId: orderIds }
-                        ]
-                    }
-                });
+                // Separate UUIDs and non-UUIDs to avoid Postgres casting errors
+                const uuidIds = orderIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
+                const nonUuidIds = orderIds.filter(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
+
+                const orConditions = [];
+                if (uuidIds.length > 0) {
+                    orConditions.push({ id: uuidIds });
+                }
+                if (nonUuidIds.length > 0) {
+                    orConditions.push({ orderId: nonUuidIds });
+                }
+
+                if (orConditions.length > 0) {
+                    orders = await Order.findAll({
+                        where: {
+                            [Op.or]: orConditions
+                        }
+                    });
+                }
             }
 
             if (orders.length === 0) {
