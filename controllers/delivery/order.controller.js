@@ -367,12 +367,12 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     transactionId: onlineTransactionId,
                     notes: 'Recorded during delivery settlement (already verified)'
                 }, { transaction: t });
-            } else {
-                logger.info(`[Complete Order Settle]: Payment entry for online txn ${onlineTransactionId} already exists. Skipping duplicate creation.`);
-            }
 
-            // Restore user's credit from this online payment
-            await restoreUserCreditFromPayment(assignment.order.id, remainingOnline, user, t);
+                // Restore user's credit from this online payment only if we recorded it now
+                await restoreUserCreditFromPayment(assignment.order.id, remainingOnline, user, t);
+            } else {
+                logger.info(`[Complete Order Settle]: Payment entry for online txn ${onlineTransactionId} already exists. Skipping duplicate creation and credit restoration.`);
+            }
 
             // Mark that online was applied so we can include it in paymentMethodsUsed later
             onlineAppliedToCurrent = true;
