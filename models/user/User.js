@@ -80,6 +80,14 @@ const User = sequelize.define('User', {
         type: DataTypes.STRING, // Store as "HH:mm" like "08:00"
         allowNull: true,
     },
+    latitude: {
+        type: DataTypes.DECIMAL(15, 10),
+        allowNull: true,
+    },
+    longitude: {
+        type: DataTypes.DECIMAL(15, 10),
+        allowNull: true,
+    },
     credit: {
         type: DataTypes.VIRTUAL,
         get() {

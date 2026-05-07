@@ -1,5 +1,6 @@
 import express from 'express';
 import * as userController from '../../controllers/admin/user.controller.js';
+import { updateUserLocation } from '../../controllers/common/userLocation.controller.js';
 import { protect, admin } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
@@ -11,6 +12,7 @@ router.get('/', userController.getAllUsers);
 router.get('/:id', userController.getUserById);
 router.get('/:id/analytics', userController.getUserAnalytics);
 router.put('/:id', userController.updateUser);
+router.put('/:id/location', updateUserLocation);
 router.delete('/:id', userController.deleteUser);
 
 export default router;

@@ -200,6 +200,10 @@ const runManualMigrations = async () => {
         await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "isSubmitted" BOOLEAN DEFAULT false');
         await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "submittedAt" TIMESTAMP WITH TIME ZONE');
         
+        // Add latitude and longitude to users table
+        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "latitude" DECIMAL(15, 10)');
+        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "longitude" DECIMAL(15, 10)');
+        
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);
