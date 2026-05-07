@@ -15,10 +15,19 @@ export const getBusinessProfile = async (req, res) => {
         const profile = await BusinessProfile.findOne({ where: { userId } });
 
         if (!profile) {
-            return sendSuccessResponse(res, HTTP_STATUS.OK, "No business profile found.", null);
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "No business profile found.", {
+                id: null,
+                userId,
+                latitude: req.user.latitude ? parseFloat(req.user.latitude) : null,
+                longitude: req.user.longitude ? parseFloat(req.user.longitude) : null
+            });
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile fetched successfully.", profile);
+        const profileData = profile.toJSON();
+        profileData.latitude = req.user.latitude ? parseFloat(req.user.latitude) : null;
+        profileData.longitude = req.user.longitude ? parseFloat(req.user.longitude) : null;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile fetched successfully.", profileData);
     } catch (error) {
         logger.error(`[Get Business Profile Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -92,15 +101,44 @@ export const upsertBusinessProfile = async (req, res) => {
         if (bannerImage !== undefined) profileData.bannerImage = bannerImage;
         if (profileImage !== undefined) profileData.profileImage = profileImage;
 
+        // Handle latitude/longitude updates on User model
+        if (body.latitude !== undefined || body.longitude !== undefined) {
+            const latVal = parseFloat(body.latitude);
+            const lngVal = parseFloat(body.longitude);
+
+            if (isNaN(latVal) || latVal < -90 || latVal > 90) {
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid latitude. Must be between -90 and 90.");
+            }
+
+            if (isNaN(lngVal) || lngVal < -180 || lngVal > 180) {
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid longitude. Must be between -180 and 180.");
+            }
+
+            await req.user.update({
+                latitude: latVal,
+                longitude: lngVal
+            });
+        }
+
         if (profile) {
             await profile.update(profileData);
-            return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile updated successfully.", profile);
+            
+            const profileResponse = profile.toJSON();
+            profileResponse.latitude = req.user.latitude ? parseFloat(req.user.latitude) : null;
+            profileResponse.longitude = req.user.longitude ? parseFloat(req.user.longitude) : null;
+            
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile updated successfully.", profileResponse);
         } else {
             profile = await BusinessProfile.create({
                 userId,
                 ...profileData
             });
-            return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Business profile created successfully.", profile);
+            
+            const profileResponse = profile.toJSON();
+            profileResponse.latitude = req.user.latitude ? parseFloat(req.user.latitude) : null;
+            profileResponse.longitude = req.user.longitude ? parseFloat(req.user.longitude) : null;
+            
+            return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Business profile created successfully.", profileResponse);
         }
     } catch (error) {
         logger.error(`[Upsert Business Profile Error]: ${error.message}`);
@@ -145,9 +183,35 @@ export const updateBusinessProfile = async (req, res) => {
             }
         }
 
+        // Handle latitude/longitude updates on User model
+        if (updateData.latitude !== undefined || updateData.longitude !== undefined) {
+            const latVal = parseFloat(updateData.latitude);
+            const lngVal = parseFloat(updateData.longitude);
+
+            if (isNaN(latVal) || latVal < -90 || latVal > 90) {
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid latitude. Must be between -90 and 90.");
+            }
+
+            if (isNaN(lngVal) || lngVal < -180 || lngVal > 180) {
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid longitude. Must be between -180 and 180.");
+            }
+
+            await req.user.update({
+                latitude: latVal,
+                longitude: lngVal
+            });
+
+            delete updateData.latitude;
+            delete updateData.longitude;
+        }
+
         await profile.update(updateData);
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile updated successfully.", profile);
+        const profileResponse = profile.toJSON();
+        profileResponse.latitude = req.user.latitude ? parseFloat(req.user.latitude) : null;
+        profileResponse.longitude = req.user.longitude ? parseFloat(req.user.longitude) : null;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Business profile updated successfully.", profileResponse);
     } catch (error) {
         logger.error(`[Update Business Profile Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
