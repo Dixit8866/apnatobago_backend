@@ -196,6 +196,10 @@ const runManualMigrations = async () => {
         await sequelize.query('ALTER TABLE order_payments DROP CONSTRAINT IF EXISTS "order_payments_deliveryBoyId_fkey" CASCADE');
         await sequelize.query('ALTER TABLE order_payments ADD CONSTRAINT "order_payments_deliveryBoyId_fkey" FOREIGN KEY ("deliveryBoyId") REFERENCES delivery_boys(id) ON UPDATE CASCADE ON DELETE SET NULL');
         
+        // Add isSubmitted and submittedAt to order_payments
+        await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "isSubmitted" BOOLEAN DEFAULT false');
+        await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "submittedAt" TIMESTAMP WITH TIME ZONE');
+        
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);

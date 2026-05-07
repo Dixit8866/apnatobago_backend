@@ -38,6 +38,14 @@ const OrderPayment = sequelize.define('OrderPayment', {
     notes: {
         type: DataTypes.STRING,
         allowNull: true,
+    },
+    isSubmitted: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    submittedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
     }
 }, {
     timestamps: true,
