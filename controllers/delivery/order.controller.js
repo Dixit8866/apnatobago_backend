@@ -38,7 +38,7 @@ export const getMyAssignedOrders = async (req, res) => {
                     as: 'order',
                     where: Object.keys(orderIncludeWhere).length > 0 ? orderIncludeWhere : null,
                     include: [
-                        { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode'] },
+                        { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'] },
                         { 
                             model: OrderItem, 
                             as: 'items',
@@ -87,7 +87,7 @@ export const getAssignmentDetails = async (req, res) => {
                     model: Order,
                     as: 'order',
                     include: [
-                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'postcode'] },
+                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'] },
                         { model: OrderPayment, as: 'payments' },
                         { 
                             model: OrderItem, 
