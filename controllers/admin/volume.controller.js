@@ -3,6 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { Op } from 'sequelize';
+import sequelize from '../../config/db.js';
 
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createVolume = async (req, res, next) => {
@@ -31,7 +32,7 @@ export const getVolumes = async (req, res, next) => {
 
         // Search in JSONB 'name' field
         const searchWhere = search
-            ? { name: { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } }
+            ? { name: sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${search}%` }) }
             : {};
 
         const whereWithSearch = { ...searchWhere };

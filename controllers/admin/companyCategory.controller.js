@@ -39,7 +39,7 @@ export const getCompanyCategories = async (req, res, next) => {
 
         // Search-only where for accurate tab counts (no status filter)
         const searchWhere = search
-            ? { title: { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } }
+            ? { title: sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${search}%` }) }
             : {};
 
         const whereWithSearch = { ...searchWhere };

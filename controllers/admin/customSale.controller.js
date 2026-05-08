@@ -30,6 +30,7 @@ export const createCustomSale = async (req, res) => {
             items, 
             paymentMethod, 
             paidAmount: rawPaidAmount,
+            deliveryCharge: rawDeliveryCharge,
             godownId,
             notes
         } = req.body;
@@ -88,11 +89,13 @@ export const createCustomSale = async (req, res) => {
             });
         }
 
+        const deliveryCharge = parseFloat(rawDeliveryCharge || 0);
+        const grandTotalAmount = totalAmount + deliveryCharge;
         const paidAmount = parseFloat(rawPaidAmount || 0);
-        const dueAmount = Math.max(0, totalAmount - paidAmount);
+        const dueAmount = Math.max(0, grandTotalAmount - paidAmount);
         
         let paymentStatus = 'Pending';
-        if (paidAmount >= totalAmount) paymentStatus = 'Paid';
+        if (paidAmount >= grandTotalAmount) paymentStatus = 'Paid';
         else if (paidAmount > 0) paymentStatus = 'Partial';
 
         // 2. Create the Order
@@ -101,13 +104,14 @@ export const createCustomSale = async (req, res) => {
             userId: userId || null,
             customerName: userId ? null : customerName,
             customerNumber: userId ? null : customerNumber,
-            totalAmount,
+            totalAmount: grandTotalAmount,
             paidAmount,
             dueAmount,
             paymentMethod: paymentMethod || 'Cash',
             paymentStatus,
             orderStatus: 'Delivered', // Custom sales are usually delivered immediately
             saleType: 'Direct',
+            deliveryCharge,
             notes
         }, { transaction: t });
 

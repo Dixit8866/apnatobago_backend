@@ -26,6 +26,7 @@ import adminNotificationRoutes from './admin-notification.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import helpSupportRoutes from './helpSupport.routes.js';
 import customSaleRoutes from './custom-sale.routes.js';
+import paymentRoutes from './payment.routes.js';
 
 const router = express.Router();
 
@@ -56,5 +57,6 @@ router.use('/admin-notifications', adminNotificationRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/help-support', helpSupportRoutes);
 router.use('/custom-sales', customSaleRoutes);
+router.use('/payments', paymentRoutes);
 
 export default router;

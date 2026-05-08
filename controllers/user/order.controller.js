@@ -25,13 +25,13 @@ const generateUniqueOrderId = () => {
 export const createOrder = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { 
-            items, 
-            paymentMethod, 
-            deliveryMode, 
+        const {
+            items,
+            paymentMethod,
+            deliveryMode,
             totalAmount: frontendTotalAmount // Total sent from frontend for validation
         } = req.body;
-        
+
         const userId = req.user.id;
         const userAppLevel = req.user.applevel;
 
@@ -109,7 +109,7 @@ export const createOrder = async (req, res) => {
                     productName: variant.product.name,
                     volume: variant.volume,
                     image: variant.image || variant.product.thumbnail,
-                    innerUnitLabel: variant.innerUnitRef?.name 
+                    innerUnitLabel: variant.innerUnitRef?.name
                         ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel)
                         : variant.innerUnitLabel,
                     baseUnitLabel: variant.baseUnitRef?.name
@@ -130,7 +130,7 @@ export const createOrder = async (req, res) => {
 
         // Calculate final total (Subtotal + Delivery Charge)
         const backendTotal = calculatedSubtotal + deliveryCharge;
-        
+
         // Validate with frontend total (allowing for small rounding differences)
         if (frontendTotalAmount && Math.abs(parseFloat(frontendTotalAmount) - backendTotal) > 1) {
             logger.warn(`[Order Total Discrepancy]: Frontend: ${frontendTotalAmount}, Backend: ${backendTotal} for User: ${userId}`);
@@ -220,16 +220,16 @@ export const createOrder = async (req, res) => {
                 // How many base units to deduct?
                 // If selling pieces (Inner), deduct quantity directly. 
                 // If selling cartons (Base), deduct quantity * unitsPerPack.
-                const deductionRequired = item.sellUnit === 'Inner' 
-                    ? item.quantity 
+                const deductionRequired = item.sellUnit === 'Inner'
+                    ? item.quantity
                     : item.quantity * (variant.baseUnitsPerPack || 1);
-                
+
                 // Find available stock batches for this variant in the target godown (FIFO)
                 const stocks = await InventoryStock.findAll({
-                    where: { 
-                        variantId: item.variantId, 
-                        godownId: targetGodownId, 
-                        totalBaseUnits: { [Op.gt]: 0 } 
+                    where: {
+                        variantId: item.variantId,
+                        godownId: targetGodownId,
+                        totalBaseUnits: { [Op.gt]: 0 }
                     },
                     order: [['createdAt', 'ASC']],
                     transaction: t
@@ -241,7 +241,7 @@ export const createOrder = async (req, res) => {
 
                     const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
                     const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-                    
+
                     await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
 
                     // Log the transaction
@@ -261,7 +261,7 @@ export const createOrder = async (req, res) => {
 
                     remainingToDeduct -= deductFromThis;
                 }
-                
+
                 if (remainingToDeduct > 0) {
                     logger.warn(`[Stock Deduction]: Order #${newOrder.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId} in Godown ${targetGodownId}`);
                 }
@@ -320,9 +320,9 @@ export const getOrders = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { 
-                            model: ProductVariant, 
-                            as: 'variant', 
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
                             attributes: ['id', 'volume', 'image'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
@@ -360,9 +360,9 @@ export const getOrderDetails = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { 
-                            model: ProductVariant, 
-                            as: 'variant', 
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
                             attributes: ['id', 'volume', 'image'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
@@ -511,9 +511,9 @@ export const getOrdersWithPaymentStatus = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { 
-                            model: ProductVariant, 
-                            as: 'variant', 
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
                             attributes: ['id', 'volume', 'image'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },

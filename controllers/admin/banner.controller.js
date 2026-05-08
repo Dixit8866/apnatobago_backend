@@ -3,6 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { Op } from 'sequelize';
+import sequelize from '../../config/db.js';
 
 export const createBanner = async (req, res, next) => {
     try {
@@ -27,7 +28,11 @@ export const getBanners = async (req, res, next) => {
         let searchOnlyWhere = {};
 
         if (search) {
-            const searchFilter = { [Op.or]: [{ "title": { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } }] };
+            const searchFilter = {
+                [Op.or]: [
+                    sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${search}%` })
+                ]
+            };
             whereClause = { ...whereClause, ...searchFilter };
             searchOnlyWhere = { ...searchFilter };
         }

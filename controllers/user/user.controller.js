@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import User from '../../models/user/User.js';
 import OTP from '../../models/user/Otp.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
+import Order from '../../models/user/Order.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import APP_MESSAGES from '../../constants/messages.js';
@@ -299,6 +300,14 @@ export const getProfile = async (req, res) => {
     try {
         const userData = req.user.toJSON();
         delete userData.logintoken;
+
+        // Sum the dueAmount for all orders of this user
+        const totalDueAmount = await Order.sum('dueAmount', {
+            where: { userId: req.user.id }
+        }) || 0;
+
+        // Nest totalDueAmount directly inside the user object
+        userData.totalDueAmount = parseFloat(totalDueAmount);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Profile fetched successfully", {
             user: userData

@@ -164,7 +164,7 @@ export const getInventoryStocks = async (req, res, next) => {
         }
 
         if (search) {
-            include[0].where = { name: { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } };
+            include[0].where = { name: sequelize.where(sequelize.cast(sequelize.col('product.name'), 'text'), { [Op.iLike]: `%${search}%` }) };
             include[0].required = true;
         }
 

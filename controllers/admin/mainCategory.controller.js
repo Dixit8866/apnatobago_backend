@@ -31,7 +31,11 @@ export const getMainCategories = async (req, res, next) => {
         let searchOnlyWhere = {};
 
         if (search) {
-            const searchFilter = { [Op.or]: [{ "title": { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } }] };
+            const searchFilter = {
+                [Op.or]: [
+                    sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${search}%` })
+                ]
+            };
             whereClause = { ...whereClause, ...searchFilter };
             searchOnlyWhere = { ...searchFilter };
         }

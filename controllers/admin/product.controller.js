@@ -280,11 +280,15 @@ export const createProduct = async (req, res, next) => {
 
 export const getProducts = async (req, res, next) => {
     try {
-        const { search = '', status, mainCategoryId } = req.query;
+        const { search = '', status, mainCategoryId, isTobacco } = req.query;
         
         const searchWhere = search
-            ? { name: { [Op.cast]: 'text', [Op.iLike]: `%${search}%` } }
+            ? { name: sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${search}%` }) }
             : {};
+
+        if (isTobacco !== undefined && isTobacco !== '') {
+            searchWhere.isTobaccoProduct = isTobacco === 'true';
+        }
 
         const whereWithFilters = { ...searchWhere };
         if (status) {
