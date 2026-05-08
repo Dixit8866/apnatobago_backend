@@ -21,8 +21,9 @@ import { Op } from 'sequelize';
  */
 export const getMainCategories = async (req, res) => {
     try {
+        const showTobacco = req.user ? req.user.showtabacco : false;
         const whereClause = { status: 'Active' };
-        if (req.user && !req.user.showtabacco) {
+        if (!showTobacco) {
             whereClause.isTobacco = false;
         }
 
@@ -38,7 +39,7 @@ export const getMainCategories = async (req, res) => {
                                 product."mainCategoryId" = "MainCategory".id
                                 AND product.status = 'Active'
                                 AND product."deletedAt" IS NULL
-                                ${req.user && !req.user.showtabacco ? 'AND product."isTobaccoProduct" = false' : ''}
+                                ${!showTobacco ? 'AND product."isTobaccoProduct" = false' : ''}
                         )`),
                         'productCount'
                     ]
@@ -283,6 +284,23 @@ export const getBanners = async (req, res) => {
             where: { status: 'Active' },
             order: [['position', 'ASC']]
         });
+
+        const showTobacco = req.user ? req.user.showtabacco : false;
+        if (!showTobacco) {
+            // Filter out banners containing tobacco keywords (in JSONB title) to pass Apple App Review safely
+            const tobaccoKeywords = [
+                'tobacco', 'tobaco', 'cigarette', 'cig', 'smoking', 'bidi', 'gutka', 'paan', 'pan', 'smoke',
+                'તમાકુ', 'બીડી', 'સિગારેટ', 'ગુટખા', 'માવો', 'પાન', 'ખૈની'
+            ];
+
+            const filteredBanners = banners.filter(banner => {
+                const titleStr = JSON.stringify(banner.title || {}).toLowerCase();
+                return !tobaccoKeywords.some(keyword => titleStr.includes(keyword));
+            });
+
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Banners fetched successfully", filteredBanners);
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Banners fetched successfully", banners);
     } catch (error) {
         logger.error(`[Get Banners Error]: ${error.message}`);

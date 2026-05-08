@@ -24,7 +24,7 @@ import {
     searchCatalogue
 } from '../../controllers/user/catalogue.controller.js';
 import { getAppSettings } from '../../controllers/user/settings.controller.js';
-import { protectUser } from '../../middlewares/userAuth.middleware.js';
+import { protectUser, optionalProtectUser } from '../../middlewares/userAuth.middleware.js';
 import cartRoutes from './cart.routes.js';
 import wishlistRoutes from './wishlist.routes.js';
 import orderRoutes from './order.routes.js';
@@ -48,14 +48,14 @@ router.post('/logout', protectUser, logoutUser);
 router.delete('/delete-account', protectUser, deleteAccount);
 
 // Catalogue - Protected by User Auth
-router.get('/main-categories', protectUser, getMainCategories);
+router.get('/main-categories', optionalProtectUser, getMainCategories);
 router.get('/sub-categories', protectUser, getSubCategories);
 router.get('/company-categories', protectUser, getCompanyCategories);
 router.get('/products', protectUser, getProducts);
 router.get('/products/main-category/:id', protectUser, getProductsByMainCategory);
 router.get('/products/sub-category/:id', protectUser, getProductsBySubCategory);
 router.get('/products/company-category/:id', protectUser, getProductsByCompanyCategory);
-router.get('/banners', protectUser, getBanners);
+router.get('/banners', optionalProtectUser, getBanners);
 router.get('/settings', protectUser, getAppSettings);
 router.get('/search', protectUser, searchCatalogue);
 

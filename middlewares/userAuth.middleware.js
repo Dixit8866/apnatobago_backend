@@ -46,3 +46,37 @@ export const protectUser = async (req, res, next) => {
         return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.UNAUTHORIZED_INVALID_TOKEN);
     }
 };
+
+export const optionalProtectUser = async (req, res, next) => {
+    let token;
+
+    if (req.cookies && req.cookies.apna_tobacco_admin) {
+        token = req.cookies.apna_tobacco_admin;
+    } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+        token = req.headers.authorization.split(' ')[1];
+    }
+
+    if (!token) {
+        req.user = null;
+        return next();
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        const currentUser = await User.findByPk(decoded.id, {
+            attributes: { exclude: ['password'] }
+        });
+
+        if (!currentUser || currentUser.status === 'Deleted' || currentUser.logintoken !== token) {
+            req.user = null;
+            return next();
+        }
+
+        req.user = currentUser;
+        next();
+    } catch (error) {
+        req.user = null;
+        next();
+    }
+};
