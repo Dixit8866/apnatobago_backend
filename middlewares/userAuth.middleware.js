@@ -35,10 +35,6 @@ export const protectUser = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "User account is deleted.");
         }
         
-        if (currentUser.logintoken !== token) {
-             return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Session expired, logged in from another device or logged out.");
-        }
-
         req.user = currentUser;
         next();
     } catch (error) {
@@ -68,7 +64,7 @@ export const optionalProtectUser = async (req, res, next) => {
             attributes: { exclude: ['password'] }
         });
 
-        if (!currentUser || currentUser.status === 'Deleted' || currentUser.logintoken !== token) {
+        if (!currentUser || currentUser.status === 'Deleted') {
             req.user = null;
             return next();
         }
