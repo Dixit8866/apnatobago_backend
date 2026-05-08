@@ -45,7 +45,11 @@ export const getSubCategories = async (req, res, next) => {
 
         // Base search filter (only text search, no status overrides for counts)
         const searchWhere = search
-            ? { title: sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${search}%` }) }
+            ? {
+                [Op.or]: [
+                    sequelize.where(sequelize.cast(sequelize.col('SubCategory.title'), 'text'), { [Op.iLike]: `%${search}%` })
+                ]
+            }
             : {};
 
         if (mainCategoryId) {

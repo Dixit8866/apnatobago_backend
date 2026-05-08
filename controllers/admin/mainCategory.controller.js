@@ -33,7 +33,7 @@ export const getMainCategories = async (req, res, next) => {
         if (search) {
             const searchFilter = {
                 [Op.or]: [
-                    sequelize.where(sequelize.cast(sequelize.col('title'), 'text'), { [Op.iLike]: `%${search}%` })
+                    sequelize.where(sequelize.cast(sequelize.col('MainCategory.title'), 'text'), { [Op.iLike]: `%${search}%` })
                 ]
             };
             whereClause = { ...whereClause, ...searchFilter };

@@ -306,8 +306,9 @@ export const getProfile = async (req, res) => {
             where: { userId: req.user.id }
         }) || 0;
 
-        // Nest totalDueAmount directly inside the user object
+        // Nest totalDueAmount directly inside the user object (with both casings to avoid client mismatch)
         userData.totalDueAmount = parseFloat(totalDueAmount);
+        userData.totaldueamount = parseFloat(totalDueAmount);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Profile fetched successfully", {
             user: userData
@@ -383,6 +384,15 @@ export const editProfile = async (req, res) => {
         const userData = user.toJSON();
         delete userData.password;
         delete userData.logintoken;
+
+        // Sum the dueAmount for all orders of this user so editProfile has it too!
+        const totalDueAmount = await Order.sum('dueAmount', {
+            where: { userId: req.user.id }
+        }) || 0;
+
+        // Nest totalDueAmount directly inside the user object (with both casings to avoid client mismatch)
+        userData.totalDueAmount = parseFloat(totalDueAmount);
+        userData.totaldueamount = parseFloat(totalDueAmount);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Profile updated successfully", {
             user: userData
