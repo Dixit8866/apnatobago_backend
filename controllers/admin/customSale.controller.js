@@ -187,23 +187,31 @@ export const createCustomSale = async (req, res) => {
  */
 export const getCustomSales = async (req, res) => {
     try {
-        const { search, date } = req.query;
+        const { search, date, status } = req.query;
         const where = { saleType: 'Direct' };
 
-        if (date) {
-            const startOfDay = new Date(date);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(date);
-            endOfDay.setHours(23, 59, 59, 999);
-            where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
-        }
-
         if (search) {
+            // Global search bypasses tab and date constraints
             where[Op.or] = [
                 { orderId: { [Op.iLike]: `%${search}%` } },
                 { customerName: { [Op.iLike]: `%${search}%` } },
-                { '$user.fullname$': { [Op.iLike]: `%${search}%` } }
+                { customerNumber: { [Op.iLike]: `%${search}%` } },
+                { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
+                { '$user.number$': { [Op.iLike]: `%${search}%` } }
             ];
+        } else {
+            // Only filter by tab status and date when there is no active search query
+            if (status && status !== 'All') {
+                where.orderStatus = status;
+            }
+
+            if (date) {
+                const startOfDay = new Date(date);
+                startOfDay.setHours(0, 0, 0, 0);
+                const endOfDay = new Date(date);
+                endOfDay.setHours(23, 59, 59, 999);
+                where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+            }
         }
 
         const pagination = getPaginationOptions(req.query);
@@ -225,10 +233,42 @@ export const getCustomSales = async (req, res) => {
             limit,
             offset,
             order: [['createdAt', 'DESC']],
-            distinct: true
+            distinct: true,
+            subQuery: false
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Custom sales fetched successfully.", formatPaginatedResponse(result, page, limit));
+        // ── Calculate Global Status Counts for Custom Sales ─────────────────────
+        const todayStr = new Date().toISOString().split('T')[0];
+        const startOfToday = new Date(todayStr);
+        startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date(todayStr);
+        endOfToday.setHours(23, 59, 59, 999);
+
+        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, cancelledCount, todayCount] = await Promise.all([
+            Order.count({ where: { orderStatus: 'Pending', saleType: 'Direct' } }),
+            Order.count({ where: { orderStatus: 'Packaging', saleType: 'Direct' } }),
+            Order.count({ where: { orderStatus: 'Packed', saleType: 'Direct' } }),
+            Order.count({ where: { orderStatus: 'Shipping', saleType: 'Direct' } }),
+            Order.count({ where: { orderStatus: 'Delivered', saleType: 'Direct' } }),
+            Order.count({ where: { orderStatus: 'Payment Collect', saleType: 'Direct' } }),
+            Order.count({ where: { orderStatus: 'Cancelled', saleType: 'Direct' } }),
+            Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] }, saleType: 'Direct' } })
+        ]);
+
+        const responseData = formatPaginatedResponse(result, page, limit);
+        responseData.statusCounts = {
+            '': responseData.totalRecords,
+            Today: todayCount,
+            Pending: pendingCount,
+            Packaging: packagingCount,
+            Packed: packedCount,
+            Shipping: shippingCount,
+            Delivered: deliveredCount,
+            'Payment Collect': paymentCollectCount,
+            Cancelled: cancelledCount
+        };
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Custom sales fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Get Custom Sales Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);

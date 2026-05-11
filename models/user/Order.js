@@ -43,7 +43,7 @@ const Order = sequelize.define(
             type: DataTypes.STRING,
             defaultValue: 'Pending',
             validate: {
-                isIn: [['Pending', 'Packed', 'Shipped', 'Delivered', 'Cancelled']]
+                isIn: [['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Cancelled']]
             }
         },
         paymentMethod: {

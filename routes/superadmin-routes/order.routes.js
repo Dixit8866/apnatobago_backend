@@ -4,7 +4,8 @@ import {
     updateOrderStatus, 
     getOrderDetails,
     downloadInvoice,
-    downloadDeliveryLabel
+    downloadDeliveryLabel,
+    bulkUpdateOrderStatus
 } from '../../controllers/admin/order.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 
@@ -17,6 +18,7 @@ router.get('/', getAllOrders);
 router.get('/:id', getOrderDetails);
 router.get('/:id/invoice', downloadInvoice);
 router.get('/:id/delivery-label', downloadDeliveryLabel);
+router.put('/bulk-status', bulkUpdateOrderStatus);
 router.put('/:id/status', updateOrderStatus);
 
 export default router;

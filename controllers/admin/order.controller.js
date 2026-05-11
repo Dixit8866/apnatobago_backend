@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -65,28 +65,32 @@ export const downloadDeliveryLabel = async (req, res) => {
 export const getAllOrders = async (req, res) => {
     try {
         const { status, date, search } = req.query;
-        const where = {};
-
-        if (status && status !== 'All') {
-            where.orderStatus = status;
-        }
-
-        if (date) {
-            // Filter by specific date
-            const startOfDay = new Date(date);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(date);
-            endOfDay.setHours(23, 59, 59, 999);
-            where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
-        }
+        const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
 
         if (search) {
-            // Search by orderId or User name/number
+            // Global search bypasses tab status and date limits so users can find orders instantly
             where[Op.or] = [
                 { orderId: { [Op.iLike]: `%${search}%` } },
+                { customerName: { [Op.iLike]: `%${search}%` } },
+                { customerNumber: { [Op.iLike]: `%${search}%` } },
                 { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
-                { '$user.number$': { [Op.iLike]: `%${search}%` } }
+                { '$user.number$': { [Op.iLike]: `%${search}%` } },
+                { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } }
             ];
+        } else {
+            // Apply status and date filters only when there is no active search
+            if (status && status !== 'All') {
+                where.orderStatus = status;
+            }
+
+            if (date) {
+                // Filter by specific date
+                const startOfDay = new Date(date);
+                startOfDay.setHours(0, 0, 0, 0);
+                const endOfDay = new Date(date);
+                endOfDay.setHours(23, 59, 59, 999);
+                where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+            }
         }
 
         const pagination = getPaginationOptions(req.query);
@@ -98,7 +102,14 @@ export const getAllOrders = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city']
+                    attributes: ['id', 'fullname', 'number', 'city'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['id', 'shopName']
+                        }
+                    ]
                 },
                 {
                     model: OrderItem,
@@ -108,10 +119,11 @@ export const getAllOrders = async (req, res) => {
                         { 
                             model: ProductVariant, 
                             as: 'variant', 
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'],
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
                             ]
                         }
                     ]
@@ -125,7 +137,8 @@ export const getAllOrders = async (req, res) => {
             limit,
             offset,
             order: [['createdAt', 'DESC']],
-            distinct: true
+            distinct: true,
+            subQuery: false
         });
 
         // ── Calculate Global Status Counts for Tab Badges ────────────────────────
@@ -136,25 +149,29 @@ export const getAllOrders = async (req, res) => {
         const endOfToday = new Date(todayStr);
         endOfToday.setHours(23, 59, 59, 999);
 
-        const [pendingCount, packedCount, shippedCount, deliveredCount, cancelledCount, todayCount] = await Promise.all([
-            Order.count({ where: { orderStatus: 'Pending' } }),
-            Order.count({ where: { orderStatus: 'Packed' } }),
-            Order.count({ where: { orderStatus: 'Shipped' } }),
-            Order.count({ where: { orderStatus: 'Delivered' } }),
-            Order.count({ where: { orderStatus: 'Cancelled' } }),
-            Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] } } })
+        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, cancelledCount, todayCount] = await Promise.all([
+            Order.count({ where: { orderStatus: 'Pending', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: 'Packaging', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: 'Packed', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: 'Shipping', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: 'Delivered', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: 'Payment Collect', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: 'Cancelled', saleType: 'Online' } }),
+            Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] }, saleType: 'Online' } })
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
         
         // Attach counts to response
         responseData.statusCounts = {
-            '': responseData.totalRecords, // All (total for current search/filter if we wanted, but let's use global if no search)
+            '': responseData.totalRecords,
             Today: todayCount,
             Pending: pendingCount,
+            Packaging: packagingCount,
             Packed: packedCount,
-            Shipped: shippedCount,
+            Shipping: shippingCount,
             Delivered: deliveredCount,
+            'Payment Collect': paymentCollectCount,
             Cancelled: cancelledCount
         };
 
@@ -182,7 +199,7 @@ export const updateOrderStatus = async (req, res) => {
         }
 
         if (orderStatus) {
-            const validStatuses = ['Pending', 'Packed', 'Shipped', 'Delivered', 'Cancelled'];
+            const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Cancelled'];
             if (!validStatuses.includes(orderStatus)) {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
             }
@@ -230,6 +247,37 @@ export const updateOrderStatus = async (req, res) => {
 };
 
 /**
+ * @desc    Bulk update order status
+ * @route   PUT /api/admin/orders/bulk-status
+ * @access  Private (Admin)
+ */
+export const bulkUpdateOrderStatus = async (req, res) => {
+    try {
+        const { orderIds, orderStatus } = req.body;
+
+        if (!Array.isArray(orderIds) || orderIds.length === 0) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide an array of orderIds.");
+        }
+
+        const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Cancelled'];
+        if (!validStatuses.includes(orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
+        }
+
+        // Update all matching orders
+        await Order.update(
+            { orderStatus },
+            { where: { id: orderIds } }
+        );
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders status updated successfully.");
+    } catch (error) {
+        logger.error(`[Admin Bulk Update Order Status Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
  * @desc    Get single order details for admin
  * @route   GET /api/admin/orders/:id
  * @access  Private (Admin)
@@ -252,10 +300,11 @@ export const getOrderDetails = async (req, res) => {
                         { 
                             model: ProductVariant, 
                             as: 'variant', 
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel'],
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
                             ]
                         }
                     ]

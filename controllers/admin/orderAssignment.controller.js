@@ -1,4 +1,4 @@
-import { OrderAssignment, Order, DeliveryBoy, User } from '../../models/index.js';
+import { OrderAssignment, Order, DeliveryBoy, User, OrderItem, Product, ProductVariant, Volume } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -55,17 +55,52 @@ export const bulkAssignOrders = async (req, res) => {
  */
 export const getAllAssignments = async (req, res) => {
     try {
+        const { search } = req.query;
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
+        const where = {};
+
+        if (search) {
+            where[Op.or] = [
+                { '$order.orderId$': { [Op.iLike]: `%${search}%` } },
+                { '$order.customerName$': { [Op.iLike]: `%${search}%` } },
+                { '$order.customerNumber$': { [Op.iLike]: `%${search}%` } },
+                { '$order.user.fullname$': { [Op.iLike]: `%${search}%` } },
+                { '$order.user.number$': { [Op.iLike]: `%${search}%` } },
+                { '$order.user.city$': { [Op.iLike]: `%${search}%` } },
+                { '$deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
+                { '$deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } },
+                { '$deliveryBoy.vehicleNumber$': { [Op.iLike]: `%${search}%` } }
+            ];
+        }
+
         const result = await OrderAssignment.findAndCountAll({
+            where,
             attributes: { exclude: ['orderId'] },
             include: [
                 {
                     model: Order,
                     as: 'order',
-                    attributes: ['id', 'orderId', 'totalAmount', 'orderStatus', 'createdAt', 'shippingAddress', 'paymentMethod'],
-                    include: [{ model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode'] }]
+                    attributes: ['id', 'orderId', 'customerName', 'customerNumber', 'totalAmount', 'orderStatus', 'createdAt', 'shippingAddress', 'paymentMethod', 'paymentStatus'],
+                    include: [
+                        { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode'] },
+                        {
+                            model: OrderItem,
+                            as: 'items',
+                            include: [
+                                { model: Product, as: 'product', attributes: ['id', 'name'] },
+                                {
+                                    model: ProductVariant,
+                                    as: 'variant',
+                                    attributes: ['id', 'volume', 'volumeId'],
+                                    include: [
+                                        { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
                 },
                 {
                     model: DeliveryBoy,
@@ -75,7 +110,8 @@ export const getAllAssignments = async (req, res) => {
             ],
             limit,
             offset,
-            order: [['assignedAt', 'DESC']]
+            order: [['assignedAt', 'DESC']],
+            distinct: true
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);

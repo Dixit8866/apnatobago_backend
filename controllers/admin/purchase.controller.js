@@ -5,6 +5,7 @@ import { PurchaseBill, VendorOrder, InventoryStock, InventoryTransaction, Produc
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { generatePurchaseBill } from '../../utils/invoiceGenerator.js';
 import logger from '../../logger/apiLogger.js';
+import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 
 export const convertToBill = async (req, res, next) => {
     const t = await sequelize.transaction();
@@ -156,16 +157,37 @@ export const convertToBill = async (req, res, next) => {
 
 export const getPurchaseBills = async (req, res, next) => {
     try {
-        const bills = await PurchaseBill.findAll({
+        const { search } = req.query;
+        const pagination = getPaginationOptions(req.query);
+        const { limit, offset, page } = pagination;
+
+        const where = {};
+
+        if (search) {
+            where[Op.or] = [
+                { billNo: { [Op.iLike]: `%${search}%` } },
+                { '$vendor.name$': { [Op.iLike]: `%${search}%` } },
+                { '$vendor.companyName$': { [Op.iLike]: `%${search}%` } }
+            ];
+        }
+
+        const result = await PurchaseBill.findAndCountAll({
+            where,
             include: [
                 { model: Vendor, as: 'vendor', attributes: ['name', 'companyName'] },
                 { model: Admin, as: 'receiver', attributes: ['name'] },
                 { model: Godown, as: 'godown', attributes: ['name'] },
                 { model: VendorOrder, as: 'vendorOrder', attributes: ['orderNo'] }
             ],
-            order: [['createdAt', 'DESC']]
+            limit,
+            offset,
+            order: [['createdAt', 'DESC']],
+            distinct: true,
+            subQuery: false
         });
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Purchase bills fetched successfully', bills);
+
+        const responseData = formatPaginatedResponse(result, page, limit);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Purchase bills fetched successfully', responseData);
     } catch (error) {
         next(error);
     }

@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -60,22 +60,39 @@ export const getAllUsers = async (req, res, next) => {
                 { fullname: { [Op.iLike]: `%${search}%` } },
                 { number: { [Op.iLike]: `%${search}%` } },
                 { email: { [Op.iLike]: `%${search}%` } },
+                { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } }
             ];
         }
         if (status) where.status = status;
         if (kycverification) where.kycverification = kycverification;
 
+        const include = [
+            {
+                model: BusinessProfile,
+                as: 'businessProfile',
+                attributes: ['id', 'shopName']
+            }
+        ];
+
         if (req.query.paginate === 'false') {
-            const users = await User.findAll({ where, attributes: SAFE_ATTRIBUTES, order: [['createdAt', 'DESC']] });
+            const users = await User.findAll({ 
+                where, 
+                attributes: SAFE_ATTRIBUTES, 
+                include,
+                order: [['createdAt', 'DESC']] 
+            });
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'Users fetched.', users);
         }
 
         const { count, rows } = await User.findAndCountAll({
             where,
             attributes: SAFE_ATTRIBUTES,
+            include,
             limit: limitOptions,
             offset,
             order: [['createdAt', 'DESC']],
+            distinct: true,
+            subQuery: false
         });
 
         const responseData = formatPaginatedResponse({ count, rows }, page, limitOptions);
