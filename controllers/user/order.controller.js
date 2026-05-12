@@ -133,7 +133,6 @@ export const createOrder = async (req, res) => {
                 applicablePricing = pricings[0];
             }
 
-            const bUPP = Number(variant.baseUnitsPerPack || 1);
             let rawPrice = 0;
             if (applicablePricing) {
                 rawPrice = parseFloat(applicablePricing.price);
