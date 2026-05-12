@@ -102,14 +102,16 @@ export const getAllOrders = async (req, res) => {
         const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
 
         if (search) {
-            // Global search bypasses tab status and date limits so users can find orders instantly
             where[Op.or] = [
                 { orderId: { [Op.iLike]: `%${search}%` } },
                 { customerName: { [Op.iLike]: `%${search}%` } },
                 { customerNumber: { [Op.iLike]: `%${search}%` } },
                 { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
                 { '$user.number$': { [Op.iLike]: `%${search}%` } },
-                { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } }
+                { '$user.city$': { [Op.iLike]: `%${search}%` } },
+                { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$assignment.deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
+                { '$assignment.deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } }
             ];
         } else {
             // Apply status and date filters only when there is no active search
