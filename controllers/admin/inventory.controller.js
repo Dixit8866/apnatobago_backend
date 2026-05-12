@@ -71,9 +71,10 @@ async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }
     const uuidIds = ids.filter(id => uuidRegex.test(id));
     
     if (uuidIds.length > 0) {
-        const volRows = await Volume.findAll({ where: { id: { [Op.in]: uuidIds }, status: 'Active' }, transaction });
+        const uniqueUuidIds = [...new Set(uuidIds)];
+        const volRows = await Volume.findAll({ where: { id: { [Op.in]: uniqueUuidIds }, status: 'Active' }, transaction });
         const foundIds = new Set(volRows.map(r => r.id));
-        return foundIds.size === uuidIds.length;
+        return foundIds.size === uniqueUuidIds.length;
     }
     
     return true;
