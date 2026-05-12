@@ -190,13 +190,14 @@ export const getAllOrders = async (req, res) => {
         const endOfToday = new Date(todayStr);
         endOfToday.setHours(23, 59, 59, 999);
 
-        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, cancelledCount, todayCount] = await Promise.all([
+        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount] = await Promise.all([
             Order.count({ where: { orderStatus: 'Pending', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Packaging', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Packed', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Shipping', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Delivered', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Payment Collect', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: 'Payment Verify', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Cancelled', saleType: 'Online' } }),
             Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] }, saleType: 'Online' } })
         ]);
@@ -213,6 +214,7 @@ export const getAllOrders = async (req, res) => {
             Shipping: shippingCount,
             Delivered: deliveredCount,
             'Payment Collect': paymentCollectCount,
+            'Payment Verify': paymentVerifyCount,
             Cancelled: cancelledCount
         };
 
@@ -244,7 +246,7 @@ export const updateOrderStatus = async (req, res) => {
         }
 
         if (orderStatus) {
-            const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Cancelled'];
+            const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled'];
             if (!validStatuses.includes(orderStatus)) {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
             }
@@ -304,7 +306,7 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide an array of orderIds.");
         }
 
-        const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Cancelled'];
+        const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled'];
         if (!validStatuses.includes(orderStatus)) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
         }
@@ -338,7 +340,7 @@ export const bulkVerifyPayments = async (req, res) => {
         const orders = await Order.findAll({ where: { id: orderIds } });
 
         for (const order of orders) {
-            order.orderStatus = 'Delivered';
+            order.orderStatus = 'Payment Verify';
             order.paymentCollectStatus = 'Verified';
 
             // Cash and Online should be Paid, Credit remains Pending
