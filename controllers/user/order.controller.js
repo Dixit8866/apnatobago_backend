@@ -158,7 +158,7 @@ export const createOrder = async (req, res) => {
             // Deduct from credit line
             user.creditline = currentCredit - finalTotal;
             await user.save({ transaction: t });
-            paymentStatus = 'Paid';
+            paymentStatus = 'Pending'; // Set to Pending so CREDIT orders are treated as outstanding dues (baki)
         } else if (method === 'ONLINE') {
             paymentStatus = 'Pending';
         } else {
