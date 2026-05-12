@@ -361,7 +361,7 @@ export const getOrders = async (req, res) => {
 
         const updatedOrders = orders.map(o => {
             const orderData = o.toJSON ? o.toJSON() : o;
-            if (orderData.orderStatus === 'Payment Collect') {
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
             return orderData;
@@ -411,7 +411,7 @@ export const getOrderDetails = async (req, res) => {
         }
 
         const orderData = order.toJSON ? order.toJSON() : order;
-        if (orderData.orderStatus === 'Payment Collect') {
+        if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
             orderData.orderStatus = 'Delivered';
         }
 
@@ -565,7 +565,7 @@ export const getOrdersWithPaymentStatus = async (req, res) => {
 
         const updatedOrders = orders.map(o => {
             const orderData = o.toJSON ? o.toJSON() : o;
-            if (orderData.orderStatus === 'Payment Collect') {
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
             return orderData;
