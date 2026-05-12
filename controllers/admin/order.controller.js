@@ -323,6 +323,47 @@ export const bulkUpdateOrderStatus = async (req, res) => {
 };
 
 /**
+ * @desc    Bulk verify payments and move to Delivered
+ * @route   PUT /api/admin/orders/bulk-verify-payments
+ * @access  Private (Admin)
+ */
+export const bulkVerifyPayments = async (req, res) => {
+    try {
+        const { orderIds } = req.body;
+
+        if (!Array.isArray(orderIds) || orderIds.length === 0) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide an array of orderIds.");
+        }
+
+        const orders = await Order.findAll({ where: { id: orderIds } });
+
+        for (const order of orders) {
+            order.orderStatus = 'Delivered';
+            order.paymentCollectStatus = 'Verified';
+
+            // Cash and Online should be Paid, Credit remains Pending
+            const method = order.paymentMethod?.toUpperCase();
+            if (method === 'CASH' || method === 'ONLINE') {
+                order.paymentStatus = 'Paid';
+                order.paidAmount = order.totalAmount;
+                order.dueAmount = 0;
+            } else {
+                order.paymentStatus = 'Pending';
+                order.paidAmount = 0;
+                order.dueAmount = order.totalAmount;
+            }
+
+            await order.save();
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Payments verified and orders moved to Delivered successfully.");
+    } catch (error) {
+        logger.error(`[Admin Bulk Verify Payments Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
  * @desc    Get single order details for admin
  * @route   GET /api/admin/orders/:id
  * @access  Private (Admin)

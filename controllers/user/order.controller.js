@@ -202,9 +202,7 @@ export const createOrder = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ${currentCredit}, Required: ${finalTotal}`);
             }
 
-            // Deduct from credit line
-            user.creditline = currentCredit - finalTotal;
-            await user.save({ transaction: t });
+            // Do NOT deduct from credit line during order creation as per user request (ત્યારે ક્રેડિટ કટ નથી કરવાની)
             paymentStatus = 'Pending'; // Set to Pending so CREDIT orders are treated as outstanding dues (baki)
         } else if (method === 'ONLINE') {
             paymentStatus = 'Pending';

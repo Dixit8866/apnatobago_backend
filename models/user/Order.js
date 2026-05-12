@@ -57,6 +57,13 @@ const Order = sequelize.define(
                 isIn: [['Pending', 'Paid', 'Partial', 'Failed', 'Refunded']]
             }
         },
+        paymentCollectStatus: {
+            type: DataTypes.STRING,
+            defaultValue: 'Unverified',
+            validate: {
+                isIn: [['Unverified', 'Verified', 'N/A']]
+            }
+        },
         paidAmount: {
             type: DataTypes.DECIMAL(10, 2),
             defaultValue: 0,
