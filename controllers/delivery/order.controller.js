@@ -513,19 +513,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             await user.save({ transaction: t });
         }
 
-        // Determine order status: if there's cash or online payment to collect, go to Payment Collect, otherwise Delivered
-        const hasRealPayment = await OrderPayment.findOne({
-            where: {
-                orderId: assignment.orderId,
-                paymentMethod: { [Op.in]: ['CASH', 'ONLINE'] }
-            },
-            transaction: t
-        });
-
-        const finalStatus = hasRealPayment ? 'Payment Collect' : 'Delivered';
-
+        // Ensure current order status is updated to Payment Collect upon delivery completion
         await Order.update(
-            { orderStatus: finalStatus }, 
+            { orderStatus: 'Payment Collect' }, 
             { where: { id: assignment.orderId }, transaction: t }
         );
 
@@ -773,22 +763,12 @@ export const settleSingleOrderPayment = async (req, res) => {
                 newNotes = order.notes;
             }
 
-            const hasRealPayment = await OrderPayment.findOne({
-                where: {
-                    orderId: order.id,
-                    paymentMethod: { [Op.in]: ['CASH', 'ONLINE'] }
-                },
-                transaction: t
-            });
-
-            const finalStatus = hasRealPayment ? 'Payment Collect' : 'Delivered';
-
             await order.update({
                 paidAmount: order.paidAmount,
                 dueAmount: due,
                 paymentStatus: newPaymentStatus,
                 paymentMethod: finalMethod,
-                orderStatus: finalStatus,
+                orderStatus: 'Payment Collect',
                 notes: newNotes
             }, { transaction: t });
 
