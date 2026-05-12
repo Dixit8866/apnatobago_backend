@@ -513,9 +513,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             await user.save({ transaction: t });
         }
 
-        // Ensure current order status is updated to Delivered
+        // Ensure current order status is updated to Payment Collect
         await Order.update(
-            { orderStatus: 'Delivered' }, 
+            { orderStatus: 'Payment Collect' }, 
             { where: { id: assignment.orderId }, transaction: t }
         );
 
@@ -768,7 +768,7 @@ export const settleSingleOrderPayment = async (req, res) => {
                 dueAmount: due,
                 paymentStatus: newPaymentStatus,
                 paymentMethod: finalMethod,
-                orderStatus: 'Delivered',
+                orderStatus: 'Payment Collect',
                 notes: newNotes
             }, { transaction: t });
 
