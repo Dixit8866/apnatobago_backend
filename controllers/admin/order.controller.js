@@ -7,6 +7,40 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML } from '../../utils/invoiceGenerator.js';
 // ... (rest of imports)
 
+const adjustOrderPayments = (order) => {
+    if (!order) return order;
+    
+    const rowData = order.toJSON ? order.toJSON() : order;
+    if (!rowData.payments || rowData.payments.length === 0) return rowData;
+
+    const payments = rowData.payments.map(p => p.toJSON ? p.toJSON() : { ...p });
+    const totalCredit = payments.filter(p => p.paymentMethod === 'CREDIT').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const totalReal = payments.filter(p => p.paymentMethod === 'CASH' || p.paymentMethod === 'ONLINE').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const orderTotal = parseFloat(rowData.totalAmount || 0);
+
+    const nonCreditPortion = Math.max(0, orderTotal - totalCredit);
+    const realPaidToCredit = Math.max(0, totalReal - nonCreditPortion);
+    const outstandingCredit = Math.max(0, totalCredit - realPaidToCredit);
+
+    let remainingCreditToDistribute = outstandingCredit;
+    
+    const adjustedPayments = payments.map(payment => {
+        if (payment.paymentMethod === 'CREDIT') {
+            const currentAmount = parseFloat(payment.amount || 0);
+            const allowedAmount = Math.min(currentAmount, remainingCreditToDistribute);
+            remainingCreditToDistribute -= allowedAmount;
+            return {
+                ...payment,
+                amount: allowedAmount.toFixed(2)
+            };
+        }
+        return payment;
+    }).filter(p => parseFloat(p.amount) > 0);
+
+    rowData.payments = adjustedPayments;
+    return rowData;
+};
+
 /**
  * @desc    Generate Delivery Label PDF
  * @route   GET /api/admin/orders/:id/delivery-label
@@ -180,6 +214,10 @@ export const getAllOrders = async (req, res) => {
             Cancelled: cancelledCount
         };
 
+        if (responseData.orders) {
+            responseData.orders = responseData.orders.map(order => adjustOrderPayments(order));
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "All orders fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Admin Get Orders Error]: ${error.message}`);
@@ -331,7 +369,9 @@ export const getOrderDetails = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", order);
+        const adjustedOrder = adjustOrderPayments(order);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", adjustedOrder);
     } catch (error) {
         logger.error(`[Admin Get Order Details Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
