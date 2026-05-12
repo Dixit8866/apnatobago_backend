@@ -120,7 +120,7 @@ export const getAssignmentDetails = async (req, res) => {
                 where: {
                     userId,
                     dueAmount: { [Op.gt]: 0 },
-                    orderStatus: 'Delivered',
+                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
                     orderId: { [Op.ne]: assignment.order.orderId } // Exclude current order
                 },
                 attributes: ['id', 'orderId', 'totalAmount', 'dueAmount', 'paymentStatus'],
@@ -321,7 +321,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 where: {
                     userId,
                     dueAmount: { [Op.gt]: 0 },
-                    orderStatus: 'Delivered',
+                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
                     id: { [Op.ne]: assignment.orderId } // Exclude current order as we'll add it manually
                 },
                 order: [['createdAt', 'ASC']], // Oldest first
