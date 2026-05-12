@@ -335,7 +335,15 @@ export const getOrders = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", orders);
+        const updatedOrders = orders.map(o => {
+            const orderData = o.toJSON ? o.toJSON() : o;
+            if (orderData.orderStatus === 'Payment Collect') {
+                orderData.orderStatus = 'Delivered';
+            }
+            return orderData;
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
     } catch (error) {
         logger.error(`[Get Orders Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -378,7 +386,12 @@ export const getOrderDetails = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", order);
+        const orderData = order.toJSON ? order.toJSON() : order;
+        if (orderData.orderStatus === 'Payment Collect') {
+            orderData.orderStatus = 'Delivered';
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", orderData);
     } catch (error) {
         logger.error(`[Get Order Details Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -526,7 +539,15 @@ export const getOrdersWithPaymentStatus = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment status data fetched successfully.", orders);
+        const updatedOrders = orders.map(o => {
+            const orderData = o.toJSON ? o.toJSON() : o;
+            if (orderData.orderStatus === 'Payment Collect') {
+                orderData.orderStatus = 'Delivered';
+            }
+            return orderData;
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment status data fetched successfully.", updatedOrders);
     } catch (error) {
         logger.error(`[Get Payment Status Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
