@@ -513,9 +513,19 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             await user.save({ transaction: t });
         }
 
-        // Ensure current order status is updated to Delivered
+        // Determine order status: if there's cash or online payment to collect, go to Payment Collect, otherwise Delivered
+        const hasRealPayment = await OrderPayment.findOne({
+            where: {
+                orderId: assignment.orderId,
+                paymentMethod: { [Op.in]: ['CASH', 'ONLINE'] }
+            },
+            transaction: t
+        });
+
+        const finalStatus = hasRealPayment ? 'Payment Collect' : 'Delivered';
+
         await Order.update(
-            { orderStatus: 'Delivered' }, 
+            { orderStatus: finalStatus }, 
             { where: { id: assignment.orderId }, transaction: t }
         );
 
@@ -763,12 +773,22 @@ export const settleSingleOrderPayment = async (req, res) => {
                 newNotes = order.notes;
             }
 
+            const hasRealPayment = await OrderPayment.findOne({
+                where: {
+                    orderId: order.id,
+                    paymentMethod: { [Op.in]: ['CASH', 'ONLINE'] }
+                },
+                transaction: t
+            });
+
+            const finalStatus = hasRealPayment ? 'Payment Collect' : 'Delivered';
+
             await order.update({
                 paidAmount: order.paidAmount,
                 dueAmount: due,
                 paymentStatus: newPaymentStatus,
                 paymentMethod: finalMethod,
-                orderStatus: 'Delivered',
+                orderStatus: finalStatus,
                 notes: newNotes
             }, { transaction: t });
 
@@ -817,36 +837,36 @@ export const restoreUserCreditFromPayment = async (orderId, paymentAmount, user,
         // 1. Get all CREDIT payments for this order
         const creditPayments = await OrderPayment.findAll({
             where: { orderId, paymentMethod: 'CREDIT' },
+            order: [['createdAt', 'ASC']],
             transaction
         });
 
-        const totalCreditPaid = creditPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        if (totalCreditPaid <= 0) return;
+        let remainingRealPayment = paymentAmount;
 
-        // 2. Get all CASH/ONLINE payments for this order
-        const realPayments = await OrderPayment.findAll({
-            where: { 
-                orderId, 
-                paymentMethod: { [Op.in]: ['CASH', 'ONLINE'] } 
-            },
-            transaction
-        });
+        for (const creditPayment of creditPayments) {
+            if (remainingRealPayment <= 0) break;
 
-        const totalRealPaid = realPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+            const creditAmt = parseFloat(creditPayment.amount || 0);
+            const reduction = Math.min(creditAmt, remainingRealPayment);
 
-        // Calculate how much of previous credit has already been restored
-        const alreadyRestored = Math.min(Math.max(0, totalRealPaid - paymentAmount), totalCreditPaid);
-        const unrestoredCredit = Math.max(0, totalCreditPaid - alreadyRestored);
-
-        const restoreAmount = Math.min(paymentAmount, unrestoredCredit);
-
-        if (restoreAmount > 0) {
-            user.creditline = parseFloat(user.creditline) + restoreAmount;
-            // Also unblock credit if they have positive creditline
-            if (parseFloat(user.creditline) > 0) {
-                user.blockcredit = false;
+            if (reduction > 0) {
+                const newAmount = creditAmt - reduction;
+                if (newAmount <= 1e-4) {
+                    // Fully cleared - delete the credit payment record!
+                    await creditPayment.destroy({ transaction });
+                } else {
+                    // Partially cleared - update the credit payment record with the reduced amount!
+                    await creditPayment.update({ amount: newAmount }, { transaction });
+                }
+                remainingRealPayment -= reduction;
+                
+                // Restore user's creditline by the same reduction amount!
+                user.creditline = parseFloat(user.creditline) + reduction;
+                if (parseFloat(user.creditline) > 0) {
+                    user.blockcredit = false;
+                }
+                logger.info(`[Restore Credit]: Cleared ${reduction} of credit payment ${creditPayment.id}. Restored to user creditline.`);
             }
-            logger.info(`[Restore Credit]: Restored ${restoreAmount} to user ${user.id} creditline. New creditline: ${user.creditline}`);
         }
     } catch (error) {
         logger.error(`[Restore Credit Error]: ${error.message}`);
