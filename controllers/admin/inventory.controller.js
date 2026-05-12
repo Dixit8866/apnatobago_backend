@@ -66,12 +66,17 @@ async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }
     const ids = [primaryUnitId, secondaryUnitId].filter(Boolean);
     if (!ids.length) return false;
     
-    // Check volumes
-    const volRows = await Volume.findAll({ where: { id: { [Op.in]: ids }, status: 'Active' }, transaction });
+    // Filter only valid UUIDs
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidIds = ids.filter(id => uuidRegex.test(id));
     
-    // Total found unique IDs should match the requested ids count
-    const foundIds = new Set(volRows.map(r => r.id));
-    return foundIds.size === ids.length;
+    if (uuidIds.length > 0) {
+        const volRows = await Volume.findAll({ where: { id: { [Op.in]: uuidIds }, status: 'Active' }, transaction });
+        const foundIds = new Set(volRows.map(r => r.id));
+        return foundIds.size === uuidIds.length;
+    }
+    
+    return true;
 }
 
 export const getInventoryOptions = async (req, res, next) => {
