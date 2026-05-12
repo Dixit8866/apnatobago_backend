@@ -1,7 +1,44 @@
-import { Cart, Product, ProductVariant, ProductPricing, Volume, Wishlist } from '../../models/index.js';
+import { Cart, Product, ProductVariant, ProductPricing, Volume, Wishlist, InventoryStock, User, Godown } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
+import { Op } from 'sequelize';
+
+// Helper to get available stock of a variant in the customer's postcode-specific/main godown
+const getAvailableStock = async (variantId, userId) => {
+    const userData = await User.findByPk(userId);
+    if (!userData) return 0;
+
+    let targetGodownId = null;
+    if (userData.postcode) {
+        const godown = await Godown.findOne({
+            where: { pincodes: { [Op.contains]: [userData.postcode] } }
+        });
+        if (godown) targetGodownId = godown.id;
+    }
+
+    if (!targetGodownId) {
+        const mainGodown = await Godown.findOne({ where: { type: 'main' } });
+        if (mainGodown) targetGodownId = mainGodown.id;
+    }
+
+    if (!targetGodownId) {
+        const anyGodown = await Godown.findOne();
+        if (anyGodown) targetGodownId = anyGodown.id;
+    }
+
+    if (!targetGodownId) return 0;
+
+    const totalStock = await InventoryStock.sum('totalBaseUnits', {
+        where: {
+            variantId,
+            godownId: targetGodownId,
+            totalBaseUnits: { [Op.gt]: 0 }
+        }
+    });
+
+    return parseFloat(totalStock) || 0;
+};
 
 /**
  * @desc    Get current user's cart
@@ -142,10 +179,25 @@ export const addToCart = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide product, variant and quantity");
         }
 
+        // Check stock first
+        const availableStock = await getAvailableStock(variantId, userId);
+        const qtyToAdd = Number(quantity);
+
         // Check if item already exists in cart
         let cartItem = await Cart.findOne({
             where: { userId, productId, variantId }
         });
+
+        const currentCartQty = cartItem ? Number(cartItem.quantity) : 0;
+        const totalProposedQty = currentCartQty + qtyToAdd;
+
+        if (totalProposedQty > availableStock) {
+            return sendErrorResponse(
+                res, 
+                HTTP_STATUS.BAD_REQUEST, 
+                `Insufficient stock. Available stock: ${availableStock} units. Your cart has: ${currentCartQty} units.`
+            );
+        }
 
         if (cartItem) {
             // Update existing quantity (incremental)
@@ -203,12 +255,24 @@ export const updateCartItem = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Cart item not found");
         }
 
-        if (Number(quantity) <= 0) {
+        const proposedQty = Number(quantity);
+        if (proposedQty > 0) {
+            const availableStock = await getAvailableStock(cartItem.variantId, userId);
+            if (proposedQty > availableStock) {
+                return sendErrorResponse(
+                    res, 
+                    HTTP_STATUS.BAD_REQUEST, 
+                    `Insufficient stock. Available stock: ${availableStock} units.`
+                );
+            }
+        }
+
+        if (proposedQty <= 0) {
             await cartItem.destroy();
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Item removed from cart");
         }
 
-        cartItem.quantity = Number(quantity);
+        cartItem.quantity = proposedQty;
         await cartItem.save();
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart item updated successfully", cartItem);

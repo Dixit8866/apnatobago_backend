@@ -35,12 +35,30 @@ export const createOrder = async (req, res) => {
         const userId = req.user.id;
         const userAppLevel = req.user.applevel;
 
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Order must contain at least one item.");
+        // Fetch User and target Godown at the beginning for stock validation
+        const userData = await User.findByPk(userId, { transaction: t });
+        if (!userData) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
         }
 
-        if (frontendTotalAmount === undefined || frontendTotalAmount === null) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Total amount is required for validation.");
+        let targetGodownId = null;
+        if (userData.postcode) {
+            const godown = await Godown.findOne({
+                where: { pincodes: { [Op.contains]: [userData.postcode] } },
+                transaction: t
+            });
+            if (godown) targetGodownId = godown.id;
+        }
+
+        if (!targetGodownId) {
+            const mainGodown = await Godown.findOne({ where: { type: 'main' }, transaction: t });
+            if (mainGodown) targetGodownId = mainGodown.id;
+        }
+
+        if (!targetGodownId) {
+            const anyGodown = await Godown.findOne({ transaction: t });
+            if (anyGodown) targetGodownId = anyGodown.id;
         }
 
         let calculatedSubtotal = 0;
@@ -62,6 +80,36 @@ export const createOrder = async (req, res) => {
             if (!variant) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant ${variantId} not found.`);
+            }
+
+            const bUPP = Number(variant.baseUnitsPerPack || 1);
+
+            // Volume-wise/Unit-wise stock check
+            const deductionRequired = sellUnit === 'Inner'
+                ? Number(quantity)
+                : Number(quantity) * bUPP;
+
+            let availableStock = 0;
+            if (targetGodownId) {
+                const totalStock = await InventoryStock.sum('totalBaseUnits', {
+                    where: {
+                        variantId,
+                        godownId: targetGodownId,
+                        totalBaseUnits: { [Op.gt]: 0 }
+                    },
+                    transaction: t
+                });
+                availableStock = parseFloat(totalStock) || 0;
+            }
+
+            if (deductionRequired > availableStock) {
+                await t.rollback();
+                const productName = variant.product?.name || 'Product';
+                return sendErrorResponse(
+                    res,
+                    HTTP_STATUS.BAD_REQUEST,
+                    `Insufficient stock for ${productName}. Required: ${deductionRequired} units, Available: ${availableStock} units.`
+                );
             }
 
             // 2. Fetch all pricings for this variant
@@ -191,27 +239,6 @@ export const createOrder = async (req, res) => {
         await Cart.destroy({ where: { userId }, transaction: t });
 
         // 8. Deduct Stock from Inventory
-        const userData = await User.findByPk(userId, { transaction: t });
-        let targetGodownId = null;
-
-        if (userData.postcode) {
-            const godown = await Godown.findOne({
-                where: { pincodes: { [Op.contains]: [userData.postcode] } },
-                transaction: t
-            });
-            if (godown) targetGodownId = godown.id;
-        }
-
-        if (!targetGodownId) {
-            const mainGodown = await Godown.findOne({ where: { type: 'main' }, transaction: t });
-            if (mainGodown) targetGodownId = mainGodown.id;
-        }
-
-        if (!targetGodownId) {
-            const anyGodown = await Godown.findOne({ transaction: t });
-            if (anyGodown) targetGodownId = anyGodown.id;
-        }
-
         if (targetGodownId) {
             for (const item of orderItemsData) {
                 const variant = await ProductVariant.findByPk(item.variantId, { transaction: t });
