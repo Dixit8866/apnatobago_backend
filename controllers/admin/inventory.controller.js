@@ -95,7 +95,8 @@ export const getInventoryOptions = async (req, res, next) => {
                                 order: [['minQty', 'ASC']],
                             },
                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
                         ],
                     },
                 ],
