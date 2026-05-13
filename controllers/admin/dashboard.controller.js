@@ -69,7 +69,10 @@ export const getDashboardStats = async (req, res) => {
 
         // 6.2 Delivered Order Count
         const deliveredOrderCount = await Order.count({
-            where: { ...dateFilter, orderStatus: 'Delivered' }
+            where: { 
+                ...dateFilter, 
+                orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } 
+            }
         });
 
         // 6.3 Today Total Order
