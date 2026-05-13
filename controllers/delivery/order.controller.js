@@ -155,6 +155,11 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.payments = payments;
         }
 
+        if (data.order) {
+            data.order.totalAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
+            data.order.dueAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
+        }
+
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
         data.currentOrderAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
