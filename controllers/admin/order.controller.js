@@ -13,7 +13,13 @@ const adjustOrderPayments = (order) => {
     const rowData = order.toJSON ? order.toJSON() : order;
     if (!rowData.payments || rowData.payments.length === 0) return rowData;
 
-    const payments = rowData.payments.map(p => p.toJSON ? p.toJSON() : { ...p });
+    let payments = rowData.payments.map(p => p.toJSON ? p.toJSON() : { ...p });
+
+    // If the order is in "Payment Collect" status, ONLY show payments currently pending verification (isSubmitted = false)
+    if (rowData.orderStatus === 'Payment Collect') {
+        payments = payments.filter(p => p.isSubmitted === false);
+    }
+
     const totalCredit = payments.filter(p => p.paymentMethod === 'CREDIT').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
     const totalReal = payments.filter(p => p.paymentMethod === 'CASH' || p.paymentMethod === 'ONLINE').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
     const orderTotal = parseFloat(rowData.totalAmount || 0);
@@ -98,7 +104,7 @@ export const downloadDeliveryLabel = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
     try {
-        const { status, date, search } = req.query;
+        const { status, date, search, deliveryBoyId, startDate, endDate } = req.query;
         const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
 
         if (search) {
@@ -113,24 +119,41 @@ export const getAllOrders = async (req, res) => {
                 { '$assignment.deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
                 { '$assignment.deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } }
             ];
-        } else {
-            // Apply status and date filters only when there is no active search
-            if (status && status !== 'All') {
-                if (status === 'Delivered') {
-                    where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
-                } else {
-                    where.orderStatus = status;
-                }
-            }
+        }
 
-            if (date) {
-                // Filter by specific date
-                const startOfDay = new Date(date);
-                startOfDay.setHours(0, 0, 0, 0);
-                const endOfDay = new Date(date);
-                endOfDay.setHours(23, 59, 59, 999);
-                where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+        // Apply status filter
+        if (status && status !== 'All') {
+            if (status === 'Delivered') {
+                where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+            } else {
+                where.orderStatus = status;
             }
+        }
+
+        // Apply date / date range filters
+        if (startDate && endDate) {
+            const startOfDate = new Date(startDate);
+            startOfDate.setHours(0, 0, 0, 0);
+            const endOfDate = new Date(endDate);
+            endOfDate.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+        } else if (startDate) {
+            const startOfDate = new Date(startDate);
+            startOfDate.setHours(0, 0, 0, 0);
+            const endOfDate = new Date(startDate);
+            endOfDate.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+        } else if (date) {
+            const startOfDay = new Date(date);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(date);
+            endOfDay.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+        }
+
+        // Apply delivery boy filter
+        if (deliveryBoyId) {
+            where['$assignment.deliveryBoyId$'] = deliveryBoyId;
         }
 
         const pagination = getPaginationOptions(req.query);
@@ -186,8 +209,38 @@ export const getAllOrders = async (req, res) => {
             subQuery: false
         });
 
-        // ── Calculate Global Status Counts for Tab Badges ────────────────────────
-        // These are calculated independently of the current filters (except date for 'Today')
+        // ── Calculate Dynamic Status Counts for Tab Badges ────────────────────────
+        const countWhere = { saleType: 'Online' };
+        const countInclude = [];
+
+        if (deliveryBoyId) {
+            countWhere['$assignment.deliveryBoyId$'] = deliveryBoyId;
+            countInclude.push({
+                model: OrderAssignment,
+                as: 'assignment'
+            });
+        }
+
+        if (startDate && endDate) {
+            const startOfDate = new Date(startDate);
+            startOfDate.setHours(0, 0, 0, 0);
+            const endOfDate = new Date(endDate);
+            endOfDate.setHours(23, 59, 59, 999);
+            countWhere.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+        } else if (startDate) {
+            const startOfDate = new Date(startDate);
+            startOfDate.setHours(0, 0, 0, 0);
+            const endOfDate = new Date(startDate);
+            endOfDate.setHours(23, 59, 59, 999);
+            countWhere.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+        } else if (date) {
+            const startOfDay = new Date(date);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(date);
+            endOfDay.setHours(23, 59, 59, 999);
+            countWhere.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+        }
+
         const todayStr = new Date().toISOString().split('T')[0];
         const startOfToday = new Date(todayStr);
         startOfToday.setHours(0, 0, 0, 0);
@@ -195,15 +248,15 @@ export const getAllOrders = async (req, res) => {
         endOfToday.setHours(23, 59, 59, 999);
 
         const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount] = await Promise.all([
-            Order.count({ where: { orderStatus: 'Pending', saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: 'Packaging', saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: 'Packed', saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: 'Shipping', saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] }, saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: 'Payment Collect', saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: 'Payment Verify', saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: 'Cancelled', saleType: 'Online' } }),
-            Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] }, saleType: 'Online' } })
+            Order.count({ where: { ...countWhere, orderStatus: 'Pending' }, include: countInclude }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Packaging' }, include: countInclude }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Packed' }, include: countInclude }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Shipping' }, include: countInclude }),
+            Order.count({ where: { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }, include: countInclude }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Payment Collect' }, include: countInclude }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Payment Verify' }, include: countInclude }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Cancelled' }, include: countInclude }),
+            Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } }, include: countInclude })
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -255,6 +308,14 @@ export const updateOrderStatus = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
             }
             order.orderStatus = orderStatus;
+
+            // If moving to verified status, auto-submit any pending payments
+            if (orderStatus === 'Payment Verify' || orderStatus === 'Delivered') {
+                await OrderPayment.update(
+                    { isSubmitted: true, submittedAt: new Date() },
+                    { where: { orderId: order.id, isSubmitted: false } }
+                );
+            }
         }
 
         // Handle Payment Updates
@@ -360,6 +421,12 @@ export const bulkVerifyPayments = async (req, res) => {
             }
 
             await order.save();
+
+            // Auto-submit associated unsubmitted payments
+            await OrderPayment.update(
+                { isSubmitted: true, submittedAt: new Date() },
+                { where: { orderId: order.id, isSubmitted: false } }
+            );
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payments verified and orders moved to Delivered successfully.");
