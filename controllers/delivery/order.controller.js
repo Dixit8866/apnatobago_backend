@@ -155,15 +155,15 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.payments = payments;
         }
 
-        if (data.order) {
-            data.order.totalAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
-            data.order.dueAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
-        }
-
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
         data.currentOrderAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
         data.grandTotalAmount = (parseFloat(totalPastDueAmount) + parseFloat(assignment.order.dueAmount)).toFixed(2);
+
+        // Force the mobile app to display the remaining due amount instead of the full bill amount
+        if (data.order) {
+            data.order.totalAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", data);
     } catch (error) {
