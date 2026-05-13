@@ -309,30 +309,12 @@ export const updateOrderStatus = async (req, res) => {
             }
             order.orderStatus = orderStatus;
 
-            // If moving to verified status, auto-submit any pending payments and recalculate paid/due amount
+            // If moving to verified status, auto-submit any pending payments
             if (orderStatus === 'Payment Verify' || orderStatus === 'Delivered') {
                 await OrderPayment.update(
                     { isSubmitted: true, submittedAt: new Date() },
                     { where: { orderId: order.id, isSubmitted: false } }
                 );
-
-                // Recalculate actual paidAmount and dueAmount from OrderPayment records
-                const paymentsList = await OrderPayment.findAll({ where: { orderId: order.id } });
-                const totalCashOnlinePaid = paymentsList
-                    .filter(p => p.paymentMethod === 'CASH' || p.paymentMethod === 'ONLINE')
-                    .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-
-                const total = parseFloat(order.totalAmount || 0);
-                order.paidAmount = totalCashOnlinePaid;
-                order.dueAmount = Math.max(0, total - totalCashOnlinePaid);
-
-                if (order.paidAmount >= total) {
-                    order.paymentStatus = 'Paid';
-                } else if (order.paidAmount > 0) {
-                    order.paymentStatus = 'Partial';
-                } else {
-                    order.paymentStatus = 'Pending';
-                }
             }
         }
 
@@ -426,31 +408,25 @@ export const bulkVerifyPayments = async (req, res) => {
             order.orderStatus = 'Payment Verify';
             order.paymentCollectStatus = 'Verified';
 
-            // Auto-submit associated unsubmitted payments first
+            // Cash and Online should be Paid, Credit remains Pending
+            const method = order.paymentMethod?.toUpperCase();
+            if (method === 'CASH' || method === 'ONLINE') {
+                order.paymentStatus = 'Paid';
+                order.paidAmount = order.totalAmount;
+                order.dueAmount = 0;
+            } else {
+                order.paymentStatus = 'Pending';
+                order.paidAmount = 0;
+                order.dueAmount = order.totalAmount;
+            }
+
+            await order.save();
+
+            // Auto-submit associated unsubmitted payments
             await OrderPayment.update(
                 { isSubmitted: true, submittedAt: new Date() },
                 { where: { orderId: order.id, isSubmitted: false } }
             );
-
-            // Recalculate actual paidAmount and dueAmount from OrderPayment records
-            const paymentsList = await OrderPayment.findAll({ where: { orderId: order.id } });
-            const totalCashOnlinePaid = paymentsList
-                .filter(p => p.paymentMethod === 'CASH' || p.paymentMethod === 'ONLINE')
-                .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-
-            const total = parseFloat(order.totalAmount || 0);
-            order.paidAmount = totalCashOnlinePaid;
-            order.dueAmount = Math.max(0, total - totalCashOnlinePaid);
-
-            if (order.paidAmount >= total) {
-                order.paymentStatus = 'Paid';
-            } else if (order.paidAmount > 0) {
-                order.paymentStatus = 'Partial';
-            } else {
-                order.paymentStatus = 'Pending';
-            }
-
-            await order.save();
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payments verified and orders moved to Delivered successfully.");
