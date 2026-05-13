@@ -408,17 +408,7 @@ export const bulkVerifyPayments = async (req, res) => {
             order.orderStatus = 'Payment Verify';
             order.paymentCollectStatus = 'Verified';
 
-            // Cash and Online should be Paid, Credit remains Pending
-            const method = order.paymentMethod?.toUpperCase();
-            if (method === 'CASH' || method === 'ONLINE') {
-                order.paymentStatus = 'Paid';
-                order.paidAmount = order.totalAmount;
-                order.dueAmount = 0;
-            } else {
-                order.paymentStatus = 'Pending';
-                order.paidAmount = 0;
-                order.dueAmount = order.totalAmount;
-            }
+
 
             await order.save();
 
