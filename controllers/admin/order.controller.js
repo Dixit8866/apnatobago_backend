@@ -116,7 +116,11 @@ export const getAllOrders = async (req, res) => {
         } else {
             // Apply status and date filters only when there is no active search
             if (status && status !== 'All') {
-                where.orderStatus = status;
+                if (status === 'Delivered') {
+                    where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+                } else {
+                    where.orderStatus = status;
+                }
             }
 
             if (date) {
@@ -195,7 +199,7 @@ export const getAllOrders = async (req, res) => {
             Order.count({ where: { orderStatus: 'Packaging', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Packed', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Shipping', saleType: 'Online' } }),
-            Order.count({ where: { orderStatus: 'Delivered', saleType: 'Online' } }),
+            Order.count({ where: { orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] }, saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Payment Collect', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Payment Verify', saleType: 'Online' } }),
             Order.count({ where: { orderStatus: 'Cancelled', saleType: 'Online' } }),

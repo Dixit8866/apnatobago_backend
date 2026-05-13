@@ -157,8 +157,8 @@ export const getAssignmentDetails = async (req, res) => {
 
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.currentOrderAmount = parseFloat(assignment.order.totalAmount).toFixed(2);
-        data.grandTotalAmount = (parseFloat(totalPastDueAmount) + parseFloat(assignment.order.totalAmount)).toFixed(2);
+        data.currentOrderAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
+        data.grandTotalAmount = (parseFloat(totalPastDueAmount) + parseFloat(assignment.order.dueAmount)).toFixed(2);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", data);
     } catch (error) {
