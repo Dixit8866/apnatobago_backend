@@ -17,7 +17,7 @@ const adjustOrderPayments = (order) => {
 
     // If the order is in "Payment Collect" status, ONLY show payments currently pending verification (isSubmitted = false)
     if (rowData.orderStatus === 'Payment Collect') {
-        payments = payments.filter(p => p.isSubmitted === false);
+        payments = payments.filter(p => !p.isSubmitted);
     }
 
     const totalCredit = payments.filter(p => p.paymentMethod === 'CREDIT').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
