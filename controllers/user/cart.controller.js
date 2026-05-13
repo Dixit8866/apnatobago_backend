@@ -4,8 +4,8 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { Op } from 'sequelize';
 
-// Helper to get available stock of a variant in the customer's postcode-specific/main godown
-const getAvailableStock = async (variantId, userId) => {
+// Helper to get available stock of a product across all its variants in the customer's postcode-specific/main godown
+const getAvailableStock = async (productId, userId) => {
     const userData = await User.findByPk(userId);
     if (!userData) return 0;
 
@@ -31,7 +31,7 @@ const getAvailableStock = async (variantId, userId) => {
 
     const totalStock = await InventoryStock.sum('totalBaseUnits', {
         where: {
-            variantId,
+            productId,
             godownId: targetGodownId,
             totalBaseUnits: { [Op.gt]: 0 }
         }
@@ -179,8 +179,13 @@ export const addToCart = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide product, variant and quantity");
         }
 
-        // Check stock first
-        const availableStock = await getAvailableStock(variantId, userId);
+        // Fetch variant to calculate base units required
+        const variant = await ProductVariant.findByPk(variantId);
+        if (!variant) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found");
+        }
+
+        const bUPP = Number(variant.baseUnitsPerPack || 1);
         const qtyToAdd = Number(quantity);
 
         // Check if item already exists in cart
@@ -191,11 +196,18 @@ export const addToCart = async (req, res) => {
         const currentCartQty = cartItem ? Number(cartItem.quantity) : 0;
         const totalProposedQty = currentCartQty + qtyToAdd;
 
-        if (totalProposedQty > availableStock) {
+        const deductionRequired = variant.sellingVolume 
+            ? totalProposedQty * Number(variant.sellingVolume) * bUPP
+            : totalProposedQty * bUPP;
+
+        // Check stock first (at product level)
+        const availableStock = await getAvailableStock(productId, userId);
+
+        if (deductionRequired > availableStock) {
             return sendErrorResponse(
                 res, 
                 HTTP_STATUS.BAD_REQUEST, 
-                `Insufficient stock. Available stock: ${availableStock} units. Your cart has: ${currentCartQty} units.`
+                `Insufficient stock. Available stock: ${availableStock} base units. Your cart requires: ${deductionRequired} base units.`
             );
         }
 
@@ -257,12 +269,18 @@ export const updateCartItem = async (req, res) => {
 
         const proposedQty = Number(quantity);
         if (proposedQty > 0) {
-            const availableStock = await getAvailableStock(cartItem.variantId, userId);
-            if (proposedQty > availableStock) {
+            const variant = await ProductVariant.findByPk(cartItem.variantId);
+            const bUPP = variant ? Number(variant.baseUnitsPerPack || 1) : 1;
+            const deductionRequired = variant && variant.sellingVolume 
+                ? proposedQty * Number(variant.sellingVolume) * bUPP
+                : proposedQty * bUPP;
+
+            const availableStock = await getAvailableStock(cartItem.productId, userId);
+            if (deductionRequired > availableStock) {
                 return sendErrorResponse(
                     res, 
                     HTTP_STATUS.BAD_REQUEST, 
-                    `Insufficient stock. Available stock: ${availableStock} units.`
+                    `Insufficient stock. Available stock: ${availableStock} base units. Your request requires: ${deductionRequired} base units.`
                 );
             }
         }

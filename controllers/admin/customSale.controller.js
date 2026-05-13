@@ -130,7 +130,7 @@ export const createCustomSale = async (req, res) => {
             
             const stocks = await InventoryStock.findAll({
                 where: { 
-                    variantId: item.variantId, 
+                    productId: item.productId, 
                     godownId, 
                     totalBaseUnits: { [Op.gt]: 0 } 
                 },

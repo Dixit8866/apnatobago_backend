@@ -93,7 +93,7 @@ export const createOrder = async (req, res) => {
             if (targetGodownId) {
                 const totalStock = await InventoryStock.sum('totalBaseUnits', {
                     where: {
-                        variantId,
+                        productId: item.productId,
                         godownId: targetGodownId,
                         totalBaseUnits: { [Op.gt]: 0 }
                     },
@@ -251,7 +251,7 @@ export const createOrder = async (req, res) => {
                 // Find available stock batches for this variant in the target godown (FIFO)
                 const stocks = await InventoryStock.findAll({
                     where: {
-                        variantId: item.variantId,
+                        productId: item.productId,
                         godownId: targetGodownId,
                         totalBaseUnits: { [Op.gt]: 0 }
                     },
