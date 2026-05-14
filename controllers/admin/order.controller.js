@@ -294,7 +294,7 @@ export const getAllOrders = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { orderStatus, paymentStatus, paidAmount: newPaidAmount } = req.body;
+        const { orderStatus, paymentStatus, paidAmount: newPaidAmount, notes } = req.body;
 
         const order = await Order.findByPk(id);
 
@@ -309,12 +309,29 @@ export const updateOrderStatus = async (req, res) => {
             }
             order.orderStatus = orderStatus;
 
+            if (notes) {
+                const timestamp = new Date().toLocaleString();
+                const prefix = orderStatus === 'Cancelled' ? `[Cancelled on ${timestamp}] Reason: ` : `[Status ${orderStatus} on ${timestamp}]: `;
+                order.notes = order.notes ? `${order.notes}\n${prefix}${notes}` : `${prefix}${notes}`;
+            }
+
             // If moving to verified status, auto-submit any pending payments
             if (orderStatus === 'Payment Verify' || orderStatus === 'Delivered') {
                 await OrderPayment.update(
                     { isSubmitted: true, submittedAt: new Date() },
                     { where: { orderId: order.id, isSubmitted: false } }
                 );
+            }
+
+            // If cancelled, also cancel associated assignment if exists
+            if (orderStatus === 'Cancelled') {
+                const OrderAssignment = order.sequelize.models.OrderAssignment;
+                if (OrderAssignment) {
+                    await OrderAssignment.update(
+                        { status: 'Cancelled', notes: notes || 'Cancelled by Admin' },
+                        { where: { orderId: order.id } }
+                    );
+                }
             }
         }
 

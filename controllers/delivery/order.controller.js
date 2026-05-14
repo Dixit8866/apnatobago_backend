@@ -205,19 +205,48 @@ export const updateMyAssignmentStatus = async (req, res) => {
         const { assignmentId } = req.params;
         const { status, notes } = req.body;
         const deliveryBoyId = req.user.id;
-        logger.info(`[Update Assignment Status]: Assignment ${assignmentId}, New Status: ${status}, Boy: ${deliveryBoyId}`);
-
-        const assignment = await OrderAssignment.findOne({
-            where: { id: assignmentId, deliveryBoyId }
-        });
-
-        if (!assignment) {
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment not found or not assigned to you.");
-        }
+        logger.info(`[Update Assignment Status]: Param ${assignmentId}, New Status: ${status}, Boy: ${deliveryBoyId}`);
 
         const validStatuses = ['Pending', 'Assigned', 'Cancelled', 'Completed'];
         if (status && !validStatuses.includes(status)) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid status.");
+        }
+
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assignmentId);
+        const whereConditions = [
+            { id: assignmentId }
+        ];
+        if (isUuid) {
+            whereConditions.push({ orderId: assignmentId });
+        }
+
+        const assignment = await OrderAssignment.findOne({
+            where: {
+                deliveryBoyId,
+                [Op.or]: whereConditions
+            }
+        });
+
+        if (!assignment) {
+            // Fallback: Check if an Order exists with id = assignmentId
+            let order = null;
+            if (isUuid) {
+                order = await Order.findByPk(assignmentId);
+            } else {
+                order = await Order.findOne({ where: { orderId: assignmentId } });
+            }
+
+            if (!order) {
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment or Order not found.");
+            }
+
+            if (status === 'Cancelled') {
+                order.orderStatus = 'Cancelled';
+            } else if (status === 'Completed') {
+                order.orderStatus = 'Delivered';
+            }
+            await order.save();
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", { order });
         }
 
         await assignment.update({ status, notes: notes || assignment.notes });
