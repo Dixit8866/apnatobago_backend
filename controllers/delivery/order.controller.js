@@ -1,4 +1,4 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment } from '../../models/index.js';
+import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
