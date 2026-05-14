@@ -17,11 +17,22 @@ export const getMyAssignedOrders = async (req, res) => {
         logger.info(`[Get My Assigned Orders]: Fetching orders for delivery boy ${deliveryBoyId}, status: ${status || 'Any'}`);
 
         const whereClause = { deliveryBoyId };
+        const orderIncludeWhere = {};
+
         if (status) {
-            whereClause.status = status;
+            if (status === 'Cancelled') {
+                whereClause[Op.or] = [
+                    { status: 'Cancelled' },
+                    { '$order.orderStatus$': 'Cancelled' }
+                ];
+            } else if (status === 'Assigned' || status === 'Pending') {
+                whereClause.status = status;
+                orderIncludeWhere.orderStatus = { [Op.ne]: 'Cancelled' };
+            } else {
+                whereClause.status = status;
+            }
         }
 
-        const orderIncludeWhere = {};
         if (search) {
             orderIncludeWhere.orderId = { [Op.iLike]: `%${search}%` };
         }
@@ -56,10 +67,22 @@ export const getMyAssignedOrders = async (req, res) => {
             ],
             limit,
             offset,
-            order: [['position', 'ASC'], ['assignedAt', 'DESC']]
+            order: [['position', 'ASC'], ['assignedAt', 'DESC']],
+            subQuery: false
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
+
+        if (responseData.orders) {
+            responseData.orders = responseData.orders.map(item => {
+                const data = item.toJSON ? item.toJSON() : item;
+                if (data.order && data.order.orderStatus === 'Cancelled') {
+                    data.status = 'Cancelled';
+                }
+                return data;
+            });
+        }
+
         logger.info(`[Get My Assigned Orders]: Found ${result.count} orders for delivery boy ${deliveryBoyId}`);
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Assigned orders fetched successfully.", responseData);
     } catch (error) {
@@ -199,10 +222,11 @@ export const updateMyAssignmentStatus = async (req, res) => {
 
         await assignment.update({ status, notes: notes || assignment.notes });
 
-        // Optionally update the main Order status if needed
-        // if (status === 'Completed') {
-        //     await Order.update({ orderStatus: 'Delivered' }, { where: { id: assignment.orderId } });
-        // }
+        if (status === 'Cancelled') {
+            await Order.update({ orderStatus: 'Cancelled' }, { where: { id: assignment.orderId } });
+        } else if (status === 'Completed') {
+            await Order.update({ orderStatus: 'Delivered' }, { where: { id: assignment.orderId } });
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Assignment status updated successfully.", assignment);
     } catch (error) {

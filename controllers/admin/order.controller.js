@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -520,3 +520,80 @@ export const downloadInvoice = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * @desc    Update single order item quantity and price
+ * @route   PUT /api/admin/orders/:id/items/:itemId
+ * @access  Private (Admin)
+ */
+export const updateOrderItem = async (req, res) => {
+    try {
+        const { id, itemId } = req.params;
+        const { quantity, price } = req.body;
+
+        const order = await Order.findByPk(id);
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const orderItem = await OrderItem.findOne({
+            where: { id: itemId, orderId: order.id }
+        });
+        if (!orderItem) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order item not found.");
+        }
+
+        const oldQuantity = parseFloat(orderItem.quantity || 0);
+        const newQuantity = parseFloat(quantity || 0);
+        const qtyDiff = newQuantity - oldQuantity;
+
+        orderItem.quantity = newQuantity;
+        orderItem.price = parseFloat(price || 0);
+        await orderItem.save();
+
+        // Adjust stock if quantity changed
+        if (qtyDiff !== 0) {
+            const variant = await ProductVariant.findByPk(orderItem.variantId);
+            const bUPP = variant?.baseUnitsPerPack || orderItem.variantInfo?.baseUnitsPerPack || 1;
+            const baseUnitsDiff = orderItem.sellUnit === 'Inner' ? qtyDiff : qtyDiff * bUPP;
+            
+            const stock = await InventoryStock.findOne({
+                where: { productId: orderItem.productId },
+                order: [['createdAt', 'DESC']]
+            });
+            if (stock) {
+                await stock.update({ totalBaseUnits: Math.max(0, stock.totalBaseUnits - baseUnitsDiff) });
+            }
+        }
+
+        // Recalculate order totals
+        const allItems = await OrderItem.findAll({ where: { orderId: order.id } });
+        let calculatedSubtotal = 0;
+        for (const item of allItems) {
+            calculatedSubtotal += parseFloat(item.price || 0) * parseFloat(item.quantity || 0);
+        }
+
+        const deliveryCharge = parseFloat(order.deliveryCharge || 0);
+        const newTotalAmount = calculatedSubtotal + deliveryCharge;
+        const paidAmount = parseFloat(order.paidAmount || 0);
+
+        order.totalAmount = newTotalAmount;
+        order.dueAmount = Math.max(0, newTotalAmount - paidAmount);
+
+        if (paidAmount >= newTotalAmount) {
+            order.paymentStatus = 'Paid';
+        } else if (paidAmount > 0) {
+            order.paymentStatus = 'Partial';
+        } else {
+            order.paymentStatus = 'Pending';
+        }
+
+        await order.save();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order item updated successfully.", order);
+    } catch (error) {
+        logger.error(`[Admin Update Order Item Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
