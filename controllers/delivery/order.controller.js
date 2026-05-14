@@ -231,9 +231,9 @@ export const updateMyAssignmentStatus = async (req, res) => {
             // Fallback: Check if an Order exists with id = assignmentId
             let order = null;
             if (isUuid) {
-                order = await Order.findByPk(assignmentId);
+                order = await Order.findByPk(assignmentId, { include: [{ model: OrderItem, as: 'items' }] });
             } else {
-                order = await Order.findOne({ where: { orderId: assignmentId } });
+                order = await Order.findOne({ where: { orderId: assignmentId }, include: [{ model: OrderItem, as: 'items' }] });
             }
 
             if (!order) {
@@ -242,17 +242,72 @@ export const updateMyAssignmentStatus = async (req, res) => {
 
             if (status === 'Cancelled') {
                 order.orderStatus = 'Cancelled';
+                order.notes = order.notes ? `${order.notes}\n[Delivery Boy Cancelled]: ${notes || 'Refused'}` : `[Delivery Boy Cancelled]: ${notes || 'Refused'}`;
+                await order.save();
+
+                // Restore stock for all items
+                if (order.items && order.items.length > 0) {
+                    for (const item of order.items) {
+                        const variant = await ProductVariant.findByPk(item.variantId);
+                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                        const baseUnitsToRestore = item.sellUnit === 'Inner' 
+                            ? Number(item.quantity) 
+                            : Number(item.quantity) * bUPP;
+
+                        const stock = await InventoryStock.findOne({
+                            where: { productId: item.productId },
+                            order: [['createdAt', 'DESC']]
+                        });
+                        if (stock) {
+                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                        }
+                    }
+                }
+
+                const OrderAssignment = order.sequelize.models.OrderAssignment;
+                if (OrderAssignment) {
+                    await OrderAssignment.update(
+                        { status: 'Cancelled', notes: notes || 'Cancelled by Delivery Boy' },
+                        { where: { orderId: order.id } }
+                    );
+                }
             } else if (status === 'Completed') {
                 order.orderStatus = 'Delivered';
+                await order.save();
             }
-            await order.save();
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", { order });
         }
 
         await assignment.update({ status, notes: notes || assignment.notes });
 
         if (status === 'Cancelled') {
-            await Order.update({ orderStatus: 'Cancelled' }, { where: { id: assignment.orderId } });
+            const order = await Order.findByPk(assignment.orderId, {
+                include: [{ model: OrderItem, as: 'items' }]
+            });
+            if (order) {
+                order.orderStatus = 'Cancelled';
+                order.notes = order.notes ? `${order.notes}\n[Delivery Boy Cancelled]: ${notes || 'Refused'}` : `[Delivery Boy Cancelled]: ${notes || 'Refused'}`;
+                await order.save();
+
+                // Restore stock for all items
+                if (order.items && order.items.length > 0) {
+                    for (const item of order.items) {
+                        const variant = await ProductVariant.findByPk(item.variantId);
+                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                        const baseUnitsToRestore = item.sellUnit === 'Inner' 
+                            ? Number(item.quantity) 
+                            : Number(item.quantity) * bUPP;
+
+                        const stock = await InventoryStock.findOne({
+                            where: { productId: item.productId },
+                            order: [['createdAt', 'DESC']]
+                        });
+                        if (stock) {
+                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                        }
+                    }
+                }
+            }
         } else if (status === 'Completed') {
             await Order.update({ orderStatus: 'Delivered' }, { where: { id: assignment.orderId } });
         }
