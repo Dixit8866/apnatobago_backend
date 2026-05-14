@@ -432,7 +432,18 @@ export const cancelOrder = async (req, res) => {
         const { id } = req.params;
         const userId = req.user.id;
 
-        const order = await Order.findOne({ where: { id, userId } });
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+        const whereClause = { userId };
+        if (isUuid) {
+            whereClause.id = id;
+        } else {
+            whereClause.orderId = id;
+        }
+
+        const order = await Order.findOne({ 
+            where: whereClause,
+            include: [{ model: OrderItem, as: 'items' }]
+        });
 
         if (!order) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
@@ -443,7 +454,36 @@ export const cancelOrder = async (req, res) => {
         }
 
         order.orderStatus = 'Cancelled';
+        order.notes = order.notes ? `${order.notes}\n[Customer Cancelled]` : `[Customer Cancelled]`;
         await order.save();
+
+        // Restore stock for all items
+        if (order.items && order.items.length > 0) {
+            for (const item of order.items) {
+                const variant = await ProductVariant.findByPk(item.variantId);
+                const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                const baseUnitsToRestore = item.sellUnit === 'Inner' 
+                    ? Number(item.quantity) 
+                    : Number(item.quantity) * bUPP;
+
+                const stock = await InventoryStock.findOne({
+                    where: { productId: item.productId },
+                    order: [['createdAt', 'DESC']]
+                });
+                if (stock) {
+                    await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                }
+            }
+        }
+
+        // Cancel associated assignment if exists
+        const OrderAssignment = order.sequelize.models.OrderAssignment;
+        if (OrderAssignment) {
+            await OrderAssignment.update(
+                { status: 'Cancelled', notes: 'Cancelled by Customer' },
+                { where: { orderId: order.id } }
+            );
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order cancelled successfully.", order);
     } catch (error) {
