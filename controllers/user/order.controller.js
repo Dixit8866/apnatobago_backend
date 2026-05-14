@@ -449,8 +449,9 @@ export const cancelOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        if (order.orderStatus !== 'Pending') {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Cannot cancel order in '${order.orderStatus}' status.`);
+        const nonCancellableStatuses = ['Delivered', 'Cancelled'];
+        if (nonCancellableStatuses.includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Cannot cancel order that is already '${order.orderStatus}'.`);
         }
 
         order.orderStatus = 'Cancelled';
