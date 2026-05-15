@@ -61,6 +61,16 @@ const ProductVariant = sequelize.define(
             type: DataTypes.STRING,
             defaultValue: 'Active',
         },
+        minQty: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: true,
+            defaultValue: null,
+        },
+        maxQty: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,

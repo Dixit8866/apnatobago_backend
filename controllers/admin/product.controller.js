@@ -209,6 +209,8 @@ export const createProduct = async (req, res, next) => {
             const innerUnitLabel = v.innerUnitLabel || null;
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
+            const minQty = v.minQty ? Number(v.minQty) : null;
+            const maxQty = v.maxQty ? Number(v.maxQty) : null;
             if (!volumeValue) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue is required for each variant.');
@@ -236,6 +238,8 @@ export const createProduct = async (req, res, next) => {
                     innerUnitLabel,
                     baseUnitsPerPack,
                     sellingVolume,
+                    minQty,
+                    maxQty,
                     status: v.status || 'Active',
                 },
                 { transaction: t }
@@ -283,7 +287,12 @@ export const getProducts = async (req, res, next) => {
         const { search = '', status, mainCategoryId, isTobacco } = req.query;
         
         const searchWhere = search
-            ? { name: sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${search}%` }) }
+            ? {
+                [Op.or]: [
+                    { 'name.en': { [Op.iLike]: `%${search}%` } },
+                    { 'name.gu': { [Op.iLike]: `%${search}%` } },
+                ]
+            }
             : {};
 
         if (isTobacco !== undefined && isTobacco !== '') {
@@ -319,6 +328,20 @@ export const getProducts = async (req, res, next) => {
             {
                 model: ProductVariant,
                 as: 'variants',
+                attributes: {
+                    include: [
+                        [
+                            sequelize.literal(`(
+                                SELECT COALESCE(SUM("totalBaseUnits"), 0)
+                                FROM "inventory_stocks" AS "stock"
+                                WHERE "stock"."variantId" = "variants"."id"
+                                  AND "stock"."status" = 'Active'
+                                  AND "stock"."deletedAt" IS NULL
+                            )`),
+                            'totalStock'
+                        ]
+                    ]
+                },
                 required: false,
                 include: [
                     {
@@ -479,6 +502,8 @@ export const updateProduct = async (req, res, next) => {
             const innerUnitLabel = v.innerUnitLabel || null;
             const baseUnitsPerPack = Number(v.baseUnitsPerPack || 1);
             const sellingVolume = v.sellingVolume ? Number(v.sellingVolume) : null;
+            const minQty = v.minQty ? Number(v.minQty) : null;
+            const maxQty = v.maxQty ? Number(v.maxQty) : null;
             if (!volumeValue) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'volumeValue is required for each variant.');
@@ -506,6 +531,8 @@ export const updateProduct = async (req, res, next) => {
                     innerUnitLabel,
                     baseUnitsPerPack,
                     sellingVolume,
+                    minQty,
+                    maxQty,
                     status: v.status || 'Active',
                 },
                 { transaction: t }

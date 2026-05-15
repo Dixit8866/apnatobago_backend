@@ -42,6 +42,19 @@ export const createUser = async (req, res, next) => {
             kycverification: kycverification || 'pending',
         });
 
+        // Handle Business Profile if provided
+        const { shopName, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
+        if (shopName || shopAddress) {
+            await BusinessProfile.create({
+                userId: user.id,
+                shopName: shopName || fullname,
+                gstNumber,
+                shopAddress: shopAddress || city || '',
+                city: businessCity || city || '',
+                postcode: businessPostcode || postcode || '',
+            });
+        }
+
         const safeUser = await User.findByPk(user.id, { attributes: SAFE_ATTRIBUTES });
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'User created successfully.', safeUser);
     } catch (error) {
@@ -106,7 +119,10 @@ export const getUserById = async (req, res, next) => {
     try {
         const user = await User.findByPk(req.params.id, { 
             attributes: SAFE_ATTRIBUTES,
-            include: [{ model: CustomLevel, as: 'rewardLevel', attributes: ['id', 'name'] }]
+            include: [
+                { model: CustomLevel, as: 'rewardLevel', attributes: ['id', 'name'] },
+                { model: BusinessProfile, as: 'businessProfile' }
+            ]
         });
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', user);
@@ -143,7 +159,36 @@ export const updateUser = async (req, res, next) => {
         if (password) updateData.password = password;
 
         await user.update(updateData);
-        const updated = await User.findByPk(user.id, { attributes: SAFE_ATTRIBUTES });
+
+        // Handle Business Profile update
+        const { shopName, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
+        if (shopName || shopAddress || gstNumber || businessCity || businessPostcode) {
+            const [profile, created] = await BusinessProfile.findOrCreate({
+                where: { userId: user.id },
+                defaults: {
+                    shopName: shopName || user.fullname,
+                    gstNumber,
+                    shopAddress: shopAddress || user.city || '',
+                    city: businessCity || user.city || '',
+                    postcode: businessPostcode || user.postcode || '',
+                }
+            });
+
+            if (!created) {
+                await profile.update({
+                    shopName: shopName ?? profile.shopName,
+                    gstNumber: gstNumber ?? profile.gstNumber,
+                    shopAddress: shopAddress ?? profile.shopAddress,
+                    city: businessCity ?? profile.city,
+                    postcode: businessPostcode ?? profile.postcode,
+                });
+            }
+        }
+
+        const updated = await User.findByPk(user.id, { 
+            attributes: SAFE_ATTRIBUTES,
+            include: [{ model: BusinessProfile, as: 'businessProfile' }]
+        });
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User updated.', updated);
     } catch (error) {
         next(error);

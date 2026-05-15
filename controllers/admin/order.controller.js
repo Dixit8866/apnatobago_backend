@@ -546,7 +546,7 @@ export const downloadInvoice = async (req, res) => {
 export const updateOrderItem = async (req, res) => {
     try {
         const { id, itemId } = req.params;
-        const { quantity, price } = req.body;
+        const { quantity, price, sellUnit } = req.body;
 
         const order = await Order.findByPk(id);
         if (!order) {
@@ -561,19 +561,25 @@ export const updateOrderItem = async (req, res) => {
         }
 
         const oldQuantity = parseFloat(orderItem.quantity || 0);
+        const oldSellUnit = orderItem.sellUnit;
         const newQuantity = parseFloat(quantity || 0);
-        const qtyDiff = newQuantity - oldQuantity;
+        const newSellUnit = sellUnit || oldSellUnit;
+
+        const variant = await ProductVariant.findByPk(orderItem.variantId);
+        const bUPP = variant?.baseUnitsPerPack || orderItem.variantInfo?.baseUnitsPerPack || 1;
+
+        // Calculate old and new base units
+        const oldBaseUnits = oldSellUnit === 'Inner' ? oldQuantity : oldQuantity * bUPP;
+        const newBaseUnits = newSellUnit === 'Inner' ? newQuantity : newQuantity * bUPP;
+        const baseUnitsDiff = newBaseUnits - oldBaseUnits;
 
         orderItem.quantity = newQuantity;
         orderItem.price = parseFloat(price || 0);
+        orderItem.sellUnit = newSellUnit;
         await orderItem.save();
 
-        // Adjust stock if quantity changed
-        if (qtyDiff !== 0) {
-            const variant = await ProductVariant.findByPk(orderItem.variantId);
-            const bUPP = variant?.baseUnitsPerPack || orderItem.variantInfo?.baseUnitsPerPack || 1;
-            const baseUnitsDiff = orderItem.sellUnit === 'Inner' ? qtyDiff : qtyDiff * bUPP;
-            
+        // Adjust stock if base units changed
+        if (baseUnitsDiff !== 0) {
             const stock = await InventoryStock.findOne({
                 where: { productId: orderItem.productId },
                 order: [['createdAt', 'DESC']]

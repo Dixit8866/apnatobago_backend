@@ -201,8 +201,11 @@ const runManualMigrations = async () => {
         await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "submittedAt" TIMESTAMP WITH TIME ZONE');
         
         // Add latitude and longitude to users table
-        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "latitude" DECIMAL(15, 10)');
         await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "longitude" DECIMAL(15, 10)');
+        
+        // Add minQty and maxQty to product_variants
+        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "minQty" DECIMAL(10, 2)');
+        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "maxQty" DECIMAL(10, 2)');
         
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {

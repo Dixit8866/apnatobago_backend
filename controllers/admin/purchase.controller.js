@@ -23,7 +23,7 @@ export const convertToBill = async (req, res, next) => {
         }
 
         // 1. Create Purchase Bill
-        const billNo = `PB-${Date.now()}`;
+        const billNo = `PB-${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
         const totalAmount = items.reduce((sum, item) => sum + (Number(item.purchasePrice) * Number(item.qty)), 0);
 
         const bill = await PurchaseBill.create({
