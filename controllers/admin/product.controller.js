@@ -353,7 +353,8 @@ export const getProducts = async (req, res, next) => {
                         ]
                     },
                     { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                    { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
                 ]
             }
         ];
@@ -654,35 +655,57 @@ export const moveProductToTop = async (req, res, next) => {
 export const updateProductPrices = async (req, res, next) => {
     const t = await sequelize.transaction();
     try {
-        const { productId, purchasePrice, pricings } = req.body;
+        const { productId, purchasePrice, pricings, variants } = req.body;
 
-        // Update first variant's purchasePrice
-        const variant = await ProductVariant.findOne({ 
-            where: { productId }, 
-            order: [['createdAt', 'ASC']], 
-            transaction: t 
-        });
+        if (Array.isArray(variants)) {
+            // Detailed update logic
+            for (const v of variants) {
+                const variant = await ProductVariant.findByPk(v.id, { transaction: t });
+                if (!variant) continue;
+                
+                if (v.purchasePrice !== undefined) {
+                    await variant.update({ purchasePrice: v.purchasePrice }, { transaction: t });
+                }
 
-        if (!variant) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product variant not found.');
-        }
-
-        await variant.update({ purchasePrice }, { transaction: t });
-        
-        if (Array.isArray(pricings)) {
-            for (const p of pricings) {
-                // Update all pricing ranges for this level for simple inline editing
-                await ProductPricing.update(
-                    { price: p.price, mrp: p.mrp, purchasePrice },
-                    { 
-                        where: { 
-                            variantId: variant.id, 
-                            customLevelId: p.customLevelId 
-                        }, 
-                        transaction: t 
+                if (Array.isArray(v.pricings)) {
+                    for (const p of v.pricings) {
+                        if (p.id) {
+                            await ProductPricing.update(
+                                { price: p.price, mrp: p.mrp, purchasePrice: v.purchasePrice },
+                                { where: { id: p.id }, transaction: t }
+                            );
+                        }
                     }
-                );
+                }
+            }
+        } else {
+            // Original flat payload logic
+            const variant = await ProductVariant.findOne({ 
+                where: { productId }, 
+                order: [['createdAt', 'ASC']], 
+                transaction: t 
+            });
+
+            if (!variant) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product variant not found.');
+            }
+
+            await variant.update({ purchasePrice }, { transaction: t });
+            
+            if (Array.isArray(pricings)) {
+                for (const p of pricings) {
+                    await ProductPricing.update(
+                        { price: p.price, mrp: p.mrp, purchasePrice },
+                        { 
+                            where: { 
+                                variantId: variant.id, 
+                                customLevelId: p.customLevelId 
+                            }, 
+                            transaction: t 
+                        }
+                    );
+                }
             }
         }
 

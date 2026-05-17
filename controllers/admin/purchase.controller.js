@@ -127,6 +127,35 @@ export const convertToBill = async (req, res, next) => {
                 }, { transaction: t });
             }
 
+            // Update Product Variant base purchase price
+            await ProductVariant.update(
+                { purchasePrice: item.purchasePrice },
+                { where: { id: item.variantId }, transaction: t }
+            );
+
+            // Update Level Wise Pricing if provided
+            if (item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
+                // Delete existing pricings for this variant to replace them
+                await ProductPricing.destroy({
+                    where: { variantId: item.variantId },
+                    transaction: t
+                });
+
+                for (const p of item.pricings) {
+                    await ProductPricing.create({
+                        variantId: item.variantId,
+                        customLevelId: p.customLevelId,
+                        quantityRange: `${p.minQty}-${p.maxQty}`,
+                        minQty: p.minQty,
+                        maxQty: p.maxQty,
+                        purchasePrice: item.purchasePrice,
+                        price: p.price,
+                        mrp: p.mrp,
+                        status: 'Active'
+                    }, { transaction: t });
+                }
+            }
+
             // Create Inventory Transaction
             await InventoryTransaction.create({
                 stockId: stock.id,
