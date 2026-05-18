@@ -286,13 +286,16 @@ export const getProducts = async (req, res, next) => {
     try {
         const { search = '', status, mainCategoryId, isTobacco } = req.query;
         
-        const searchWhere = search
+        const searchTerms = search.split(/\s+/).filter(Boolean);
+        const searchWhere = searchTerms.length > 0
             ? {
-                [Op.or]: [
-                    { 'name.en': { [Op.iLike]: `%${search}%` } },
-                    { 'name.gu': { [Op.iLike]: `%${search}%` } },
-                    { 'name.hi': { [Op.iLike]: `%${search}%` } },
-                ]
+                [Op.and]: searchTerms.map(term => ({
+                    [Op.or]: [
+                        { 'name.en': { [Op.iLike]: `%${term}%` } },
+                        { 'name.gu': { [Op.iLike]: `%${term}%` } },
+                        { 'name.hi': { [Op.iLike]: `%${term}%` } },
+                    ]
+                }))
             }
             : {};
 
