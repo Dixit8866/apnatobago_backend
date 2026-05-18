@@ -285,7 +285,7 @@ export const createProduct = async (req, res, next) => {
 export const getProducts = async (req, res, next) => {
     try {
         const { search = '', status, mainCategoryId, isTobacco } = req.query;
-        
+
         const searchTerms = search.split(/\s+/).filter(Boolean);
         const searchWhere = searchTerms.length > 0
             ? {
@@ -293,7 +293,7 @@ export const getProducts = async (req, res, next) => {
                     [Op.or]: [
                         { 'name.en': { [Op.iLike]: `%${term}%` } },
                         { 'name.gu': { [Op.iLike]: `%${term}%` } },
-                        { 'name.hi': { [Op.iLike]: `%${term}%` } },
+                        { 'name.hn': { [Op.iLike]: `%${term}%` } },
                         { 'name.HN': { [Op.iLike]: `%${term}%` } },
                         { 'name.GU': { [Op.iLike]: `%${term}%` } },
                         { 'name.EN': { [Op.iLike]: `%${term}%` } },
@@ -625,23 +625,23 @@ export const reorderProducts = async (req, res, next) => {
 export const moveProductToTop = async (req, res, next) => {
     try {
         const { id } = req.params;
-        
+
         // Get all active products ordered by position
         const products = await Product.findAll({
             where: { status: { [Op.ne]: 'Deleted' } },
             order: [['position', 'ASC']]
         });
-        
+
         // Find the target product
         const targetIndex = products.findIndex(p => p.id === id);
         if (targetIndex === -1) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
         }
-        
+
         // Remove target from current position and insert at beginning
         const [target] = products.splice(targetIndex, 1);
         products.unshift(target);
-        
+
         // Update all positions sequentially
         await Promise.all(
             products.map(async (prod, index) => {
@@ -651,7 +651,7 @@ export const moveProductToTop = async (req, res, next) => {
                 );
             })
         );
-        
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product moved to top successfully.');
     } catch (error) {
         next(error);
@@ -669,7 +669,7 @@ export const updateProductPrices = async (req, res, next) => {
             for (const v of variants) {
                 const variant = await ProductVariant.findByPk(v.id, { transaction: t });
                 if (!variant) continue;
-                
+
                 if (v.purchasePrice !== undefined) {
                     await variant.update({ purchasePrice: v.purchasePrice }, { transaction: t });
                 }
@@ -687,10 +687,10 @@ export const updateProductPrices = async (req, res, next) => {
             }
         } else {
             // Original flat payload logic
-            const variant = await ProductVariant.findOne({ 
-                where: { productId }, 
-                order: [['createdAt', 'ASC']], 
-                transaction: t 
+            const variant = await ProductVariant.findOne({
+                where: { productId },
+                order: [['createdAt', 'ASC']],
+                transaction: t
             });
 
             if (!variant) {
@@ -699,17 +699,17 @@ export const updateProductPrices = async (req, res, next) => {
             }
 
             await variant.update({ purchasePrice }, { transaction: t });
-            
+
             if (Array.isArray(pricings)) {
                 for (const p of pricings) {
                     await ProductPricing.update(
                         { price: p.price, mrp: p.mrp, purchasePrice },
-                        { 
-                            where: { 
-                                variantId: variant.id, 
-                                customLevelId: p.customLevelId 
-                            }, 
-                            transaction: t 
+                        {
+                            where: {
+                                variantId: variant.id,
+                                customLevelId: p.customLevelId
+                            },
+                            transaction: t
                         }
                     );
                 }
