@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
-import { PurchaseBill, VendorOrder, InventoryStock, InventoryTransaction, ProductVariant, Product, Godown, Admin, Vendor } from '../../models/index.js';
+import { PurchaseBill, VendorOrder, InventoryStock, InventoryTransaction, ProductVariant, Product, Godown, Admin, Vendor, ProductPricing } from '../../models/index.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { generatePurchaseBill } from '../../utils/invoiceGenerator.js';
 import logger from '../../logger/apiLogger.js';
