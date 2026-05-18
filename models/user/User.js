@@ -14,10 +14,7 @@ const User = sequelize.define('User', {
     },
     email: {
         type: DataTypes.STRING,
-        allowNull: true,
-        validate: {
-            isEmail: true,
-        },
+        allowNull: false,
     },
     dialcode: {
         type: DataTypes.STRING,
