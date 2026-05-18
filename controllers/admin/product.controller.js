@@ -294,6 +294,9 @@ export const getProducts = async (req, res, next) => {
                         { 'name.en': { [Op.iLike]: `%${term}%` } },
                         { 'name.gu': { [Op.iLike]: `%${term}%` } },
                         { 'name.hi': { [Op.iLike]: `%${term}%` } },
+                        { 'name.HN': { [Op.iLike]: `%${term}%` } },
+                        { 'name.GU': { [Op.iLike]: `%${term}%` } },
+                        { 'name.EN': { [Op.iLike]: `%${term}%` } },
                     ]
                 }))
             }
