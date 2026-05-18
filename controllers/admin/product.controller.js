@@ -291,6 +291,7 @@ export const getProducts = async (req, res, next) => {
                 [Op.or]: [
                     { 'name.en': { [Op.iLike]: `%${search}%` } },
                     { 'name.gu': { [Op.iLike]: `%${search}%` } },
+                    { 'name.hi': { [Op.iLike]: `%${search}%` } },
                 ]
             }
             : {};
