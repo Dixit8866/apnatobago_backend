@@ -21,14 +21,20 @@ import { Op } from 'sequelize';
  */
 export const getMainCategories = async (req, res) => {
     try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
         const showTobacco = req.user ? req.user.showtabacco : false;
         const whereClause = { status: 'Active' };
         if (!showTobacco) {
             whereClause.isTobacco = false;
         }
 
-        const categories = await MainCategory.findAll({
+        const { count, rows: categories } = await MainCategory.findAndCountAll({
             where: whereClause,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            distinct: true,
             attributes: {
                 include: [
                     [
@@ -47,7 +53,13 @@ export const getMainCategories = async (req, res) => {
             },
             order: [['position', 'ASC']]
         });
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Main categories fetched successfully", categories);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Main categories fetched successfully", {
+            totalItems: count,
+            totalPages: Math.ceil(count / limit),
+            currentPage: parseInt(page),
+            limit: parseInt(limit),
+            items: categories
+        });
     } catch (error) {
         logger.error(`[Get Main Categories Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch main categories");
@@ -61,15 +73,20 @@ export const getMainCategories = async (req, res) => {
  */
 export const getSubCategories = async (req, res) => {
     try {
-        const { mainCategoryId } = req.query;
+        const { mainCategoryId, page = 1, limit = 10 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
         const whereClause = { status: 'Active' };
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
         if (req.user && !req.user.showtabacco) {
             whereClause.isTobacco = false;
         }
 
-        const categories = await SubCategory.findAll({
+        const { count, rows: categories } = await SubCategory.findAndCountAll({
             where: whereClause,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            distinct: true,
             attributes: {
                 include: [
                     [
@@ -88,7 +105,13 @@ export const getSubCategories = async (req, res) => {
             },
             order: [['position', 'ASC']]
         });
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Sub categories fetched successfully", categories);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Sub categories fetched successfully", {
+            totalItems: count,
+            totalPages: Math.ceil(count / limit),
+            currentPage: parseInt(page),
+            limit: parseInt(limit),
+            items: categories
+        });
     } catch (error) {
         logger.error(`[Get Sub Categories Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch sub categories");
@@ -102,7 +125,9 @@ export const getSubCategories = async (req, res) => {
  */
 export const getCompanyCategories = async (req, res) => {
     try {
-        const { subCategoryId, mainCategoryId } = req.query;
+        const { subCategoryId, mainCategoryId, page = 1, limit = 10 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
         const whereClause = { status: 'Active' };
         if (subCategoryId) whereClause.subCategoryId = subCategoryId;
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
@@ -110,8 +135,11 @@ export const getCompanyCategories = async (req, res) => {
             whereClause.isTobacco = false;
         }
 
-        const categories = await CompanyCategory.findAll({
+        const { count, rows: categories } = await CompanyCategory.findAndCountAll({
             where: whereClause,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            distinct: true,
             attributes: {
                 include: [
                     [
@@ -130,7 +158,13 @@ export const getCompanyCategories = async (req, res) => {
             },
             order: [['position', 'ASC']]
         });
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Company categories fetched successfully", categories);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Company categories fetched successfully", {
+            totalItems: count,
+            totalPages: Math.ceil(count / limit),
+            currentPage: parseInt(page),
+            limit: parseInt(limit),
+            items: categories
+        });
     } catch (error) {
         logger.error(`[Get Company Categories Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch company categories");
@@ -144,7 +178,9 @@ export const getCompanyCategories = async (req, res) => {
  */
 export const getProducts = async (req, res) => {
     try {
-        const { mainCategoryId, subCategoryId, companyCategoryId } = req.query;
+        const { mainCategoryId, subCategoryId, companyCategoryId, page = 1, limit = 10 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        
         const user = req.user;
         const userLevel = user?.applevel || null;
 
@@ -161,8 +197,11 @@ export const getProducts = async (req, res) => {
         // Only fetch pricings for the user's assigned level
         const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
 
-        const products = await Product.findAll({
+        const { count, rows: products } = await Product.findAndCountAll({
             where: whereClause,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            distinct: true,
             order: [
                 ['position', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
@@ -236,7 +275,13 @@ export const getProducts = async (req, res) => {
             return productJson;
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Products fetched successfully", mappedProducts);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Products fetched successfully", {
+            totalItems: count,
+            totalPages: Math.ceil(count / limit),
+            currentPage: parseInt(page),
+            limit: parseInt(limit),
+            items: mappedProducts
+        });
     } catch (error) {
         logger.error(`[Get Products Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch products");
