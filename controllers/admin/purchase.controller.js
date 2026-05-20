@@ -172,7 +172,8 @@ export const convertToBill = async (req, res, next) => {
                 purchasePricePerBaseUnit: purchasePricePerBaseUnit,
                 avgPriceAfterTxn: stock.avgPurchasePricePerBaseUnit,
                 balanceAfterBaseUnits: stock.totalBaseUnits,
-                note: note || `Purchase Bill ${billNo}`
+                note: note || `Purchase Bill ${billNo}`,
+                createdBy: req.user?.name || 'Admin'
             }, { transaction: t });
         }
 

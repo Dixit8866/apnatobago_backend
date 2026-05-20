@@ -197,6 +197,74 @@ export const getDashboardStats = async (req, res) => {
             return d;
         });
 
+        // 9.1 Low Stock Count & List
+        const activeProducts = await Product.findAll({
+            where: { status: 'Active' },
+            attributes: ['id', 'name', 'thumbnail'],
+            include: [
+                {
+                    model: ProductVariant,
+                    as: 'variants',
+                    where: { status: 'Active' },
+                    required: true,
+                    include: [
+                        {
+                            model: Volume,
+                            as: 'volumeRef',
+                            attributes: ['id', 'name']
+                        },
+                        {
+                            model: InventoryStock,
+                            as: 'inventoryStocks',
+                            attributes: ['totalBaseUnits', 'status'],
+                            required: false
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let lowStockCount = 0;
+        const lowStockProducts = [];
+
+        for (const product of activeProducts) {
+            const variants = product.variants || [];
+            if (variants.length === 0) continue;
+
+            let allVariantsLow = true;
+            const variantStocks = [];
+
+            for (const variant of variants) {
+                const activeStocks = (variant.inventoryStocks || []).filter(s => s.status === 'Active');
+                const totalStock = activeStocks.reduce((sum, s) => sum + parseFloat(s.totalBaseUnits || 0), 0);
+                
+                if (totalStock > 10) {
+                    allVariantsLow = false;
+                }
+
+                const unitNameObj = variant.volumeRef?.name || {};
+                const unitName = unitNameObj.en || Object.values(unitNameObj)[0] || '';
+                const fullVolume = `${variant.volume || ''} ${unitName}`.trim();
+
+                variantStocks.push({
+                    variantId: variant.id,
+                    volume: fullVolume || variant.volume,
+                    totalStock: totalStock
+                });
+            }
+
+            if (allVariantsLow) {
+                lowStockCount++;
+                const pName = product.name?.en || Object.values(product.name || {})[0] || 'Product';
+                lowStockProducts.push({
+                    productId: product.id,
+                    productName: pName,
+                    image: product.thumbnail,
+                    variants: variantStocks
+                });
+            }
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Dashboard stats fetched successfully.", {
             summary: {
                 totalSales,
@@ -206,13 +274,15 @@ export const getDashboardStats = async (req, res) => {
                 totalPayable,
                 newOrderCount,
                 deliveredOrderCount,
-                todayTotalOrder
+                todayTotalOrder,
+                lowStockCount
             },
             paymentBifurcation: paymentStats,
             topProducts: enrichedProducts,
             topCategories: enrichedCategories,
             expirySoon: enrichedExpiry,
-            salesTrend: salesTrend
+            salesTrend: salesTrend,
+            lowStockProducts: lowStockProducts
         });
     } catch (error) {
         logger.error(`[Dashboard Stats Error]: ${error.message}`);

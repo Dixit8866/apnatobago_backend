@@ -13,6 +13,11 @@ const ProductVariant = sequelize.define(
             type: DataTypes.UUID,
             allowNull: false,
         },
+        extra: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: null,
+        },
         volumeId: {
             type: DataTypes.UUID,
             allowNull: true,

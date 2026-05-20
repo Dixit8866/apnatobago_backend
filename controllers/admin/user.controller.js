@@ -83,7 +83,7 @@ export const getAllUsers = async (req, res, next) => {
             {
                 model: BusinessProfile,
                 as: 'businessProfile',
-                attributes: ['id', 'shopName']
+                attributes: ['id', 'shopName', 'shopAddress', 'postcode']
             }
         ];
 

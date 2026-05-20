@@ -7,9 +7,21 @@ const router = express.Router();
 
 // Memory storage to process file via SDK buffer
 const storage = multer.memoryStorage();
+
+const allowedMimeTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+
+const fileFilter = (req, file, cb) => {
+    if (allowedMimeTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only PNG, JPG, JPEG, WebP images are allowed.'), false);
+    }
+};
+
 const upload = multer({ 
-    storage, 
-    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+    storage,
+    fileFilter,
+    limits: { fileSize: 3 * 1024 * 1024 } // 3MB limit
 });
 
 router.post('/', protect, admin, upload.single('image'), uploadImage);

@@ -170,7 +170,7 @@ export const getAllOrders = async (req, res) => {
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['id', 'shopName']
+                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
                         }
                     ]
                 },

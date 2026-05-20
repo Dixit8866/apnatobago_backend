@@ -159,7 +159,8 @@ export const createCustomSale = async (req, res) => {
                     secondaryPerPrimary: stock.secondaryPerPrimary,
                     totalQtyBaseUnits: deductFromThis,
                     balanceAfterBaseUnits: newTotalBaseUnits,
-                    note: `Direct Sale #${newSale.orderId}`
+                    note: `Direct Sale #${newSale.orderId}`,
+                    createdBy: req.user?.name || 'Admin'
                 }, { transaction: t });
 
                 remainingToDeduct -= deductFromThis;

@@ -50,7 +50,7 @@ export const getCart = async (req, res) => {
         const userId = req.user.id;
         const userAppLevel = req.user.applevel;
 
-        const cartItemsRaw = await Cart.findAll({
+        let cartItemsRaw = await Cart.findAll({
             where: { userId },
             include: [
                 {
@@ -75,6 +75,77 @@ export const getCart = async (req, res) => {
             ],
             order: [['createdAt', 'DESC']]
         });
+
+        // Healing soft-deleted variants in cart items
+        let healedAny = false;
+        for (const item of cartItemsRaw) {
+            if (!item.variant && item.productId) {
+                const deletedVariant = await ProductVariant.findByPk(item.variantId, { paranoid: false });
+                if (deletedVariant) {
+                    let activeVariant = await ProductVariant.findOne({
+                        where: {
+                            productId: deletedVariant.productId,
+                            volumeId: deletedVariant.volumeId,
+                            status: 'Active'
+                        }
+                    });
+                    if (!activeVariant) {
+                        activeVariant = await ProductVariant.findOne({
+                            where: {
+                                productId: deletedVariant.productId,
+                                status: 'Active'
+                            }
+                        });
+                    }
+                    if (activeVariant) {
+                        // Check if another cart item already exists with this active variant
+                        const existingCartItem = await Cart.findOne({
+                            where: { userId, productId: item.productId, variantId: activeVariant.id }
+                        });
+                        if (existingCartItem) {
+                            // Merge quantities
+                            existingCartItem.quantity = Number(existingCartItem.quantity) + Number(item.quantity);
+                            await existingCartItem.save();
+                            await item.destroy();
+                        } else {
+                            // Point old cart item to new variant
+                            item.variantId = activeVariant.id;
+                            await item.save();
+                        }
+                        healedAny = true;
+                    }
+                }
+            }
+        }
+
+        if (healedAny) {
+            // Re-fetch populated cart
+            cartItemsRaw = await Cart.findAll({
+                where: { userId },
+                include: [
+                    {
+                        model: Product,
+                        as: 'product',
+                        attributes: ['id', 'name', 'thumbnail']
+                    },
+                    {
+                        model: ProductVariant,
+                        as: 'variant',
+                        attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
+                        include: [
+                            {
+                                model: ProductPricing,
+                                as: 'pricings',
+                                attributes: ['customLevelId', 'minQty', 'maxQty', 'price', 'mrp']
+                            },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                        ]
+                    }
+                ],
+                order: [['createdAt', 'DESC']]
+            });
+        }
 
         // Fetch user's wishlist to mark items as wishlisted
         const wishlist = await Wishlist.findAll({
@@ -147,11 +218,20 @@ export const getCart = async (req, res) => {
             };
         }).filter(item => item !== null);
 
+        // Paginate items based on page and limit query parameters if provided
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const startIndex = (page - 1) * limit;
+        const endIndex = page * limit;
+        const paginatedItems = (req.query.page || req.query.limit)
+            ? formattedItems.slice(startIndex, endIndex)
+            : formattedItems;
+
         // Simple delivery logic (can be adjusted based on requirements)
         const deliveryCharges = 0;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", {
-            items: formattedItems,
+            items: paginatedItems,
             billDetails: {
                 itemTotal: Number(itemTotal.toFixed(2)),
                 deliveryCharges: Number(deliveryCharges.toFixed(2)),
@@ -180,7 +260,33 @@ export const addToCart = async (req, res) => {
         }
 
         // Fetch variant to calculate base units required
-        const variant = await ProductVariant.findByPk(variantId);
+        let variant = await ProductVariant.findByPk(variantId);
+        let resolvedVariantId = variantId;
+        if (!variant) {
+            const deletedVariant = await ProductVariant.findByPk(variantId, { paranoid: false });
+            if (deletedVariant) {
+                let activeVariant = await ProductVariant.findOne({
+                    where: {
+                        productId: deletedVariant.productId,
+                        volumeId: deletedVariant.volumeId,
+                        status: 'Active'
+                    }
+                });
+                if (!activeVariant) {
+                    activeVariant = await ProductVariant.findOne({
+                        where: {
+                            productId: deletedVariant.productId,
+                            status: 'Active'
+                        }
+                    });
+                }
+                if (activeVariant) {
+                    variant = activeVariant;
+                    resolvedVariantId = activeVariant.id;
+                }
+            }
+        }
+
         if (!variant) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found");
         }
@@ -190,7 +296,7 @@ export const addToCart = async (req, res) => {
 
         // Check if item already exists in cart
         let cartItem = await Cart.findOne({
-            where: { userId, productId, variantId }
+            where: { userId, productId, variantId: resolvedVariantId }
         });
 
         const currentCartQty = cartItem ? Number(cartItem.quantity) : 0;
@@ -228,7 +334,7 @@ export const addToCart = async (req, res) => {
             cartItem = await Cart.create({
                 userId,
                 productId,
-                variantId,
+                variantId: resolvedVariantId,
                 quantity: Number(quantity)
             });
         }
@@ -269,7 +375,32 @@ export const updateCartItem = async (req, res) => {
 
         const proposedQty = Number(quantity);
         if (proposedQty > 0) {
-            const variant = await ProductVariant.findByPk(cartItem.variantId);
+            let variant = await ProductVariant.findByPk(cartItem.variantId);
+            if (!variant) {
+                const deletedVariant = await ProductVariant.findByPk(cartItem.variantId, { paranoid: false });
+                if (deletedVariant) {
+                    let activeVariant = await ProductVariant.findOne({
+                        where: {
+                            productId: deletedVariant.productId,
+                            volumeId: deletedVariant.volumeId,
+                            status: 'Active'
+                        }
+                    });
+                    if (!activeVariant) {
+                        activeVariant = await ProductVariant.findOne({
+                            where: {
+                                productId: deletedVariant.productId,
+                                status: 'Active'
+                            }
+                        });
+                    }
+                    if (activeVariant) {
+                        variant = activeVariant;
+                        cartItem.variantId = activeVariant.id;
+                        await cartItem.save();
+                    }
+                }
+            }
             const bUPP = variant ? Number(variant.baseUnitsPerPack || 1) : 1;
             const deductionRequired = variant && variant.sellingVolume 
                 ? proposedQty * Number(variant.sellingVolume) * bUPP

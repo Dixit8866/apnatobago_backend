@@ -11,6 +11,7 @@ import MainCategory from '../../models/superadmin-models/MainCategory.js';
 import SubCategory from '../../models/superadmin-models/SubCategory.js';
 import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
 import Volume from '../../models/superadmin-models/Volume.js';
+import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
 
 function hasAnyLangValue(obj) {
     return !!(obj && typeof obj === 'object' && Object.values(obj).some((v) => String(v || '').trim()));
@@ -151,6 +152,9 @@ export const createProduct = async (req, res, next) => {
             companyCategoryId,
             productDescription,
             isTobaccoProduct,
+            isCombo,
+            comboProduct1Id,
+            comboProduct2Id,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -171,6 +175,17 @@ export const createProduct = async (req, res, next) => {
         if (!Array.isArray(variants) || variants.length === 0) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'At least one volume variant is required.');
+        }
+
+        if (isCombo) {
+            if (!comboProduct1Id || !comboProduct2Id) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please select both combo products. (કૃપા કરીને બંને કોમ્બો પ્રોડક્ટ્સ પસંદ કરો.)');
+            }
+            if (comboProduct1Id === comboProduct2Id) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Both combo products cannot be the same. (કોમ્બોની બંને પ્રોડક્ટ સમાન ન હોઈ શકે.)');
+            }
         }
 
         const categoryError = await validateCategoryIds({ mainCategoryId, subCategoryId, companyCategoryId, transaction: t });
@@ -196,11 +211,15 @@ export const createProduct = async (req, res, next) => {
                 isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : true,
                 productDescription: normalizeProductDescription(productDescription),
                 status: status || 'Active',
+                isCombo: isCombo !== undefined ? isCombo : false,
+                comboProduct1Id: comboProduct1Id || null,
+                comboProduct2Id: comboProduct2Id || null,
             },
             { transaction: t }
         );
 
         for (const v of variants) {
+            const extra = typeof v.extra === 'string' ? v.extra.trim() : null;
             const volumeValue = String(v.volumeValue || '').trim();
             const volumeId = String(v.volumeId || '').trim();
             const purchasePrice = Number(v.purchasePrice);
@@ -230,6 +249,7 @@ export const createProduct = async (req, res, next) => {
             const variant = await ProductVariant.create(
                 {
                     productId: product.id,
+                    extra: extra || null,
                     volumeId: volumeId || null,
                     volume: normalizedVolume,
                     purchasePrice,
@@ -251,9 +271,24 @@ export const createProduct = async (req, res, next) => {
                     await t.rollback();
                     return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'customLevelId and valid quantity range are required for pricing.');
                 }
-                if (p.price === undefined || p.mrp === undefined) {
+                const numMRP = Number(p.mrp);
+                const numPrice = Number(p.price);
+
+                if (p.mrp === undefined || p.mrp === null || String(p.mrp).trim() === '' || isNaN(numMRP) || numMRP <= 0) {
                     await t.rollback();
-                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'price and mrp are required for pricing.');
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid MRP greater than 0 for all pricing entries. (એમઆરપી કિંમત 0 થી વધારે હોવી જોઈએ.)');
+                }
+                if (p.price === undefined || p.price === null || String(p.price).trim() === '' || isNaN(numPrice) || numPrice <= 0) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid Selling Price greater than 0 for all pricing entries. (વેચાણ કિંમત 0 થી વધારે હોવી જોઈએ.)');
+                }
+                if (numPrice < purchasePrice) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Selling price (${p.price}) cannot be lower than purchase price (${purchasePrice}) for variant "${normalizedVolume}". (વેચાણ કિંમત ખરીદ કિંમત કરતા ઓછી ન હોવી જોઈએ.)`);
+                }
+                if (numPrice > numMRP) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Selling price (${p.price}) cannot be higher than MRP (${p.mrp}) for variant "${normalizedVolume}". (વેચાણ કિંમત એમઆરપી કરતા વધારે ન હોઈ શકે.)`);
                 }
 
                 await ProductPricing.create(
@@ -285,6 +320,7 @@ export const createProduct = async (req, res, next) => {
 export const getProducts = async (req, res, next) => {
     try {
         const { search = '', status, mainCategoryId, isTobacco } = req.query;
+        const isInventoryView = req.query.inventoryView === 'true';
 
         const searchTerms = search.split(/\s+/).filter(Boolean);
         const searchWhere = searchTerms.length > 0
@@ -306,11 +342,40 @@ export const getProducts = async (req, res, next) => {
             searchWhere.isTobaccoProduct = isTobacco === 'true';
         }
 
+        const stockSubquery = `(
+            SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
+            FROM "inventory_stocks" AS "stock"
+            INNER JOIN "product_variants" AS "variant" ON "variant"."id" = "stock"."variantId"
+            WHERE "variant"."productId" = "Product"."id"
+              AND "stock"."status" = 'Active'
+              AND "stock"."deletedAt" IS NULL
+              AND "variant"."status" != 'Deleted'
+              AND "variant"."deletedAt" IS NULL
+        )`;
+
         const whereWithFilters = { ...searchWhere };
-        if (status) {
-            whereWithFilters.status = status;
-        } else {
+
+        if (isInventoryView) {
             whereWithFilters.status = { [Op.ne]: 'Deleted' };
+            if (status === 'Active') {
+                // In Stock: at least one variant has total stock > 0
+                whereWithFilters[Op.and] = [
+                    sequelize.literal(`${stockSubquery} > 0`)
+                ];
+            } else if (status === 'Inactive') {
+                // Out of Stock: all variants have total stock = 0
+                whereWithFilters[Op.and] = [
+                    sequelize.literal(`${stockSubquery} = 0`)
+                ];
+            } else if (status === 'Deleted') {
+                whereWithFilters.status = 'Deleted';
+            }
+        } else {
+            if (status) {
+                whereWithFilters.status = status;
+            } else {
+                whereWithFilters.status = { [Op.ne]: 'Deleted' };
+            }
         }
 
         if (mainCategoryId) {
@@ -320,12 +385,50 @@ export const getProducts = async (req, res, next) => {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
-        const [activeCount, inactiveCount, deletedCount, totalCount] = await Promise.all([
-            Product.count({ where: { ...searchWhere, status: 'Active', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
-            Product.count({ where: { ...searchWhere, status: 'Inactive', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
-            Product.count({ where: { ...searchWhere, status: 'Deleted', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
-            Product.count({ where: { ...searchWhere, ...(mainCategoryId ? { mainCategoryId } : {}) } }),
-        ]);
+        let activeCount, inactiveCount, deletedCount, totalCount;
+
+        const countBaseWhere = { ...searchWhere };
+        if (mainCategoryId) {
+            countBaseWhere.mainCategoryId = mainCategoryId;
+        }
+
+        if (isInventoryView) {
+            [activeCount, inactiveCount, deletedCount, totalCount] = await Promise.all([
+                Product.count({
+                    where: {
+                        ...countBaseWhere,
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.and]: [sequelize.literal(`${stockSubquery} > 0`)]
+                    }
+                }),
+                Product.count({
+                    where: {
+                        ...countBaseWhere,
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.and]: [sequelize.literal(`${stockSubquery} = 0`)]
+                    }
+                }),
+                Product.count({
+                    where: {
+                        ...countBaseWhere,
+                        status: 'Deleted'
+                    }
+                }),
+                Product.count({
+                    where: {
+                        ...countBaseWhere,
+                        status: { [Op.ne]: 'Deleted' }
+                    }
+                })
+            ]);
+        } else {
+            [activeCount, inactiveCount, deletedCount, totalCount] = await Promise.all([
+                Product.count({ where: { ...searchWhere, status: 'Active', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+                Product.count({ where: { ...searchWhere, status: 'Inactive', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+                Product.count({ where: { ...searchWhere, status: 'Deleted', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+                Product.count({ where: { ...searchWhere, ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+            ]);
+        }
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
         const include = [
@@ -397,6 +500,8 @@ export const getProductById = async (req, res, next) => {
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title', 'status'] },
                 { model: SubCategory, as: 'subCategory', attributes: ['id', 'mainCategoryId', 'title', 'status'] },
                 { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title', 'status'] },
+                { model: Product, as: 'comboProduct1', attributes: ['id', 'name', 'thumbnail'] },
+                { model: Product, as: 'comboProduct2', attributes: ['id', 'name', 'thumbnail'] },
                 {
                     model: ProductVariant,
                     as: 'variants',
@@ -440,12 +545,30 @@ export const updateProduct = async (req, res, next) => {
             companyCategoryId,
             productDescription,
             isTobaccoProduct,
+            isCombo,
+            comboProduct1Id,
+            comboProduct2Id,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
         if (!product) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
+        }
+
+        // Check if there is active stock for any variant of this product in inventory_stocks
+        const hasStock = await InventoryStock.findOne({
+            where: {
+                productId: product.id,
+                totalBaseUnits: { [Op.gt]: 0 },
+                status: 'Active'
+            },
+            transaction: t
+        });
+
+        if (hasStock) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Cannot update product/volume because stock is already added. (તમે જે વોલ્યુમ અથવા પ્રોડક્ટ અપડેટ કરો છો તેમાં ઓલરેડી સ્ટોક એડ કરેલો છે.)');
         }
         if (!hasAnyLangValue(name)) {
             await t.rollback();
@@ -464,6 +587,17 @@ export const updateProduct = async (req, res, next) => {
         if (!Array.isArray(variants) || variants.length === 0) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'At least one volume variant is required.');
+        }
+
+        if (isCombo) {
+            if (!comboProduct1Id || !comboProduct2Id) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please select both combo products. (કૃપા કરીને બંને કોમ્બો પ્રોડક્ટ્સ પસંદ કરો.)');
+            }
+            if (comboProduct1Id === comboProduct2Id) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Both combo products cannot be the same. (કોમ્બોની બંને પ્રોડક્ટ સમાન ન હોઈ શકે.)');
+            }
         }
 
         const categoryError = await validateCategoryIds({ mainCategoryId, subCategoryId, companyCategoryId, transaction: t });
@@ -489,6 +623,9 @@ export const updateProduct = async (req, res, next) => {
                 isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : product.isTobaccoProduct,
                 productDescription: normalizeProductDescription(productDescription),
                 status: status || product.status,
+                isCombo: isCombo !== undefined ? isCombo : product.isCombo,
+                comboProduct1Id: comboProduct1Id !== undefined ? comboProduct1Id : product.comboProduct1Id,
+                comboProduct2Id: comboProduct2Id !== undefined ? comboProduct2Id : product.comboProduct2Id,
             },
             { transaction: t }
         );
@@ -502,6 +639,7 @@ export const updateProduct = async (req, res, next) => {
         }
 
         for (const v of variants) {
+            const extra = typeof v.extra === 'string' ? v.extra.trim() : null;
             const volumeValue = String(v.volumeValue || '').trim();
             const volumeId = String(v.volumeId || '').trim();
             const purchasePrice = Number(v.purchasePrice);
@@ -531,6 +669,7 @@ export const updateProduct = async (req, res, next) => {
             const variant = await ProductVariant.create(
                 {
                     productId: product.id,
+                    extra: extra || null,
                     volumeId: volumeId || null,
                     volume: normalizedVolume,
                     purchasePrice,
@@ -552,10 +691,26 @@ export const updateProduct = async (req, res, next) => {
                     await t.rollback();
                     return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'customLevelId and valid quantity range are required for pricing.');
                 }
-                if (p.price === undefined || p.mrp === undefined) {
+                const numMRP = Number(p.mrp);
+                const numPrice = Number(p.price);
+
+                if (p.mrp === undefined || p.mrp === null || String(p.mrp).trim() === '' || isNaN(numMRP) || numMRP <= 0) {
                     await t.rollback();
-                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'price and mrp are required for pricing.');
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid MRP greater than 0 for all pricing entries. (એમઆરપી કિંમત 0 થી વધારે હોવી જોઈએ.)');
                 }
+                if (p.price === undefined || p.price === null || String(p.price).trim() === '' || isNaN(numPrice) || numPrice <= 0) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid Selling Price greater than 0 for all pricing entries. (વેચાણ કિંમત 0 થી વધારે હોવી જોઈએ.)');
+                }
+                if (numPrice < purchasePrice) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Selling price (${p.price}) cannot be lower than purchase price (${purchasePrice}) for variant "${normalizedVolume}". (વેચાણ કિંમત ખરીદ કિંમત કરતા ઓછી ન હોવી જોઈએ.)`);
+                }
+                if (numPrice > numMRP) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Selling price (${p.price}) cannot be higher than MRP (${p.mrp}) for variant "${normalizedVolume}". (વેચાણ કિંમત એમઆરપી કરતા વધારે ન હોઈ શકે.)`);
+                }
+
                 await ProductPricing.create(
                     {
                         variantId: variant.id,
@@ -586,6 +741,19 @@ export const deleteProduct = async (req, res, next) => {
     try {
         const product = await Product.findByPk(req.params.id);
         if (!product) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
+
+        // Check if there is active stock for any variant of this product in inventory_stocks
+        const hasStock = await InventoryStock.findOne({
+            where: {
+                productId: product.id,
+                totalBaseUnits: { [Op.gt]: 0 },
+                status: 'Active'
+            }
+        });
+
+        if (hasStock) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Cannot delete product because it has active stock. (ઉત્પાદન કાઢી શકાતું નથી કારણ કે તેમાં સક્રિય સ્ટોક છે.)');
+        }
 
         product.status = 'Deleted';
         await product.save();
@@ -670,6 +838,8 @@ export const updateProductPrices = async (req, res, next) => {
                 const variant = await ProductVariant.findByPk(v.id, { transaction: t });
                 if (!variant) continue;
 
+                const currentPurchasePrice = v.purchasePrice !== undefined ? Number(v.purchasePrice) : Number(variant.purchasePrice || 0);
+
                 if (v.purchasePrice !== undefined) {
                     await variant.update({ purchasePrice: v.purchasePrice }, { transaction: t });
                 }
@@ -677,8 +847,12 @@ export const updateProductPrices = async (req, res, next) => {
                 if (Array.isArray(v.pricings)) {
                     for (const p of v.pricings) {
                         if (p.id) {
+                            if (p.price !== undefined && Number(p.price) < currentPurchasePrice) {
+                                await t.rollback();
+                                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Selling price (${p.price}) cannot be lower than purchase price (${currentPurchasePrice}) for variant "${variant.volume}". (વેચાણ કિંમત ખરીદ કિંમત કરતા ઓછી ન હોવી જોઈએ.)`);
+                            }
                             await ProductPricing.update(
-                                { price: p.price, mrp: p.mrp, purchasePrice: v.purchasePrice },
+                                { price: p.price, mrp: p.mrp, purchasePrice: currentPurchasePrice },
                                 { where: { id: p.id }, transaction: t }
                             );
                         }
@@ -702,6 +876,10 @@ export const updateProductPrices = async (req, res, next) => {
 
             if (Array.isArray(pricings)) {
                 for (const p of pricings) {
+                    if (p.price !== undefined && Number(p.price) < Number(purchasePrice)) {
+                        await t.rollback();
+                        return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Selling price (${p.price}) cannot be lower than purchase price (${purchasePrice}) for variant "${variant.volume}". (વેચાણ કિંમત ખરીદ કિંમત કરતા ઓછી ન હોવી જોઈએ.)`);
+                    }
                     await ProductPricing.update(
                         { price: p.price, mrp: p.mrp, purchasePrice },
                         {

@@ -57,6 +57,21 @@ const Product = sequelize.define(
             defaultValue: 0,
             allowNull: false,
         },
+        isCombo: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        comboProduct1Id: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            defaultValue: null,
+        },
+        comboProduct2Id: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,

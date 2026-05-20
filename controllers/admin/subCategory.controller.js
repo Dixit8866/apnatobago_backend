@@ -18,6 +18,31 @@ export const createSubCategory = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Title is required in at least one language.");
         }
 
+        if (title) {
+            const enTitle = String(title.en || '').trim();
+            const guTitle = String(title.gu || '').trim();
+
+            if (enTitle || guTitle) {
+                const existing = await SubCategory.findOne({
+                    where: {
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.or]: [
+                            enTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'en')`), enTitle.toLowerCase()) : null,
+                            guTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'gu')`), guTitle.toLowerCase()) : null
+                        ].filter(Boolean)
+                    }
+                });
+
+                if (existing) {
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        "Sub Category with this name already exists. (આ નામવાળી સબ કેટેગરી પહેલેથી અસ્તિત્વમાં છે.)"
+                    );
+                }
+            }
+        }
+
         // Get max position for auto-increment
         const maxPos = await SubCategory.max('position') || 0;
         const newCategory = await SubCategory.create({
@@ -171,6 +196,32 @@ export const updateSubCategory = async (req, res, next) => {
 
         const category = await SubCategory.findByPk(req.params.id);
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Sub Category not found");
+
+        if (title) {
+            const enTitle = String(title.en || '').trim();
+            const guTitle = String(title.gu || '').trim();
+
+            if (enTitle || guTitle) {
+                const existing = await SubCategory.findOne({
+                    where: {
+                        id: { [Op.ne]: req.params.id },
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.or]: [
+                            enTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'en')`), enTitle.toLowerCase()) : null,
+                            guTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'gu')`), guTitle.toLowerCase()) : null
+                        ].filter(Boolean)
+                    }
+                });
+
+                if (existing) {
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        "Sub Category with this name already exists. (આ નામવાળી સબ કેટેગરી પહેલેથી અસ્તિત્વમાં છે.)"
+                    );
+                }
+            }
+        }
 
         if (mainCategoryId) category.mainCategoryId = mainCategoryId;
         if (image !== undefined) category.image = image;

@@ -2,6 +2,7 @@ import http from 'http';
 import app from './app.js';
 import sequelize, { connectDB } from './config/db.js';
 import { runManualMigrations } from './models/index.js'; // Import models and migration
+import { resetInventoryOnStartup } from './scripts/resetInventoryOnStartup.js';
 
 // Setup Port
 const PORT = process.env.PORT || 5000;
@@ -54,6 +55,9 @@ const startServer = async () => {
         
         // Seed SuperAdmin if database is empty
         await seedAdmin();
+
+        // Reset all inventory stock to 0 on every startup / PM2 restart
+        await resetInventoryOnStartup();
 
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);

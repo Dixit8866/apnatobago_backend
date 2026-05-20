@@ -377,13 +377,38 @@ export const getInventoryTransactions = async (req, res, next) => {
     try {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
+        const { search = '' } = req.query;
+
+        const include = [
+            {
+                model: Product,
+                as: 'product',
+                attributes: ['id', 'name'],
+                required: false,
+            },
+            { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] },
+            { model: Godown, as: 'godown', attributes: ['id', 'name'] },
+        ];
+
+        const searchTerms = search.split(/\s+/).filter(Boolean);
+        if (searchTerms.length > 0) {
+            include[0].where = {
+                [Op.and]: searchTerms.map(term => ({
+                    [Op.or]: [
+                        { 'name.en': { [Op.iLike]: `%${term}%` } },
+                        { 'name.gu': { [Op.iLike]: `%${term}%` } },
+                        { 'name.hn': { [Op.iLike]: `%${term}%` } },
+                        { 'name.HN': { [Op.iLike]: `%${term}%` } },
+                        { 'name.GU': { [Op.iLike]: `%${term}%` } },
+                        { 'name.EN': { [Op.iLike]: `%${term}%` } },
+                    ]
+                }))
+            };
+            include[0].required = true;
+        }
 
         const result = await InventoryTransaction.findAndCountAll({
-            include: [
-                { model: Product, as: 'product', attributes: ['id', 'name'] },
-                { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] },
-                { model: Godown, as: 'godown', attributes: ['id', 'name'] },
-            ],
+            include,
             limit,
             offset,
             order: [['createdAt', 'DESC']],
@@ -502,6 +527,7 @@ export const createPurchaseTransaction = async (req, res, next) => {
                 avgPriceAfterTxn: unitPrice,
                 balanceAfterBaseUnits: finalTotalBaseUnits,
                 note: note || null,
+                createdBy: req.user?.name || 'Admin',
             },
             { transaction: t }
         );
@@ -591,6 +617,7 @@ export const createSaleTransaction = async (req, res, next) => {
                 avgPriceAfterTxn: nextAvg,
                 balanceAfterBaseUnits: newQty,
                 note: note || null,
+                createdBy: req.user?.name || 'Admin',
             },
             { transaction: t }
         );
@@ -701,6 +728,7 @@ export const updateInventoryStock = async (req, res, next) => {
                 avgPriceAfterTxn: round2(avgPrice),
                 balanceAfterBaseUnits: qtyTotalBaseUnits,
                 note: note || 'Manual stock edit',
+                createdBy: req.user?.name || 'Admin',
             },
             { transaction: t }
         );

@@ -89,27 +89,117 @@ export const createOrder = async (req, res) => {
                 ? Number(quantity)
                 : Number(quantity) * bUPP;
 
-            let availableStock = 0;
-            if (targetGodownId) {
-                const totalStock = await InventoryStock.sum('totalBaseUnits', {
-                    where: {
-                        productId: item.productId,
-                        godownId: targetGodownId,
-                        totalBaseUnits: { [Op.gt]: 0 }
+            let combo1Variant = null;
+            let combo2Variant = null;
+            if (variant.product?.isCombo) {
+                // Find matching or default variant for Combo Product 1
+                combo1Variant = await ProductVariant.findOne({
+                    where: { 
+                        productId: variant.product.comboProduct1Id,
+                        ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                     },
                     transaction: t
+                }) || await ProductVariant.findOne({
+                    where: { productId: variant.product.comboProduct1Id },
+                    transaction: t
                 });
-                availableStock = parseFloat(totalStock) || 0;
+
+                // Find matching or default variant for Combo Product 2
+                combo2Variant = await ProductVariant.findOne({
+                    where: { 
+                        productId: variant.product.comboProduct2Id,
+                        ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                    },
+                    transaction: t
+                }) || await ProductVariant.findOne({
+                    where: { productId: variant.product.comboProduct2Id },
+                    transaction: t
+                });
             }
 
-            if (deductionRequired > availableStock) {
-                await t.rollback();
-                const productName = variant.product?.name || 'Product';
-                return sendErrorResponse(
-                    res,
-                    HTTP_STATUS.BAD_REQUEST,
-                    `Insufficient stock for ${productName}. Required: ${deductionRequired} units, Available: ${availableStock} units.`
-                );
+            if (variant.product?.isCombo) {
+                if (!combo1Variant || !combo2Variant) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Combo components variants not found for this product.`);
+                }
+
+                const bUPP1 = Number(combo1Variant.baseUnitsPerPack || 1);
+                const deduction1 = sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP1;
+
+                const bUPP2 = Number(combo2Variant.baseUnitsPerPack || 1);
+                const deduction2 = sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP2;
+
+                let stock1 = 0;
+                if (targetGodownId) {
+                    stock1 = await InventoryStock.sum('totalBaseUnits', {
+                        where: {
+                            productId: variant.product.comboProduct1Id,
+                            godownId: targetGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        transaction: t
+                    }) || 0;
+                }
+
+                if (deduction1 > stock1) {
+                    await t.rollback();
+                    const prod1 = await Product.findByPk(variant.product.comboProduct1Id, { transaction: t });
+                    const prod1Name = prod1?.name ? (prod1.name.en || Object.values(prod1.name)[0] || 'Product 1') : 'Product 1';
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        `Insufficient stock for combo component: ${prod1Name}. Required: ${deduction1} units, Available: ${stock1} units.`
+                    );
+                }
+
+                let stock2 = 0;
+                if (targetGodownId) {
+                    stock2 = await InventoryStock.sum('totalBaseUnits', {
+                        where: {
+                            productId: variant.product.comboProduct2Id,
+                            godownId: targetGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        transaction: t
+                    }) || 0;
+                }
+
+                if (deduction2 > stock2) {
+                    await t.rollback();
+                    const prod2 = await Product.findByPk(variant.product.comboProduct2Id, { transaction: t });
+                    const prod2Name = prod2?.name ? (prod2.name.en || Object.values(prod2.name)[0] || 'Product 2') : 'Product 2';
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        `Insufficient stock for combo component: ${prod2Name}. Required: ${deduction2} units, Available: ${stock2} units.`
+                    );
+                }
+            } else {
+                // NORMAL PRODUCT STOCK CHECK
+                let availableStock = 0;
+                if (targetGodownId) {
+                    const totalStock = await InventoryStock.sum('totalBaseUnits', {
+                        where: {
+                            productId: item.productId,
+                            godownId: targetGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        transaction: t
+                    });
+                    availableStock = parseFloat(totalStock) || 0;
+                }
+
+                if (deductionRequired > availableStock) {
+                    await t.rollback();
+                    const productName = typeof variant.product?.name === 'object' 
+                        ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product') 
+                        : (variant.product?.name || 'Product');
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        `Insufficient stock for ${productName}. Required: ${deductionRequired} units, Available: ${availableStock} units.`
+                    );
+                }
             }
 
             // 2. Fetch all pricings for this variant
@@ -238,56 +328,128 @@ export const createOrder = async (req, res) => {
         // 8. Deduct Stock from Inventory
         if (targetGodownId) {
             for (const item of orderItemsData) {
-                const variant = await ProductVariant.findByPk(item.variantId, { transaction: t });
-                if (!variant) continue;
-
-                // How many base units to deduct?
-                // If selling pieces (Inner), deduct quantity directly. 
-                // If selling cartons (Base), deduct quantity * unitsPerPack.
-                const deductionRequired = item.sellUnit === 'Inner'
-                    ? item.quantity
-                    : item.quantity * (variant.baseUnitsPerPack || 1);
-
-                // Find available stock batches for this variant in the target godown (FIFO)
-                const stocks = await InventoryStock.findAll({
-                    where: {
-                        productId: item.productId,
-                        godownId: targetGodownId,
-                        totalBaseUnits: { [Op.gt]: 0 }
-                    },
-                    order: [['createdAt', 'ASC']],
+                const variant = await ProductVariant.findByPk(item.variantId, {
+                    include: [{ model: Product, as: 'product' }],
                     transaction: t
                 });
+                if (!variant) continue;
 
-                let remainingToDeduct = deductionRequired;
-                for (const stock of stocks) {
-                    if (remainingToDeduct <= 0) break;
+                if (variant.product?.isCombo) {
+                    // DEDUCT FROM COMBO COMPONENTS!
+                    const comboProducts = [
+                        { id: variant.product.comboProduct1Id, key: 'comboProduct1' },
+                        { id: variant.product.comboProduct2Id, key: 'comboProduct2' }
+                    ];
 
-                    const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                    const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+                    for (const cp of comboProducts) {
+                        const compVariant = await ProductVariant.findOne({
+                            where: { 
+                                productId: cp.id,
+                                ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                            },
+                            transaction: t
+                        }) || await ProductVariant.findOne({
+                            where: { productId: cp.id },
+                            transaction: t
+                        });
 
-                    await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+                        if (!compVariant) continue;
 
-                    // Log the transaction
-                    await InventoryTransaction.create({
-                        stockId: stock.id,
-                        productId: item.productId,
-                        variantId: item.variantId,
-                        godownId: targetGodownId,
-                        type: 'SALE',
-                        primaryUnitId: stock.primaryUnitId,
-                        secondaryUnitId: stock.secondaryUnitId,
-                        secondaryPerPrimary: stock.secondaryPerPrimary,
-                        totalQtyBaseUnits: deductFromThis,
-                        balanceAfterBaseUnits: newTotalBaseUnits,
-                        note: `Sales Order #${newOrder.orderId}`
-                    }, { transaction: t });
+                        const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
+                        const compDeduction = item.sellUnit === 'Inner'
+                            ? Number(item.quantity)
+                            : Number(item.quantity) * compBUPP;
 
-                    remainingToDeduct -= deductFromThis;
-                }
+                        const stocks = await InventoryStock.findAll({
+                            where: {
+                                productId: cp.id,
+                                godownId: targetGodownId,
+                                totalBaseUnits: { [Op.gt]: 0 }
+                            },
+                            order: [['createdAt', 'ASC']],
+                            transaction: t
+                        });
 
-                if (remainingToDeduct > 0) {
-                    logger.warn(`[Stock Deduction]: Order #${newOrder.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId} in Godown ${targetGodownId}`);
+                        let remainingToDeduct = compDeduction;
+                        for (const stock of stocks) {
+                            if (remainingToDeduct <= 0) break;
+
+                            const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                            const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                            await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                            // Log the transaction
+                            await InventoryTransaction.create({
+                                stockId: stock.id,
+                                productId: cp.id,
+                                variantId: compVariant.id,
+                                godownId: targetGodownId,
+                                type: 'SALE',
+                                primaryUnitId: stock.primaryUnitId,
+                                secondaryUnitId: stock.secondaryUnitId,
+                                secondaryPerPrimary: stock.secondaryPerPrimary,
+                                totalQtyBaseUnits: deductFromThis,
+                                balanceAfterBaseUnits: newTotalBaseUnits,
+                                note: `Sales Order #${newOrder.orderId} (Combo Component)`,
+                                createdBy: req.user?.fullname || 'Customer'
+                            }, { transaction: t });
+
+                            remainingToDeduct -= deductFromThis;
+                        }
+
+                        if (remainingToDeduct > 0) {
+                            logger.warn(`[Stock Deduction Shortfall]: Order #${newOrder.orderId} - Shortfall of ${remainingToDeduct} base units for combo component variant ${compVariant.id} in Godown ${targetGodownId}`);
+                        }
+                    }
+                } else {
+                    // NORMAL PRODUCT STOCK DEDUCTION
+                    const deductionRequired = item.sellUnit === 'Inner'
+                        ? item.quantity
+                        : item.quantity * (variant.baseUnitsPerPack || 1);
+
+                    // Find available stock batches for this variant in the target godown (FIFO)
+                    const stocks = await InventoryStock.findAll({
+                        where: {
+                            productId: item.productId,
+                            godownId: targetGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        order: [['createdAt', 'ASC']],
+                        transaction: t
+                    });
+
+                    let remainingToDeduct = deductionRequired;
+                    for (const stock of stocks) {
+                        if (remainingToDeduct <= 0) break;
+
+                        const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                        const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                        await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                        // Log the transaction
+                        await InventoryTransaction.create({
+                            stockId: stock.id,
+                            productId: item.productId,
+                            variantId: item.variantId,
+                            godownId: targetGodownId,
+                            type: 'SALE',
+                            primaryUnitId: stock.primaryUnitId,
+                            secondaryUnitId: stock.secondaryUnitId,
+                            secondaryPerPrimary: stock.secondaryPerPrimary,
+                            totalQtyBaseUnits: deductFromThis,
+                            balanceAfterBaseUnits: newTotalBaseUnits,
+                            note: `Sales Order #${newOrder.orderId}`,
+                            createdBy: req.user?.fullname || 'Customer'
+                        }, { transaction: t });
+
+                        remainingToDeduct -= deductFromThis;
+                    }
+
+                    if (remainingToDeduct > 0) {
+                        logger.warn(`[Stock Deduction]: Order #${newOrder.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId} in Godown ${targetGodownId}`);
+                    }
                 }
             }
         } else {
@@ -461,18 +623,53 @@ export const cancelOrder = async (req, res) => {
         // Restore stock for all items
         if (order.items && order.items.length > 0) {
             for (const item of order.items) {
-                const variant = await ProductVariant.findByPk(item.variantId);
-                const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                const baseUnitsToRestore = item.sellUnit === 'Inner' 
-                    ? Number(item.quantity) 
-                    : Number(item.quantity) * bUPP;
-
-                const stock = await InventoryStock.findOne({
-                    where: { productId: item.productId },
-                    order: [['createdAt', 'DESC']]
+                const variant = await ProductVariant.findByPk(item.variantId, {
+                    include: [{ model: Product, as: 'product' }]
                 });
-                if (stock) {
-                    await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+
+                if (variant?.product?.isCombo) {
+                    const comboProducts = [
+                        variant.product.comboProduct1Id,
+                        variant.product.comboProduct2Id
+                    ];
+                    for (const cpId of comboProducts) {
+                        const compVariant = await ProductVariant.findOne({
+                            where: { 
+                                productId: cpId,
+                                ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                            }
+                        }) || await ProductVariant.findOne({
+                            where: { productId: cpId }
+                        });
+
+                        if (!compVariant) continue;
+
+                        const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
+                        const baseUnitsToRestore = item.sellUnit === 'Inner'
+                            ? Number(item.quantity)
+                            : Number(item.quantity) * compBUPP;
+
+                        const stock = await InventoryStock.findOne({
+                            where: { productId: cpId },
+                            order: [['createdAt', 'DESC']]
+                        });
+                        if (stock) {
+                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                        }
+                    }
+                } else {
+                    const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                    const baseUnitsToRestore = item.sellUnit === 'Inner' 
+                        ? Number(item.quantity) 
+                        : Number(item.quantity) * bUPP;
+
+                    const stock = await InventoryStock.findOne({
+                        where: { productId: item.productId },
+                        order: [['createdAt', 'DESC']]
+                    });
+                    if (stock) {
+                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                    }
                 }
             }
         }
@@ -506,15 +703,18 @@ export const initializeRazorpayOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid amount.");
         }
 
-        // Fetch Razorpay Keys from AppSettings
+        // Fetch Razorpay Keys from AppSettings with environment fallback
         const settings = await AppSettings.findOne();
-        if (!settings || !settings.razorpayKeyId || !settings.razorpaySecretKey) {
+        const keyId = settings?.razorpayKeyId || process.env.RAZORPAY_KEY_ID;
+        const secretKey = settings?.razorpaySecretKey || process.env.RAZORPAY_KEY_SECRET;
+
+        if (!keyId || !secretKey) {
             return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Razorpay is not configured in settings.");
         }
 
         const razorpay = new Razorpay({
-            key_id: settings.razorpayKeyId,
-            key_secret: settings.razorpaySecretKey,
+            key_id: keyId,
+            key_secret: secretKey,
         });
 
         const options = {
@@ -529,7 +729,7 @@ export const initializeRazorpayOrder = async (req, res) => {
             id: razorpayOrder.id,
             amount: razorpayOrder.amount,
             currency: razorpayOrder.currency,
-            keyId: settings.razorpayKeyId // Send Key ID to frontend for the Checkout SDK
+            keyId: keyId // Send Key ID to frontend for the Checkout SDK
         });
     } catch (error) {
         logger.error(`[Razorpay Initialize Error]: ${error.message}`);
@@ -551,13 +751,14 @@ export const verifyRazorpayPayment = async (req, res) => {
         }
 
         const settings = await AppSettings.findOne();
-        if (!settings || !settings.razorpaySecretKey) {
+        const secretKey = settings?.razorpaySecretKey || process.env.RAZORPAY_KEY_SECRET;
+        if (!secretKey) {
             return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Razorpay secret key not found.");
         }
 
         const body = razorpayOrderId + "|" + razorpayPaymentId;
         const expectedSignature = crypto
-            .createHmac("sha256", settings.razorpaySecretKey)
+            .createHmac("sha256", secretKey)
             .update(body.toString())
             .digest("hex");
 

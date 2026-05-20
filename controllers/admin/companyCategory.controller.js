@@ -16,6 +16,31 @@ export const createCompanyCategory = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide a title in at least one language.");
         }
 
+        if (title) {
+            const enTitle = String(title.en || '').trim();
+            const guTitle = String(title.gu || '').trim();
+
+            if (enTitle || guTitle) {
+                const existing = await CompanyCategory.findOne({
+                    where: {
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.or]: [
+                            enTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'en')`), enTitle.toLowerCase()) : null,
+                            guTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'gu')`), guTitle.toLowerCase()) : null
+                        ].filter(Boolean)
+                    }
+                });
+
+                if (existing) {
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        "Company Category with this name already exists. (આ નામવાળી કંપની કેટેગરી પહેલેથી અસ્તિત્વમાં છે.)"
+                    );
+                }
+            }
+        }
+
         const category = await CompanyCategory.create({
             title,
             description: description || {},
@@ -164,6 +189,32 @@ export const updateCompanyCategory = async (req, res, next) => {
         const { title, description, image, status, mainCategoryId, subCategoryId, isTobacco } = req.body;
         const category = await CompanyCategory.findByPk(req.params.id);
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Company Category not found.");
+
+        if (title) {
+            const enTitle = String(title.en || '').trim();
+            const guTitle = String(title.gu || '').trim();
+
+            if (enTitle || guTitle) {
+                const existing = await CompanyCategory.findOne({
+                    where: {
+                        id: { [Op.ne]: req.params.id },
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.or]: [
+                            enTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'en')`), enTitle.toLowerCase()) : null,
+                            guTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'gu')`), guTitle.toLowerCase()) : null
+                        ].filter(Boolean)
+                    }
+                });
+
+                if (existing) {
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        "Company Category with this name already exists. (આ નામવાળી કંપની કેટેગરી પહેલેથી અસ્તિત્વમાં છે.)"
+                    );
+                }
+            }
+        }
 
         await category.update({
             title: title ?? category.title,

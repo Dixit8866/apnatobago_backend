@@ -178,12 +178,22 @@ OrderAssignment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 DeliveryBoy.hasMany(OrderAssignment, { foreignKey: 'deliveryBoyId', as: 'assignments' });
 OrderAssignment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
 
+Product.belongsTo(Product, { foreignKey: 'comboProduct1Id', as: 'comboProduct1' });
+Product.belongsTo(Product, { foreignKey: 'comboProduct2Id', as: 'comboProduct2' });
+
 // ─── Manual Migrations (Production Safe) ───────────────────────────────────
 // These ensure that new columns are added if they don't exist yet
 import sequelize from '../config/db.js';
 
 const runManualMigrations = async () => {
     try {
+        // Ensure 'Payment Verify' exists in enum_orders_orderStatus enum type
+        try {
+            await sequelize.query('ALTER TYPE "enum_orders_orderStatus" ADD VALUE IF NOT EXISTS \'Payment Verify\'');
+        } catch (e) {
+            console.log('[Migration Warning] enum_orders_orderStatus type alter failed or value already exists:', e.message);
+        }
+
         await sequelize.query('ALTER TABLE main_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
         await sequelize.query('ALTER TABLE sub_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
         await sequelize.query('ALTER TABLE company_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
@@ -207,6 +217,17 @@ const runManualMigrations = async () => {
         await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "minQty" DECIMAL(10, 2)');
         await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "maxQty" DECIMAL(10, 2)');
         
+        // Add extra to product_variants
+        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "extra" VARCHAR(255)');
+        
+        // Add isCombo, comboProduct1Id, comboProduct2Id to products
+        await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "isCombo" BOOLEAN DEFAULT false');
+        await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "comboProduct1Id" UUID');
+        await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "comboProduct2Id" UUID');
+
+        // Add createdBy to inventory_transactions
+        await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255) DEFAULT \'System\'');
+
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);
@@ -214,7 +235,7 @@ const runManualMigrations = async () => {
 };
 
 // Run migrations (Non-blocking)
-// runManualMigrations();
+runManualMigrations();
 
 export {
     Admin,

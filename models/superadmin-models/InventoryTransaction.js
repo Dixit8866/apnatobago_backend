@@ -77,6 +77,11 @@ const InventoryTransaction = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        createdBy: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: 'System',
+        },
     },
     {
         timestamps: true,

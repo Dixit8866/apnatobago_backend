@@ -56,15 +56,18 @@ export const initializeRazorpayOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "No orders found.");
         }
 
-        // Fetch Razorpay Keys from AppSettings
+        // Fetch Razorpay Keys from AppSettings with environment fallback
         const settings = await AppSettings.findOne();
-        if (!settings || !settings.razorpayKeyId || !settings.razorpaySecretKey) {
+        const keyId = settings?.razorpayKeyId || process.env.RAZORPAY_KEY_ID;
+        const secretKey = settings?.razorpaySecretKey || process.env.RAZORPAY_KEY_SECRET;
+
+        if (!keyId || !secretKey) {
             return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Razorpay is not configured in settings.");
         }
 
         const razorpay = new Razorpay({
-            key_id: settings.razorpayKeyId,
-            key_secret: settings.razorpaySecretKey,
+            key_id: keyId,
+            key_secret: secretKey,
         });
 
         const options = {
@@ -83,7 +86,7 @@ export const initializeRazorpayOrder = async (req, res) => {
             id: razorpayOrder.id,
             amount: razorpayOrder.amount,
             currency: razorpayOrder.currency,
-            keyId: settings.razorpayKeyId,
+            keyId: keyId,
             orderIds: orders.map(o => o.id),
             humanReadableOrderIds: orders.map(o => o.orderId)
         });
@@ -110,13 +113,14 @@ export const verifyRazorpayPayment = async (req, res) => {
         }
 
         const settings = await AppSettings.findOne();
-        if (!settings || !settings.razorpaySecretKey) {
+        const secretKey = settings?.razorpaySecretKey || process.env.RAZORPAY_KEY_SECRET;
+        if (!secretKey) {
             return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Razorpay secret key not found.");
         }
 
         const body = razorpayOrderId + "|" + razorpayPaymentId;
         const expectedSignature = crypto
-            .createHmac("sha256", settings.razorpaySecretKey)
+            .createHmac("sha256", secretKey)
             .update(body.toString())
             .digest("hex");
 

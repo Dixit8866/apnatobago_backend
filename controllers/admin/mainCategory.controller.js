@@ -10,6 +10,31 @@ export const createMainCategory = async (req, res, next) => {
         const { image, title, description, status, isTobacco } = req.body;
         // title is expected to be an object: { en: "Name", gu: "નામ" }
 
+        if (title) {
+            const enTitle = String(title.en || '').trim();
+            const guTitle = String(title.gu || '').trim();
+
+            if (enTitle || guTitle) {
+                const existing = await MainCategory.findOne({
+                    where: {
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.or]: [
+                            enTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'en')`), enTitle.toLowerCase()) : null,
+                            guTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'gu')`), guTitle.toLowerCase()) : null
+                        ].filter(Boolean)
+                    }
+                });
+
+                if (existing) {
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        "Category with this name already exists. (આ નામવાળી કેટેગરી પહેલેથી અસ્તિત્વમાં છે.)"
+                    );
+                }
+            }
+        }
+
         // Get max position for auto-increment
         const maxPos = await MainCategory.max('position') || 0;
         const mainCategory = await MainCategory.create({
@@ -128,6 +153,32 @@ export const updateMainCategory = async (req, res, next) => {
         const { image, title, description, status, isTobacco } = req.body;
         const category = await MainCategory.findByPk(req.params.id);
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Main Category not found.");
+
+        if (title) {
+            const enTitle = String(title.en || '').trim();
+            const guTitle = String(title.gu || '').trim();
+
+            if (enTitle || guTitle) {
+                const existing = await MainCategory.findOne({
+                    where: {
+                        id: { [Op.ne]: req.params.id },
+                        status: { [Op.ne]: 'Deleted' },
+                        [Op.or]: [
+                            enTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'en')`), enTitle.toLowerCase()) : null,
+                            guTitle ? sequelize.where(sequelize.literal(`LOWER("title"->>'gu')`), guTitle.toLowerCase()) : null
+                        ].filter(Boolean)
+                    }
+                });
+
+                if (existing) {
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        "Category with this name already exists. (આ નામવાળી કેટેગરી પહેલેથી અસ્તિત્વમાં છે.)"
+                    );
+                }
+            }
+        }
 
         await category.update({ image, title, description, status, isTobacco });
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Main Category updated successfully.", category);
