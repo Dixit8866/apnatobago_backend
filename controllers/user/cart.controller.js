@@ -1,4 +1,4 @@
-import { Cart, Product, ProductVariant, ProductPricing, Volume, Wishlist, InventoryStock, User, Godown } from '../../models/index.js';
+import { Cart, Product, ProductVariant, ProductPricing, Volume, Wishlist, InventoryStock } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -285,8 +285,8 @@ export const addToCart = async (req, res) => {
             ? totalProposedQty * Number(variant.sellingVolume) * bUPP
             : totalProposedQty * bUPP;
 
-        // Check stock first (at product level)
-        const availableStock = await getAvailableStock(productId, userId);
+        // Check stock first — sum across ALL godowns
+        const availableStock = await getAvailableStock(productId);
 
         if (deductionRequired > availableStock) {
             return sendErrorResponse(
@@ -385,7 +385,7 @@ export const updateCartItem = async (req, res) => {
                 ? proposedQty * Number(variant.sellingVolume) * bUPP
                 : proposedQty * bUPP;
 
-            const availableStock = await getAvailableStock(cartItem.productId, userId);
+            const availableStock = await getAvailableStock(cartItem.productId);
             if (deductionRequired > availableStock) {
                 return sendErrorResponse(
                     res, 
