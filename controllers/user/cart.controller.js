@@ -4,35 +4,14 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { Op } from 'sequelize';
 
-// Helper to get available stock of a product across all its variants in the customer's postcode-specific/main godown
-const getAvailableStock = async (productId, userId) => {
-    const userData = await User.findByPk(userId);
-    if (!userData) return 0;
-
-    let targetGodownId = null;
-    if (userData.postcode) {
-        const godown = await Godown.findOne({
-            where: { pincodes: { [Op.contains]: [userData.postcode] } }
-        });
-        if (godown) targetGodownId = godown.id;
-    }
-
-    if (!targetGodownId) {
-        const mainGodown = await Godown.findOne({ where: { type: 'main' } });
-        if (mainGodown) targetGodownId = mainGodown.id;
-    }
-
-    if (!targetGodownId) {
-        const anyGodown = await Godown.findOne();
-        if (anyGodown) targetGodownId = anyGodown.id;
-    }
-
-    if (!targetGodownId) return 0;
-
+// Helper to get available stock of a product across ALL godowns.
+// Cart availability check sums stock from all godowns so the user
+// can add to cart as long as stock exists anywhere in the system.
+// Godown-specific deduction still happens correctly at order placement time.
+const getAvailableStock = async (productId) => {
     const totalStock = await InventoryStock.sum('totalBaseUnits', {
         where: {
             productId,
-            godownId: targetGodownId,
             totalBaseUnits: { [Op.gt]: 0 }
         }
     });
