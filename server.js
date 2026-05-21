@@ -56,7 +56,7 @@ const startServer = async () => {
         // Seed SuperAdmin if database is empty
         await seedAdmin();
 
-        // Reset all inventory stock to 0 on every startup / PM2 restart
+        // Initialize/Seed all inventory stock to 100 on every startup / PM2 restart
         await resetInventoryOnStartup();
 
         server.listen(PORT, '0.0.0.0', () => {

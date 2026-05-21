@@ -200,6 +200,11 @@ export const createProduct = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, volumeError);
         }
 
+        const maxPos = await Product.max('position', {
+            where: { status: { [Op.ne]: 'Deleted' } },
+            transaction: t
+        }) || 0;
+
         const product = await Product.create(
             {
                 name,
@@ -214,6 +219,7 @@ export const createProduct = async (req, res, next) => {
                 isCombo: isCombo !== undefined ? isCombo : false,
                 comboProduct1Id: comboProduct1Id || null,
                 comboProduct2Id: comboProduct2Id || null,
+                position: maxPos + 1,
             },
             { transaction: t }
         );
@@ -855,20 +861,65 @@ export const deleteProduct = async (req, res, next) => {
 export const reorderProducts = async (req, res, next) => {
     try {
         const { items } = req.body; // [{ id, position }]
-        if (!Array.isArray(items)) {
+        if (!Array.isArray(items) || items.length === 0) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid items array.');
         }
 
-        // Update positions in parallel
-        await Promise.all(
-            items.map(async (item) => {
-                if (!item.id || typeof item.position !== 'number') return;
+        // Fetch all active products ordered by position ASC, createdAt DESC
+        const allProducts = await Product.findAll({
+            where: { status: { [Op.ne]: 'Deleted' } },
+            order: [['position', 'ASC'], ['createdAt', 'DESC']]
+        });
+
+        // Map frontend items by id for quick lookup and get their new order
+        const frontendOrderMap = new Map(items.map((item, index) => [item.id, index]));
+
+        // Find the index in allProducts of the first item that is being reordered
+        let firstReorderedIndex = allProducts.findIndex(p => frontendOrderMap.has(p.id));
+        if (firstReorderedIndex === -1) {
+            firstReorderedIndex = 0;
+        }
+
+        // Separate untouched and reordered products
+        const untouchedBefore = [];
+        const untouchedAfter = [];
+        const reordered = [];
+
+        allProducts.forEach((p, idx) => {
+            if (frontendOrderMap.has(p.id)) {
+                reordered.push(p);
+            } else {
+                if (idx < firstReorderedIndex) {
+                    untouchedBefore.push(p);
+                } else {
+                    untouchedAfter.push(p);
+                }
+            }
+        });
+
+        // Sort the reordered products based on the frontend order
+        reordered.sort((a, b) => frontendOrderMap.get(a.id) - frontendOrderMap.get(b.id));
+
+        // Combine them: untouchedBefore + reordered + untouchedAfter
+        const combined = [...untouchedBefore, ...reordered, ...untouchedAfter];
+
+        // Update all positions in the DB sequentially in a transaction to ensure atomicity
+        const transaction = await Product.sequelize.transaction();
+        try {
+            for (let i = 0; i < combined.length; i++) {
                 await Product.update(
-                    { position: item.position },
-                    { where: { id: item.id } }
+                    { position: i },
+                    { 
+                        where: { id: combined[i].id },
+                        transaction 
+                    }
                 );
-            })
-        );
+            }
+            await transaction.commit();
+        } catch (err) {
+            await transaction.rollback();
+            throw err;
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products reordered successfully.');
     } catch (error) {
