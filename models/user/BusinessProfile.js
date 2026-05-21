@@ -42,6 +42,10 @@ const BusinessProfile = sequelize.define(
             type: DataTypes.STRING,
             allowNull: false,
         },
+        selectedmapad: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,

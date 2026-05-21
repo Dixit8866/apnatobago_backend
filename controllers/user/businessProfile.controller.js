@@ -57,6 +57,7 @@ export const upsertBusinessProfile = async (req, res) => {
         const shopAddress = ensureString(body.shopAddress);
         const city = body.city;
         const postcode = body.postcode;
+        const selectedmapad = ensureString(body.selectedmapad);
 
         // Image Handling
         let bannerImage = body.bannerImage;
@@ -94,7 +95,8 @@ export const upsertBusinessProfile = async (req, res) => {
             gstNumber,
             shopAddress,
             city,
-            postcode
+            postcode,
+            selectedmapad
         };
 
         // Only update images if provided (either as URL in body or as file)
@@ -180,6 +182,13 @@ export const updateBusinessProfile = async (req, res) => {
         if (updateData.shopAddress) {
             if (typeof updateData.shopAddress === 'object' && updateData.shopAddress !== null) {
                 updateData.shopAddress = JSON.stringify(updateData.shopAddress);
+            }
+        }
+
+        // Ensure selectedmapad is a string if provided
+        if (updateData.selectedmapad) {
+            if (typeof updateData.selectedmapad === 'object' && updateData.selectedmapad !== null) {
+                updateData.selectedmapad = JSON.stringify(updateData.selectedmapad);
             }
         }
 
