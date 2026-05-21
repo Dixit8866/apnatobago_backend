@@ -16,17 +16,17 @@ import InventoryStock from '../models/superadmin-models/InventoryStock.js';
  */
 export const resetInventoryOnStartup = async () => {
     try {
-        console.log('[Startup] Starting inventory setup/update to 100...');
+        console.log('[Startup] Starting inventory setup/update to 0...');
 
-        // 1. Update all existing non-deleted stocks to 100
+        // 1. Update all existing non-deleted stocks to 0
         const [result] = await sequelize.query(
             `UPDATE inventory_stocks
-             SET    "totalBaseUnits"               = 100,
+             SET    "totalBaseUnits"               = 0,
                     "updatedAt"                    = NOW()
              WHERE  "deletedAt" IS NULL`
         );
         const affected = result?.rowCount ?? result?.affectedRows ?? '?';
-        console.log(`[Startup] Updated ${affected} existing stock records to 100 ✓`);
+        console.log(`[Startup] Updated ${affected} existing stock records to 0 ✓`);
 
         // 2. Resolve default Godown (Active)
         let godown = await Godown.findOne({ where: { status: 'Active' } });
@@ -73,7 +73,7 @@ export const resetInventoryOnStartup = async () => {
                         primaryUnitId,
                         secondaryUnitId: null,
                         secondaryPerPrimary: 1,
-                        totalBaseUnits: 100,
+                        totalBaseUnits: 0,
                         avgPurchasePricePerBaseUnit: variant.purchasePrice || 0,
                         lastPurchasePricePerBaseUnit: variant.purchasePrice || 0,
                         status: 'Active'
@@ -82,15 +82,15 @@ export const resetInventoryOnStartup = async () => {
 
                 if (created) {
                     newRecordsCreated++;
-                } else if (stock.totalBaseUnits !== 100) {
-                    stock.totalBaseUnits = 100;
+                } else if (stock.totalBaseUnits !== 0) {
+                    stock.totalBaseUnits = 0;
                     await stock.save();
                     recordsUpdated++;
                 }
             }
         }
 
-        console.log(`[Startup] Inventory check complete! ${newRecordsCreated} new stock records created, ${recordsUpdated} existing stock records synchronized to 100.`);
+        console.log(`[Startup] Inventory check complete! ${newRecordsCreated} new stock records created, ${recordsUpdated} existing stock records synchronized to 0.`);
     } catch (error) {
         // Non-fatal: log and continue — do NOT crash the server
         console.error('[Startup] Inventory seeding FAILED:', error.stack || error.message);
