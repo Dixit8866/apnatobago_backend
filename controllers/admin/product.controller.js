@@ -322,7 +322,8 @@ export const getProducts = async (req, res, next) => {
         const { search = '', status, mainCategoryId, isTobacco } = req.query;
         const isInventoryView = req.query.inventoryView === 'true';
 
-        const searchTerms = search.split(/\s+/).filter(Boolean);
+        const trimmedSearch = String(search).trim();
+        const searchTerms = trimmedSearch.split(/\s+/).filter(Boolean);
         const searchWhere = searchTerms.length > 0
             ? {
                 [Op.and]: searchTerms.map(term => ({
@@ -360,11 +361,13 @@ export const getProducts = async (req, res, next) => {
             if (status === 'Active') {
                 // In Stock: at least one variant has total stock > 0
                 whereWithFilters[Op.and] = [
+                    ...(searchWhere[Op.and] || []),
                     sequelize.literal(`${stockSubquery} > 0`)
                 ];
             } else if (status === 'Inactive') {
                 // Out of Stock: all variants have total stock = 0
                 whereWithFilters[Op.and] = [
+                    ...(searchWhere[Op.and] || []),
                     sequelize.literal(`${stockSubquery} = 0`)
                 ];
             } else if (status === 'Deleted') {
@@ -398,14 +401,20 @@ export const getProducts = async (req, res, next) => {
                     where: {
                         ...countBaseWhere,
                         status: { [Op.ne]: 'Deleted' },
-                        [Op.and]: [sequelize.literal(`${stockSubquery} > 0`)]
+                        [Op.and]: [
+                            ...(countBaseWhere[Op.and] || []),
+                            sequelize.literal(`${stockSubquery} > 0`)
+                        ]
                     }
                 }),
                 Product.count({
                     where: {
                         ...countBaseWhere,
                         status: { [Op.ne]: 'Deleted' },
-                        [Op.and]: [sequelize.literal(`${stockSubquery} = 0`)]
+                        [Op.and]: [
+                            ...(countBaseWhere[Op.and] || []),
+                            sequelize.literal(`${stockSubquery} = 0`)
+                        ]
                     }
                 }),
                 Product.count({
@@ -556,20 +565,6 @@ export const updateProduct = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
         }
 
-        // Check if there is active stock for any variant of this product in inventory_stocks
-        const hasStock = await InventoryStock.findOne({
-            where: {
-                productId: product.id,
-                totalBaseUnits: { [Op.gt]: 0 },
-                status: 'Active'
-            },
-            transaction: t
-        });
-
-        if (hasStock) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Cannot update product/volume because stock is already added. (તમે જે વોલ્યુમ અથવા પ્રોડક્ટ અપડેટ કરો છો તેમાં ઓલરેડી સ્ટોક એડ કરેલો છે.)');
-        }
         if (!hasAnyLangValue(name)) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please provide product name in at least one language.');
@@ -612,6 +607,62 @@ export const updateProduct = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, volumeError);
         }
 
+        // Fetch existing variants of the product from database
+        const existingVariants = await ProductVariant.findAll({ where: { productId: product.id }, transaction: t });
+
+        // Retrieve any active stock records linked to variant IDs for this product
+        const stocks = await InventoryStock.findAll({
+            where: {
+                productId: product.id,
+                totalBaseUnits: { [Op.gt]: 0 },
+                status: 'Active'
+            },
+            transaction: t
+        });
+        const activeStockVariantIds = new Set(stocks.map(s => s.variantId));
+
+        // Validation 1: Check if any existing variant that has active stock is missing from the incoming variants payload (attempted deletion of a variant with stock)
+        for (const ev of existingVariants) {
+            if (activeStockVariantIds.has(ev.id)) {
+                const stillExists = variants.some(v => {
+                    if (v.id && ev.id === v.id) return true;
+                    const volumeUnit = volumeMap.get(v.volumeId) || '';
+                    const normalizedVolume = String(v.volumeValue || '').trim() || (volumeUnit ? `${volumeUnit}` : '');
+                    return ev.volumeId === (v.volumeId || null) && ev.volume === normalizedVolume;
+                });
+                if (!stillExists) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Cannot update product/volume because stock is already added. (તમે જે વોલ્યુમ અથવા પ્રોડક્ટ અપડેટ કરો છો તેમાં ઓલરેડી સ્ટોક એડ કરેલો છે.)');
+                }
+            }
+        }
+
+        // Validation 2: Check if the user is trying to change Volume, Packing Unit (Outer), or Item Unit (Inner) for any variant with active stock
+        for (const v of variants) {
+            const volumeUnit = volumeMap.get(v.volumeId) || '';
+            const normalizedVolume = String(v.volumeValue || '').trim() || (volumeUnit ? `${volumeUnit}` : '');
+            const baseUnitLabel = v.baseUnitLabel || null;
+            const innerUnitLabel = v.innerUnitLabel || null;
+
+            const matchedExisting = existingVariants.find(ev => {
+                if (v.id && ev.id === v.id) return true;
+                return ev.volumeId === (v.volumeId || null) && ev.volume === normalizedVolume;
+            });
+
+            if (matchedExisting && activeStockVariantIds.has(matchedExisting.id)) {
+                // Check if critical fields differ
+                if (
+                    matchedExisting.volume !== normalizedVolume ||
+                    matchedExisting.volumeId !== (v.volumeId || null) ||
+                    matchedExisting.baseUnitLabel !== baseUnitLabel ||
+                    matchedExisting.innerUnitLabel !== innerUnitLabel
+                ) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Cannot update product/volume because stock is already added. (તમે જે વોલ્યુમ અથવા પ્રોડક્ટ અપડેટ કરો છો તેમાં ઓલરેડી સ્ટોક એડ કરેલો છે.)');
+                }
+            }
+        }
+
         await product.update(
             {
                 name,
@@ -630,13 +681,8 @@ export const updateProduct = async (req, res, next) => {
             { transaction: t }
         );
 
-        // Soft-delete existing variants and pricings then recreate
-        const existingVariants = await ProductVariant.findAll({ where: { productId: product.id }, transaction: t });
-        const existingVariantIds = existingVariants.map((v) => v.id);
-        if (existingVariantIds.length) {
-            await ProductPricing.destroy({ where: { variantId: { [Op.in]: existingVariantIds } }, transaction: t });
-            await ProductVariant.destroy({ where: { id: { [Op.in]: existingVariantIds } }, transaction: t });
-        }
+        // Track the IDs of existing variants that were updated
+        const matchedExistingIds = new Set();
 
         for (const v of variants) {
             const extra = typeof v.extra === 'string' ? v.extra.trim() : null;
@@ -665,25 +711,58 @@ export const updateProduct = async (req, res, next) => {
             // Appending the unit caused edit-load issues ("1 packet cartton" parsed back as "1").
             const normalizedVolume = volumeValue.trim() || (volumeUnit ? `${volumeUnit}` : '');
 
+            // Try to find the matching existing variant
+            const matchedExisting = existingVariants.find(ev => {
+                if (v.id && ev.id === v.id) return true;
+                return ev.volumeId === (volumeId || null) && ev.volume === normalizedVolume;
+            });
 
-            const variant = await ProductVariant.create(
-                {
-                    productId: product.id,
-                    extra: extra || null,
-                    volumeId: volumeId || null,
-                    volume: normalizedVolume,
-                    purchasePrice,
-                    image,
-                    baseUnitLabel,
-                    innerUnitLabel,
-                    baseUnitsPerPack,
-                    sellingVolume,
-                    minQty,
-                    maxQty,
-                    status: v.status || 'Active',
-                },
-                { transaction: t }
-            );
+            let variantInstance;
+            if (matchedExisting) {
+                // Update existing variant in-place
+                await matchedExisting.update(
+                    {
+                        extra: extra || null,
+                        volumeId: volumeId || null,
+                        volume: normalizedVolume,
+                        purchasePrice,
+                        image,
+                        baseUnitLabel,
+                        innerUnitLabel,
+                        baseUnitsPerPack,
+                        sellingVolume,
+                        minQty,
+                        maxQty,
+                        status: v.status || 'Active',
+                    },
+                    { transaction: t }
+                );
+                variantInstance = matchedExisting;
+                matchedExistingIds.add(matchedExisting.id);
+            } else {
+                // Create a new variant
+                variantInstance = await ProductVariant.create(
+                    {
+                        productId: product.id,
+                        extra: extra || null,
+                        volumeId: volumeId || null,
+                        volume: normalizedVolume,
+                        purchasePrice,
+                        image,
+                        baseUnitLabel,
+                        innerUnitLabel,
+                        baseUnitsPerPack,
+                        sellingVolume,
+                        minQty,
+                        maxQty,
+                        status: v.status || 'Active',
+                    },
+                    { transaction: t }
+                );
+            }
+
+            // Always destroy previous pricings for this specific variant (if it was updated) and recreate them
+            await ProductPricing.destroy({ where: { variantId: variantInstance.id }, transaction: t });
 
             const pricings = normalizeVariantPricings(v);
             for (const p of pricings) {
@@ -700,7 +779,7 @@ export const updateProduct = async (req, res, next) => {
                 }
                 if (p.price === undefined || p.price === null || String(p.price).trim() === '' || isNaN(numPrice) || numPrice <= 0) {
                     await t.rollback();
-                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid Selling Price greater than 0 for all pricing entries. (વેચાણ કિંમત 0 થી વધારે હોવી જોઈએ.)');
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid Selling Price greater than 0 for all pricing entries. (веચાણ કિંમત 0 થી વધારે હોવી જોઈએ.)');
                 }
                 if (numPrice < purchasePrice) {
                     await t.rollback();
@@ -713,7 +792,7 @@ export const updateProduct = async (req, res, next) => {
 
                 await ProductPricing.create(
                     {
-                        variantId: variant.id,
+                        variantId: variantInstance.id,
                         customLevelId: p.customLevelId,
                         quantityRange: p.quantityRange,
                         minQty: p.minQty,
@@ -725,6 +804,14 @@ export const updateProduct = async (req, res, next) => {
                     },
                     { transaction: t }
                 );
+            }
+        }
+
+        // Clean up: For all existing variants in database that were NOT matched by any incoming variant (i.e. deleted by the user in the UI)
+        for (const ev of existingVariants) {
+            if (!matchedExistingIds.has(ev.id)) {
+                await ProductPricing.destroy({ where: { variantId: ev.id }, transaction: t });
+                await ProductVariant.destroy({ where: { id: ev.id }, transaction: t });
             }
         }
 

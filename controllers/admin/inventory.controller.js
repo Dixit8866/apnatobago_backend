@@ -9,8 +9,6 @@ import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
 import InventoryTransaction from '../../models/superadmin-models/InventoryTransaction.js';
 import Godown from '../../models/superadmin-models/Godown.js';
 import Volume from '../../models/superadmin-models/Volume.js';
-import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
-import MainCategory from '../../models/superadmin-models/MainCategory.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 
 function normalizeInt(val) {
@@ -65,19 +63,11 @@ async function validateGodown(godownId, transaction) {
 async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }) {
     const ids = [primaryUnitId, secondaryUnitId].filter(Boolean);
     if (!ids.length) return false;
-    
-    // Filter only valid UUIDs
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const uuidIds = ids.filter(id => uuidRegex.test(id));
-    
-    if (uuidIds.length > 0) {
-        const uniqueUuidIds = [...new Set(uuidIds)];
-        const volRows = await Volume.findAll({ where: { id: { [Op.in]: uniqueUuidIds }, status: 'Active' }, transaction });
-        const foundIds = new Set(volRows.map(r => r.id));
-        return foundIds.size === uniqueUuidIds.length;
-    }
-    
-    return true;
+    const rows = await Volume.findAll({
+        where: { id: { [Op.in]: ids }, status: 'Active' },
+        transaction,
+    });
+    return rows.length === ids.length;
 }
 
 export const getInventoryOptions = async (req, res, next) => {
@@ -100,9 +90,6 @@ export const getInventoryOptions = async (req, res, next) => {
                                 required: false,
                                 order: [['minQty', 'ASC']],
                             },
-                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
                         ],
                     },
                 ],
@@ -116,17 +103,12 @@ export const getInventoryOptions = async (req, res, next) => {
                 order: [['createdAt', 'DESC']],
             }),
         ]);
-
         const normalizedProducts = products.map((product) => {
             const p = product.toJSON();
-
             p.variants = (p.variants || []).map((variant) => {
                 const firstPricing = [...(variant.pricings || [])].sort((a, b) => Number(a.minQty || 0) - Number(b.minQty || 0))[0];
                 return {
                     ...variant,
-                    volume: variant.volume || '',
-                    volumeId: variant.volumeId || '',
-                    volumeValue: variant.volumeValue || '',
                     defaultSellingPrice: firstPricing ? Number(firstPricing.price || 0) : 0,
                     defaultPurchasePrice: Number(variant.purchasePrice || 0),
                     defaultMrp: firstPricing ? Number(firstPricing.mrp || 0) : 0,
@@ -149,29 +131,22 @@ export const getInventoryStocks = async (req, res, next) => {
     try {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
-        const { search = '', productId } = req.query;
+        const { search = '' } = req.query;
+
+        const trimmedSearch = String(search).trim();
 
         const include = [
-            { 
-                model: Product, 
-                as: 'product', 
-                attributes: ['id', 'name', 'status'],
-                include: [
-                    { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
-                    { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] }
-                ]
-            },
+            { model: Product, as: 'product', attributes: ['id', 'name', 'status'] },
             { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'status'] },
             { model: Godown, as: 'godown', attributes: ['id', 'name', 'status'] },
         ];
 
         const where = {};
-        if (productId) {
-            where.productId = productId;
-        }
-
-        if (search) {
-            include[0].where = { name: sequelize.where(sequelize.cast(sequelize.col('product.name'), 'text'), { [Op.iLike]: `%${search}%` }) };
+        if (trimmedSearch) {
+            include[0].where = sequelize.where(
+                sequelize.cast(sequelize.col('product.name'), 'text'),
+                { [Op.iLike]: `%${trimmedSearch}%` }
+            );
             include[0].required = true;
         }
 
@@ -193,7 +168,7 @@ export const getInventoryStocks = async (req, res, next) => {
             ),
         ];
 
-        const [unitRowsVol, purchaseTxns] = await Promise.all([
+        const [unitRows, purchaseTxns] = await Promise.all([
             unitIds.length
                 ? Volume.findAll({
                     where: { id: { [Op.in]: unitIds } },
@@ -210,10 +185,9 @@ export const getInventoryStocks = async (req, res, next) => {
         ]);
 
         const getUnitLabel = (volume) => {
-            if (!volume?.name || typeof volume.name !== 'object') return typeof volume?.name === 'string' ? volume.name : 'Unit';
+            if (!volume?.name || typeof volume.name !== 'object') return 'Unit';
             return volume.name.en || Object.values(volume.name)[0] || 'Unit';
         };
-        const unitRows = unitRowsVol;
         const unitMap = new Map(unitRows.map((u) => [u.id, getUnitLabel(u)]));
         const latestPurchasePriceMap = new Map();
         for (const txn of purchaseTxns) {
@@ -377,56 +351,19 @@ export const getInventoryTransactions = async (req, res, next) => {
     try {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
-        const { search = '' } = req.query;
-
-        const include = [
-            {
-                model: Product,
-                as: 'product',
-                attributes: ['id', 'name'],
-                required: false,
-            },
-            { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] },
-            { model: Godown, as: 'godown', attributes: ['id', 'name'] },
-        ];
-
-        const searchTerms = search.split(/\s+/).filter(Boolean);
-        if (searchTerms.length > 0) {
-            include[0].where = {
-                [Op.and]: searchTerms.map(term => ({
-                    [Op.or]: [
-                        { 'name.en': { [Op.iLike]: `%${term}%` } },
-                        { 'name.gu': { [Op.iLike]: `%${term}%` } },
-                        { 'name.hn': { [Op.iLike]: `%${term}%` } },
-                        { 'name.HN': { [Op.iLike]: `%${term}%` } },
-                        { 'name.GU': { [Op.iLike]: `%${term}%` } },
-                        { 'name.EN': { [Op.iLike]: `%${term}%` } },
-                    ]
-                }))
-            };
-            include[0].required = true;
-        }
 
         const result = await InventoryTransaction.findAndCountAll({
-            include,
+            include: [
+                { model: Product, as: 'product', attributes: ['id', 'name'] },
+                { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] },
+                { model: Godown, as: 'godown', attributes: ['id', 'name'] },
+            ],
             limit,
             offset,
             order: [['createdAt', 'DESC']],
         });
 
-        const rows = result.rows || [];
-        const unitIds = [...new Set(rows.flatMap(r => [r.primaryUnitId, r.secondaryUnitId]).filter(Boolean))];
-        const volumeRows = unitIds.length ? await Volume.findAll({ where: { id: { [Op.in]: unitIds } }, attributes: ['id', 'name'] }) : [];
-        const unitMap = new Map(volumeRows.map(v => [v.id, v.name?.en || Object.values(v.name || {})[0] || 'Unit']));
-
-        const enriched = rows.map(r => {
-            const data = r.toJSON();
-            data.primaryUnitName = unitMap.get(r.primaryUnitId) || 'Unit';
-            data.secondaryUnitName = r.secondaryUnitId ? unitMap.get(r.secondaryUnitId) : null;
-            return data;
-        });
-
-        const responseData = formatPaginatedResponse({ ...result, rows: enriched }, page, limit);
+        const responseData = formatPaginatedResponse(result, page, limit);
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Inventory transactions fetched successfully.', responseData);
     } catch (error) {
         next(error);
@@ -469,43 +406,47 @@ export const createPurchaseTransaction = async (req, res, next) => {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid product/variant selection.');
         }
-
-        // Correct: Use Base Unit (Outer Unit, e.g., Dando) as Primary
-        // and Inner Unit (Selling Unit, e.g., Box) as Secondary
-        const finalPrimaryUnitId = valid.variant.baseUnitLabel || primaryUnitId;
-        const finalSecondaryUnitId = valid.variant.innerUnitLabel || secondaryUnitId || valid.variant.volumeId;
-        const finalFactor = Number(valid.variant.baseUnitsPerPack || secondaryPerPrimary || 1);
-
         const validGodown = await validateGodown(godownId, t);
         if (!validGodown) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid godown selection.');
         }
-        const validUnits = await validateVolumeIds({ 
-            primaryUnitId: finalPrimaryUnitId, 
-            secondaryUnitId: finalSecondaryUnitId, 
-            transaction: t 
-        });
+        const validUnits = await validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction: t });
         if (!validUnits) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
 
-        const finalTotalBaseUnits = qtyToBaseUnits(qtyPrimary, qtySecondary, finalFactor);
+        let stock = await InventoryStock.findOne({ where: { productId, variantId, godownId }, transaction: t });
+        if (!stock) {
+            stock = await InventoryStock.create(
+                {
+                    productId,
+                    variantId,
+                    godownId,
+                    primaryUnitId,
+                    secondaryUnitId,
+                    secondaryPerPrimary: Number(secondaryPerPrimary || 1),
+                    totalBaseUnits: 0,
+                    avgPurchasePricePerBaseUnit: 0,
+                    status: 'Active',
+                },
+                { transaction: t }
+            );
+        }
 
-        // Create NEW stock record for each purchase (batch tracking)
-        const stock = await InventoryStock.create(
+        const oldQty = Number(stock.totalBaseUnits || 0);
+        const oldAvg = Number(stock.avgPurchasePricePerBaseUnit || 0);
+        const newQty = oldQty + qtyTotalBaseUnits;
+        const newAvg = round2(((oldQty * oldAvg) + (qtyTotalBaseUnits * unitPrice)) / newQty);
+
+        await stock.update(
             {
-                productId,
-                variantId,
-                godownId,
-                primaryUnitId: finalPrimaryUnitId,
-                secondaryUnitId: finalSecondaryUnitId,
-                secondaryPerPrimary: finalFactor,
-                totalBaseUnits: finalTotalBaseUnits,
-                avgPurchasePricePerBaseUnit: unitPrice, 
-                lastPurchasePricePerBaseUnit: unitPrice,
-                status: 'Active',
+                primaryUnitId,
+                secondaryUnitId,
+                secondaryPerPrimary: Number(secondaryPerPrimary || stock.secondaryPerPrimary || 1),
+                totalBaseUnits: newQty,
+                avgPurchasePricePerBaseUnit: newAvg,
             },
             { transaction: t }
         );
@@ -517,17 +458,16 @@ export const createPurchaseTransaction = async (req, res, next) => {
                 variantId,
                 godownId,
                 type: 'PURCHASE',
-                primaryUnitId: finalPrimaryUnitId,
-                secondaryUnitId: finalSecondaryUnitId,
-                secondaryPerPrimary: finalFactor,
+                primaryUnitId,
+                secondaryUnitId,
+                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
                 qtyPrimary: Number(qtyPrimary || 0),
                 qtySecondary: Number(qtySecondary || 0),
-                totalQtyBaseUnits: finalTotalBaseUnits,
+                totalQtyBaseUnits: qtyTotalBaseUnits,
                 purchasePricePerBaseUnit: unitPrice,
-                avgPriceAfterTxn: unitPrice,
-                balanceAfterBaseUnits: finalTotalBaseUnits,
+                avgPriceAfterTxn: newAvg,
+                balanceAfterBaseUnits: newQty,
                 note: note || null,
-                createdBy: req.user?.name || 'Admin',
             },
             { transaction: t }
         );
@@ -536,12 +476,6 @@ export const createPurchaseTransaction = async (req, res, next) => {
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Purchase transaction saved successfully.', transaction);
     } catch (error) {
         await t.rollback();
-        console.error('[Purchase Error]', error.name, error.message);
-        if (error.errors) {
-            error.errors.forEach((err, i) => {
-                console.error(`  [${i}] ${err.path}: ${err.message}`);
-            });
-        }
         next(error);
     }
 };
@@ -607,9 +541,9 @@ export const createSaleTransaction = async (req, res, next) => {
                 variantId,
                 godownId,
                 type: 'SALE',
-                primaryUnitId: stock.primaryUnitId || primaryUnitId,
-                secondaryUnitId: stock.secondaryUnitId || secondaryUnitId,
-                secondaryPerPrimary: Number(stock.secondaryPerPrimary || secondaryPerPrimary || 1),
+                primaryUnitId,
+                secondaryUnitId,
+                secondaryPerPrimary: Number(secondaryPerPrimary || stock.secondaryPerPrimary || 1),
                 qtyPrimary: Number(qtyPrimary || 0),
                 qtySecondary: Number(qtySecondary || 0),
                 totalQtyBaseUnits: qtyTotalBaseUnits,
@@ -617,7 +551,6 @@ export const createSaleTransaction = async (req, res, next) => {
                 avgPriceAfterTxn: nextAvg,
                 balanceAfterBaseUnits: newQty,
                 note: note || null,
-                createdBy: req.user?.name || 'Admin',
             },
             { transaction: t }
         );
@@ -648,14 +581,11 @@ export const updateInventoryStock = async (req, res, next) => {
             secondaryPerPrimary = stock.secondaryPerPrimary,
             qtyPrimary = 0,
             qtySecondary = 0,
-            totalBaseUnits,
             purchasePricePerBaseUnit,
             note,
         } = req.body;
 
-        const qtyTotalBaseUnits = totalBaseUnits !== undefined 
-            ? Number(totalBaseUnits)
-            : qtyToBaseUnits(qtyPrimary, qtySecondary, secondaryPerPrimary);
+        const qtyTotalBaseUnits = qtyToBaseUnits(qtyPrimary, qtySecondary, secondaryPerPrimary);
         const avgPrice = Number(purchasePricePerBaseUnit);
 
         if (!productId || !variantId || !godownId || !primaryUnitId) {
@@ -687,24 +617,32 @@ export const updateInventoryStock = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
 
-        // Note: Multiple stock entries per godown-product-variant are now allowed (batch tracking)
+        const existing = await InventoryStock.findOne({
+            where: {
+                productId,
+                variantId,
+                godownId,
+                id: { [Op.ne]: stock.id },
+            },
+            transaction: t,
+        });
+        if (existing) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Stock already exists for selected product, variant and godown.');
+        }
+
         const previousBaseUnits = Number(stock.totalBaseUnits || 0);
         const deltaBaseUnits = qtyTotalBaseUnits - previousBaseUnits;
         const deltaAbsSplit = splitBaseUnits(Math.abs(deltaBaseUnits), secondaryPerPrimary);
-
-        // Ensure we use the correct units from variant if not explicitly changed
-        const finalPrimaryUnitId = primaryUnitId;
-        const finalSecondaryUnitId = secondaryUnitId;
-        const finalFactor = Number(secondaryPerPrimary || 1);
 
         await stock.update(
             {
                 productId,
                 variantId,
                 godownId,
-                primaryUnitId: finalPrimaryUnitId,
-                secondaryUnitId: finalSecondaryUnitId || null,
-                secondaryPerPrimary: finalFactor,
+                primaryUnitId,
+                secondaryUnitId: secondaryUnitId || null,
+                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
                 totalBaseUnits: qtyTotalBaseUnits,
                 avgPurchasePricePerBaseUnit: round2(avgPrice),
             },
@@ -718,9 +656,9 @@ export const updateInventoryStock = async (req, res, next) => {
                 variantId,
                 godownId,
                 type: 'ADJUSTMENT',
-                primaryUnitId: finalPrimaryUnitId,
-                secondaryUnitId: finalSecondaryUnitId || null,
-                secondaryPerPrimary: finalFactor,
+                primaryUnitId,
+                secondaryUnitId: secondaryUnitId || null,
+                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
                 qtyPrimary: deltaAbsSplit.qtyPrimary,
                 qtySecondary: deltaAbsSplit.qtySecondary,
                 totalQtyBaseUnits: deltaBaseUnits,
@@ -728,7 +666,6 @@ export const updateInventoryStock = async (req, res, next) => {
                 avgPriceAfterTxn: round2(avgPrice),
                 balanceAfterBaseUnits: qtyTotalBaseUnits,
                 note: note || 'Manual stock edit',
-                createdBy: req.user?.name || 'Admin',
             },
             { transaction: t }
         );

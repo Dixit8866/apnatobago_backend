@@ -212,6 +212,7 @@ export const getCart = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", {
             items: paginatedItems,
             billDetails: {
+                totalCount: formattedItems.length,
                 itemTotal: Number(itemTotal.toFixed(2)),
                 deliveryCharges: Number(deliveryCharges.toFixed(2)),
                 totalSavings: Number((totalMrp - itemTotal).toFixed(2)),
