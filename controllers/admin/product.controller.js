@@ -631,10 +631,13 @@ export const updateProduct = async (req, res, next) => {
         for (const ev of existingVariants) {
             if (activeStockVariantIds.has(ev.id)) {
                 const stillExists = variants.some(v => {
-                    if (v.id && ev.id === v.id) return true;
+                    if (v.id) {
+                        return ev.id === v.id;
+                    }
                     const volumeUnit = volumeMap.get(v.volumeId) || '';
                     const normalizedVolume = String(v.volumeValue || '').trim() || (volumeUnit ? `${volumeUnit}` : '');
-                    return ev.volumeId === (v.volumeId || null) && ev.volume === normalizedVolume;
+                    const extra = typeof v.extra === 'string' ? v.extra.trim() : '';
+                    return ev.volumeId === (v.volumeId || null) && ev.volume === normalizedVolume && (ev.extra || '').trim() === extra;
                 });
                 if (!stillExists) {
                     await t.rollback();
@@ -649,10 +652,13 @@ export const updateProduct = async (req, res, next) => {
             const normalizedVolume = String(v.volumeValue || '').trim() || (volumeUnit ? `${volumeUnit}` : '');
             const baseUnitLabel = v.baseUnitLabel || null;
             const innerUnitLabel = v.innerUnitLabel || null;
+            const extra = typeof v.extra === 'string' ? v.extra.trim() : '';
 
             const matchedExisting = existingVariants.find(ev => {
-                if (v.id && ev.id === v.id) return true;
-                return ev.volumeId === (v.volumeId || null) && ev.volume === normalizedVolume;
+                if (v.id) {
+                    return ev.id === v.id;
+                }
+                return ev.volumeId === (v.volumeId || null) && ev.volume === normalizedVolume && (ev.extra || '').trim() === extra;
             });
 
             if (matchedExisting && activeStockVariantIds.has(matchedExisting.id)) {
@@ -719,8 +725,10 @@ export const updateProduct = async (req, res, next) => {
 
             // Try to find the matching existing variant
             const matchedExisting = existingVariants.find(ev => {
-                if (v.id && ev.id === v.id) return true;
-                return ev.volumeId === (volumeId || null) && ev.volume === normalizedVolume;
+                if (v.id) {
+                    return ev.id === v.id;
+                }
+                return ev.volumeId === (volumeId || null) && ev.volume === normalizedVolume && (ev.extra || '').trim() === (extra || '').trim();
             });
 
             let variantInstance;

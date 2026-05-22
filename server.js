@@ -1,8 +1,7 @@
 import http from 'http';
 import app from './app.js';
 import sequelize, { connectDB } from './config/db.js';
-import { runManualMigrations } from './models/index.js'; // Import models and migration
-import { resetInventoryOnStartup } from './scripts/resetInventoryOnStartup.js';
+import { runManualMigrations } from './models/index.js';
 
 // Setup Port
 const PORT = process.env.PORT || 5000;
@@ -51,14 +50,9 @@ const startServer = async () => {
         // Sync Sequelize Models with Database
         // Note: We are enabling this temporarily to create tables in your new database.
         await sequelize.sync({ force: false, alter: { drop: false } });
-        console.log('[Database] Sequelize Models Synced');
         
         // Seed SuperAdmin if database is empty
-        await seedAdmin();
-
-        // Initialize/Seed all inventory stock to 100 on every startup / PM2 restart
-        await resetInventoryOnStartup();
-
+        // await seedAdmin();
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);
             console.log(`[Network] Access at http://192.168.1.50:${PORT}`);
