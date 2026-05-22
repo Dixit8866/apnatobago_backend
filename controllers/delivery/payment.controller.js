@@ -236,3 +236,255 @@ export const verifyRazorpayPayment = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * Helper to get the start and end of the current day in Indian Standard Time (IST),
+ * returned as UTC Date objects for database querying.
+ */
+const getTodayRangeIST = () => {
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    
+    const year = istTime.getUTCFullYear();
+    const month = istTime.getUTCMonth();
+    const date = istTime.getUTCDate();
+    
+    const istStart = new Date(Date.UTC(year, month, date, 0, 0, 0, 0));
+    const todayStart = new Date(istStart.getTime() - (5.5 * 60 * 60 * 1000));
+    
+    const istEnd = new Date(Date.UTC(year, month, date, 23, 59, 59, 999));
+    const todayEnd = new Date(istEnd.getTime() - (5.5 * 60 * 60 * 1000));
+    
+    return { todayStart, todayEnd };
+};
+
+/**
+ * @desc    Get detailed breakdown of today's collected payments (Cash, Online, Credit) with shopwise details
+ * @route   GET /api/delivery/payments/collected
+ * @access  Private (Delivery Boy Only)
+ */
+export const getCollectedPayments = async (req, res) => {
+    try {
+        const deliveryBoyId = req.user.id;
+        const { todayStart, todayEnd } = getTodayRangeIST();
+
+        logger.info(`[Delivery Payments]: Fetching collected payments for rider ${req.user.name} (${deliveryBoyId})`);
+
+        // Fetch all payments collected today by this delivery boy
+        const payments = await OrderPayment.findAll({
+            where: {
+                deliveryBoyId,
+                createdAt: {
+                    [Op.between]: [todayStart, todayEnd]
+                }
+            },
+            include: [
+                {
+                    model: Order,
+                    as: 'order',
+                    include: [
+                        {
+                            model: User,
+                            as: 'user',
+                            include: [
+                                {
+                                    model: BusinessProfile,
+                                    as: 'businessProfile'
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            order: [['createdAt', 'DESC']]
+        });
+
+        let cashTotal = 0;
+        let onlineTotal = 0;
+        let creditTotal = 0;
+
+        const shopwiseCashMap = {};
+        const shopwiseOnlineMap = {};
+        const shopwiseCreditMap = {};
+
+        payments.forEach(payment => {
+            const amount = parseFloat(payment.amount || 0);
+            const method = payment.paymentMethod?.toUpperCase();
+
+            // Extract shop details fallback to customer name or guest
+            const shopName = payment.order?.user?.businessProfile?.shopName || payment.order?.customerName || 'Guest';
+            const shopId = payment.order?.userId || 'guest';
+
+            if (method === 'CASH') {
+                cashTotal += amount;
+                if (!shopwiseCashMap[shopName]) {
+                    shopwiseCashMap[shopName] = { shopName, amount: 0, shopId };
+                }
+                shopwiseCashMap[shopName].amount += amount;
+            } else if (method === 'ONLINE') {
+                onlineTotal += amount;
+                if (!shopwiseOnlineMap[shopName]) {
+                    shopwiseOnlineMap[shopName] = { shopName, amount: 0, shopId };
+                }
+                shopwiseOnlineMap[shopName].amount += amount;
+            } else if (method === 'CREDIT') {
+                creditTotal += amount;
+                if (!shopwiseCreditMap[shopName]) {
+                    shopwiseCreditMap[shopName] = { shopName, amount: 0, shopId };
+                }
+                shopwiseCreditMap[shopName].amount += amount;
+            }
+        });
+
+        const cashList = Object.values(shopwiseCashMap).map(item => ({
+            ...item,
+            amount: parseFloat(item.amount.toFixed(2))
+        }));
+        const onlineList = Object.values(shopwiseOnlineMap).map(item => ({
+            ...item,
+            amount: parseFloat(item.amount.toFixed(2))
+        }));
+        const creditList = Object.values(shopwiseCreditMap).map(item => ({
+            ...item,
+            amount: parseFloat(item.amount.toFixed(2))
+        }));
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Collected payments fetched successfully.", {
+            totals: {
+                cash: parseFloat(cashTotal.toFixed(2)),
+                online: parseFloat(onlineTotal.toFixed(2)),
+                credit: parseFloat(creditTotal.toFixed(2))
+            },
+            shopwise: {
+                CASH: cashList,
+                ONLINE: onlineList,
+                CREDIT: creditList
+            }
+        });
+    } catch (error) {
+        logger.error(`[Delivery Collected Payments Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get detailed breakdown of today's verified/submitted payments (Cash, Online, Credit) with shopwise details
+ * @route   GET /api/delivery/payments/submitted
+ * @access  Private (Delivery Boy Only)
+ */
+export const getSubmittedPayments = async (req, res) => {
+    try {
+        const deliveryBoyId = req.user.id;
+        const { todayStart, todayEnd } = getTodayRangeIST();
+
+        logger.info(`[Delivery Payments]: Fetching submitted payments for rider ${req.user.name} (${deliveryBoyId})`);
+
+        // Fetch all payments submitted today by this delivery boy
+        // Note: isSubmitted must be true, and the verification/submission happened today.
+        // We look at submittedAt OR createdAt for today depending on when it was verified.
+        const payments = await OrderPayment.findAll({
+            where: {
+                deliveryBoyId,
+                isSubmitted: true,
+                [Op.or]: [
+                    {
+                        submittedAt: {
+                            [Op.between]: [todayStart, todayEnd]
+                        }
+                    },
+                    {
+                        createdAt: {
+                            [Op.between]: [todayStart, todayEnd]
+                        }
+                    }
+                ]
+            },
+            include: [
+                {
+                    model: Order,
+                    as: 'order',
+                    include: [
+                        {
+                            model: User,
+                            as: 'user',
+                            include: [
+                                {
+                                    model: BusinessProfile,
+                                    as: 'businessProfile'
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            order: [['updatedAt', 'DESC']]
+        });
+
+        let cashTotal = 0;
+        let onlineTotal = 0;
+        let creditTotal = 0;
+
+        const shopwiseCashMap = {};
+        const shopwiseOnlineMap = {};
+        const shopwiseCreditMap = {};
+
+        payments.forEach(payment => {
+            const amount = parseFloat(payment.amount || 0);
+            const method = payment.paymentMethod?.toUpperCase();
+
+            // Extract shop details fallback to customer name or guest
+            const shopName = payment.order?.user?.businessProfile?.shopName || payment.order?.customerName || 'Guest';
+            const shopId = payment.order?.userId || 'guest';
+
+            if (method === 'CASH') {
+                cashTotal += amount;
+                if (!shopwiseCashMap[shopName]) {
+                    shopwiseCashMap[shopName] = { shopName, amount: 0, shopId };
+                }
+                shopwiseCashMap[shopName].amount += amount;
+            } else if (method === 'ONLINE') {
+                onlineTotal += amount;
+                if (!shopwiseOnlineMap[shopName]) {
+                    shopwiseOnlineMap[shopName] = { shopName, amount: 0, shopId };
+                }
+                shopwiseOnlineMap[shopName].amount += amount;
+            } else if (method === 'CREDIT') {
+                creditTotal += amount;
+                if (!shopwiseCreditMap[shopName]) {
+                    shopwiseCreditMap[shopName] = { shopName, amount: 0, shopId };
+                }
+                shopwiseCreditMap[shopName].amount += amount;
+            }
+        });
+
+        const cashList = Object.values(shopwiseCashMap).map(item => ({
+            ...item,
+            amount: parseFloat(item.amount.toFixed(2))
+        }));
+        const onlineList = Object.values(shopwiseOnlineMap).map(item => ({
+            ...item,
+            amount: parseFloat(item.amount.toFixed(2))
+        }));
+        const creditList = Object.values(shopwiseCreditMap).map(item => ({
+            ...item,
+            amount: parseFloat(item.amount.toFixed(2))
+        }));
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Submitted payments fetched successfully.", {
+            totals: {
+                cash: parseFloat(cashTotal.toFixed(2)),
+                online: parseFloat(onlineTotal.toFixed(2)),
+                credit: parseFloat(creditTotal.toFixed(2))
+            },
+            shopwise: {
+                CASH: cashList,
+                ONLINE: onlineList,
+                CREDIT: creditList
+            }
+        });
+    } catch (error) {
+        logger.error(`[Delivery Submitted Payments Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+

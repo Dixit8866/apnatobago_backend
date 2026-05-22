@@ -5,6 +5,27 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 
 /**
+ * Helper to get the start and end of the current day in Indian Standard Time (IST),
+ * returned as UTC Date objects for database querying.
+ */
+export const getTodayRangeIST = () => {
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    
+    const year = istTime.getUTCFullYear();
+    const month = istTime.getUTCMonth();
+    const date = istTime.getUTCDate();
+    
+    const istStart = new Date(Date.UTC(year, month, date, 0, 0, 0, 0));
+    const todayStart = new Date(istStart.getTime() - (5.5 * 60 * 60 * 1000));
+    
+    const istEnd = new Date(Date.UTC(year, month, date, 23, 59, 59, 999));
+    const todayEnd = new Date(istEnd.getTime() - (5.5 * 60 * 60 * 1000));
+    
+    return { todayStart, todayEnd };
+};
+
+/**
  * @desc    Get dashboard statistics and summaries for the logged-in delivery boy
  * @route   GET /api/delivery/dashboard
  * @access  Private (Delivery Boy Only)
@@ -18,12 +39,8 @@ export const getDeliveryDashboardStats = async (req, res) => {
 
         logger.info(`[Delivery Dashboard]: Fetching dashboard statistics for rider ${riderName} (${deliveryBoyId})`);
 
-        // Define the date range for TODAY (from 00:00:00.000 to 23:59:59.999 local time)
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
+        // Define the date range for TODAY aligned to Indian Standard Time (IST) 00:00:00 to 23:59:59.999
+        const { todayStart, todayEnd } = getTodayRangeIST();
 
         // 1. Total Assigned Orders Today (all order assignments for today)
         const assignedOrdersCount = await OrderAssignment.count({
