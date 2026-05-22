@@ -2,12 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import sequelize from '../config/db.js';
-import Product from '../models/superadmin-models/Product.js';
-import ProductVariant from '../models/superadmin-models/ProductVariant.js';
-import Volume from '../models/superadmin-models/Volume.js';
-import Godown from '../models/superadmin-models/Godown.js';
-import InventoryStock from '../models/superadmin-models/InventoryStock.js';
-import InventoryTransaction from '../models/superadmin-models/InventoryTransaction.js';
+import { Product, ProductVariant, Volume, Godown, InventoryStock, InventoryTransaction } from '../models/index.js';
 
 async function main() {
     const t = await sequelize.transaction();

@@ -131,7 +131,7 @@ export const getInventoryStocks = async (req, res, next) => {
     try {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
-        const { search = '' } = req.query;
+        const { search = '', productId, godownId, variantId } = req.query;
 
         const trimmedSearch = String(search).trim();
 
@@ -142,6 +142,15 @@ export const getInventoryStocks = async (req, res, next) => {
         ];
 
         const where = {};
+        if (productId) {
+            where.productId = productId;
+        }
+        if (godownId) {
+            where.godownId = godownId;
+        }
+        if (variantId) {
+            where.variantId = variantId;
+        }
         if (trimmedSearch) {
             include[0].where = sequelize.where(
                 sequelize.cast(sequelize.col('product.name'), 'text'),
@@ -168,33 +177,18 @@ export const getInventoryStocks = async (req, res, next) => {
             ),
         ];
 
-        const [unitRows, purchaseTxns] = await Promise.all([
-            unitIds.length
-                ? Volume.findAll({
-                    where: { id: { [Op.in]: unitIds } },
-                    attributes: ['id', 'name'],
-                })
-                : [],
-            stockIds.length
-                ? InventoryTransaction.findAll({
-                    where: { stockId: { [Op.in]: stockIds }, type: 'PURCHASE' },
-                    attributes: ['stockId', 'purchasePricePerBaseUnit', 'createdAt'],
-                    order: [['createdAt', 'DESC']],
-                })
-                : [],
-        ]);
+        const unitRows = unitIds.length
+            ? await Volume.findAll({
+                where: { id: { [Op.in]: unitIds } },
+                attributes: ['id', 'name'],
+            })
+            : [];
 
         const getUnitLabel = (volume) => {
             if (!volume?.name || typeof volume.name !== 'object') return 'Unit';
             return volume.name.en || Object.values(volume.name)[0] || 'Unit';
         };
         const unitMap = new Map(unitRows.map((u) => [u.id, getUnitLabel(u)]));
-        const latestPurchasePriceMap = new Map();
-        for (const txn of purchaseTxns) {
-            if (!latestPurchasePriceMap.has(txn.stockId)) {
-                latestPurchasePriceMap.set(txn.stockId, Number(txn.purchasePricePerBaseUnit || 0));
-            }
-        }
 
         const responseData = formatPaginatedResponse(result, page, limit);
         const enriched = responseData.data.map((row) => {
@@ -211,7 +205,7 @@ export const getInventoryStocks = async (req, res, next) => {
                 primaryUnitName,
                 secondaryUnitName,
                 conversionLabel,
-                lastPurchasePricePerBaseUnit: latestPurchasePriceMap.get(row.id) ?? Number(row.avgPurchasePricePerBaseUnit || 0),
+                lastPurchasePricePerBaseUnit: Number(row.lastPurchasePricePerBaseUnit || row.avgPurchasePricePerBaseUnit || 0),
                 effectiveStockLabel: secondaryUnitName
                     ? `${split.qtyPrimary} ${primaryUnitName} + ${split.qtySecondary} ${secondaryUnitName}`
                     : `${split.qtyPrimary} ${primaryUnitName}`,
@@ -447,6 +441,7 @@ export const createPurchaseTransaction = async (req, res, next) => {
                 secondaryPerPrimary: Number(secondaryPerPrimary || stock.secondaryPerPrimary || 1),
                 totalBaseUnits: newQty,
                 avgPurchasePricePerBaseUnit: newAvg,
+                lastPurchasePricePerBaseUnit: unitPrice,
             },
             { transaction: t }
         );
@@ -645,6 +640,7 @@ export const updateInventoryStock = async (req, res, next) => {
                 secondaryPerPrimary: Number(secondaryPerPrimary || 1),
                 totalBaseUnits: qtyTotalBaseUnits,
                 avgPurchasePricePerBaseUnit: round2(avgPrice),
+                lastPurchasePricePerBaseUnit: round2(avgPrice),
             },
             { transaction: t }
         );
