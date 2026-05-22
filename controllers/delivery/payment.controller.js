@@ -1,4 +1,4 @@
-import { Order, AppSettings, OrderPayment, User } from '../../models/index.js';
+import { Order, AppSettings, OrderPayment, User, BusinessProfile } from '../../models/index.js';
 import { restoreUserCreditFromPayment } from './order.controller.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
