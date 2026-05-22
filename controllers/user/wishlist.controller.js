@@ -63,6 +63,8 @@ export const getWishlist = async (req, res) => {
                         ...v,
                         baseUnitLabel: baseUnitName || v.baseUnitLabel,
                         innerUnitLabel: innerUnitName || v.innerUnitLabel,
+                        extra: v.extra || '',
+                        extraName: v.extra || '',
                         image: v.image || itemJson.product.thumbnail,
                         thumbnail: v.image || itemJson.product.thumbnail
                     };

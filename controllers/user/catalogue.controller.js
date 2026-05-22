@@ -269,6 +269,7 @@ export const getProducts = async (req, res) => {
                     if (v.innerUnitRef && v.innerUnitRef.name) {
                         v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                     }
+                    v.extraName = v.extra || '';
                     return v;
                 });
             }
@@ -490,6 +491,7 @@ export const searchCatalogue = async (req, res) => {
                     if (v.innerUnitRef && v.innerUnitRef.name) {
                         v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                     }
+                    v.extraName = v.extra || '';
                     return v;
                 });
             }

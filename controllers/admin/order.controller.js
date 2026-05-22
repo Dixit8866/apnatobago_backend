@@ -104,8 +104,12 @@ export const downloadDeliveryLabel = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
     try {
-        const { status, date, search, deliveryBoyId, startDate, endDate } = req.query;
+        const { status, date, search, deliveryBoyId, startDate, endDate, userId } = req.query;
         const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
+
+        if (userId) {
+            where.userId = userId;
+        }
 
         if (search) {
             where[Op.or] = [
