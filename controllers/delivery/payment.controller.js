@@ -303,9 +303,7 @@ export const getCollectedPayments = async (req, res) => {
         let onlineTotal = 0;
         let creditTotal = 0;
 
-        const shopwiseCashMap = {};
-        const shopwiseOnlineMap = {};
-        const shopwiseCreditMap = {};
+        const shopwiseMasterMap = {};
 
         payments.forEach(payment => {
             const amount = parseFloat(payment.amount || 0);
@@ -315,39 +313,78 @@ export const getCollectedPayments = async (req, res) => {
             const shopName = payment.order?.user?.businessProfile?.shopName || payment.order?.customerName || 'Guest';
             const shopId = payment.order?.userId || 'guest';
 
+            if (!shopwiseMasterMap[shopName]) {
+                shopwiseMasterMap[shopName] = {
+                    shopName,
+                    shopId,
+                    cash: 0,
+                    online: 0,
+                    credit: 0,
+                    total: 0
+                };
+            }
+
             if (method === 'CASH') {
                 cashTotal += amount;
-                if (!shopwiseCashMap[shopName]) {
-                    shopwiseCashMap[shopName] = { shopName, amount: 0, shopId };
-                }
-                shopwiseCashMap[shopName].amount += amount;
+                shopwiseMasterMap[shopName].cash += amount;
             } else if (method === 'ONLINE') {
                 onlineTotal += amount;
-                if (!shopwiseOnlineMap[shopName]) {
-                    shopwiseOnlineMap[shopName] = { shopName, amount: 0, shopId };
-                }
-                shopwiseOnlineMap[shopName].amount += amount;
+                shopwiseMasterMap[shopName].online += amount;
             } else if (method === 'CREDIT') {
                 creditTotal += amount;
-                if (!shopwiseCreditMap[shopName]) {
-                    shopwiseCreditMap[shopName] = { shopName, amount: 0, shopId };
-                }
-                shopwiseCreditMap[shopName].amount += amount;
+                shopwiseMasterMap[shopName].credit += amount;
             }
+            shopwiseMasterMap[shopName].total += amount;
         });
 
-        const cashList = Object.values(shopwiseCashMap).map(item => ({
-            ...item,
-            amount: parseFloat(item.amount.toFixed(2))
+        const combinedList = Object.values(shopwiseMasterMap).map(item => ({
+            shopName: item.shopName,
+            shopId: item.shopId,
+            cash: parseFloat(item.cash.toFixed(2)),
+            online: parseFloat(item.online.toFixed(2)),
+            credit: parseFloat(item.credit.toFixed(2)),
+            total: parseFloat(item.total.toFixed(2))
         }));
-        const onlineList = Object.values(shopwiseOnlineMap).map(item => ({
-            ...item,
-            amount: parseFloat(item.amount.toFixed(2))
-        }));
-        const creditList = Object.values(shopwiseCreditMap).map(item => ({
-            ...item,
-            amount: parseFloat(item.amount.toFixed(2))
-        }));
+
+        const cashList = [];
+        const onlineList = [];
+        const creditList = [];
+
+        combinedList.forEach(item => {
+            if (item.cash > 0) {
+                cashList.push({
+                    shopName: item.shopName,
+                    shopId: item.shopId,
+                    amount: item.cash,
+                    cash: item.cash,
+                    online: item.online,
+                    credit: item.credit,
+                    total: item.total
+                });
+            }
+            if (item.online > 0) {
+                onlineList.push({
+                    shopName: item.shopName,
+                    shopId: item.shopId,
+                    amount: item.online,
+                    cash: item.cash,
+                    online: item.online,
+                    credit: item.credit,
+                    total: item.total
+                });
+            }
+            if (item.credit > 0) {
+                creditList.push({
+                    shopName: item.shopName,
+                    shopId: item.shopId,
+                    amount: item.credit,
+                    cash: item.cash,
+                    online: item.online,
+                    credit: item.credit,
+                    total: item.total
+                });
+            }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Collected payments fetched successfully.", {
             totals: {
@@ -359,7 +396,8 @@ export const getCollectedPayments = async (req, res) => {
                 CASH: cashList,
                 ONLINE: onlineList,
                 CREDIT: creditList
-            }
+            },
+            combined: combinedList
         });
     } catch (error) {
         logger.error(`[Delivery Collected Payments Error]: ${error.message}`);
@@ -424,9 +462,7 @@ export const getSubmittedPayments = async (req, res) => {
         let onlineTotal = 0;
         let creditTotal = 0;
 
-        const shopwiseCashMap = {};
-        const shopwiseOnlineMap = {};
-        const shopwiseCreditMap = {};
+        const shopwiseMasterMap = {};
 
         payments.forEach(payment => {
             const amount = parseFloat(payment.amount || 0);
@@ -436,39 +472,78 @@ export const getSubmittedPayments = async (req, res) => {
             const shopName = payment.order?.user?.businessProfile?.shopName || payment.order?.customerName || 'Guest';
             const shopId = payment.order?.userId || 'guest';
 
+            if (!shopwiseMasterMap[shopName]) {
+                shopwiseMasterMap[shopName] = {
+                    shopName,
+                    shopId,
+                    cash: 0,
+                    online: 0,
+                    credit: 0,
+                    total: 0
+                };
+            }
+
             if (method === 'CASH') {
                 cashTotal += amount;
-                if (!shopwiseCashMap[shopName]) {
-                    shopwiseCashMap[shopName] = { shopName, amount: 0, shopId };
-                }
-                shopwiseCashMap[shopName].amount += amount;
+                shopwiseMasterMap[shopName].cash += amount;
             } else if (method === 'ONLINE') {
                 onlineTotal += amount;
-                if (!shopwiseOnlineMap[shopName]) {
-                    shopwiseOnlineMap[shopName] = { shopName, amount: 0, shopId };
-                }
-                shopwiseOnlineMap[shopName].amount += amount;
+                shopwiseMasterMap[shopName].online += amount;
             } else if (method === 'CREDIT') {
                 creditTotal += amount;
-                if (!shopwiseCreditMap[shopName]) {
-                    shopwiseCreditMap[shopName] = { shopName, amount: 0, shopId };
-                }
-                shopwiseCreditMap[shopName].amount += amount;
+                shopwiseMasterMap[shopName].credit += amount;
             }
+            shopwiseMasterMap[shopName].total += amount;
         });
 
-        const cashList = Object.values(shopwiseCashMap).map(item => ({
-            ...item,
-            amount: parseFloat(item.amount.toFixed(2))
+        const combinedList = Object.values(shopwiseMasterMap).map(item => ({
+            shopName: item.shopName,
+            shopId: item.shopId,
+            cash: parseFloat(item.cash.toFixed(2)),
+            online: parseFloat(item.online.toFixed(2)),
+            credit: parseFloat(item.credit.toFixed(2)),
+            total: parseFloat(item.total.toFixed(2))
         }));
-        const onlineList = Object.values(shopwiseOnlineMap).map(item => ({
-            ...item,
-            amount: parseFloat(item.amount.toFixed(2))
-        }));
-        const creditList = Object.values(shopwiseCreditMap).map(item => ({
-            ...item,
-            amount: parseFloat(item.amount.toFixed(2))
-        }));
+
+        const cashList = [];
+        const onlineList = [];
+        const creditList = [];
+
+        combinedList.forEach(item => {
+            if (item.cash > 0) {
+                cashList.push({
+                    shopName: item.shopName,
+                    shopId: item.shopId,
+                    amount: item.cash,
+                    cash: item.cash,
+                    online: item.online,
+                    credit: item.credit,
+                    total: item.total
+                });
+            }
+            if (item.online > 0) {
+                onlineList.push({
+                    shopName: item.shopName,
+                    shopId: item.shopId,
+                    amount: item.online,
+                    cash: item.cash,
+                    online: item.online,
+                    credit: item.credit,
+                    total: item.total
+                });
+            }
+            if (item.credit > 0) {
+                creditList.push({
+                    shopName: item.shopName,
+                    shopId: item.shopId,
+                    amount: item.credit,
+                    cash: item.cash,
+                    online: item.online,
+                    credit: item.credit,
+                    total: item.total
+                });
+            }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Submitted payments fetched successfully.", {
             totals: {
@@ -480,7 +555,8 @@ export const getSubmittedPayments = async (req, res) => {
                 CASH: cashList,
                 ONLINE: onlineList,
                 CREDIT: creditList
-            }
+            },
+            combined: combinedList
         });
     } catch (error) {
         logger.error(`[Delivery Submitted Payments Error]: ${error.message}`);
