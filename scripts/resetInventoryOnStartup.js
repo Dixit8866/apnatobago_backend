@@ -62,6 +62,8 @@ export const resetInventoryOnStartup = async () => {
 
             for (const variant of product.variants) {
                 const primaryUnitId = variant.baseUnitLabel || variant.volumeId || defaultVolume.id;
+                const bUPP = Number(variant.baseUnitsPerPack || 1);
+                const defaultBasePrice = Number(variant.purchasePrice || 0) / bUPP;
 
                 const [stock, created] = await InventoryStock.findOrCreate({
                     where: {
@@ -74,16 +76,18 @@ export const resetInventoryOnStartup = async () => {
                         secondaryUnitId: null,
                         secondaryPerPrimary: 1,
                         totalBaseUnits: 0,
-                        avgPurchasePricePerBaseUnit: variant.purchasePrice || 0,
-                        lastPurchasePricePerBaseUnit: variant.purchasePrice || 0,
+                        avgPurchasePricePerBaseUnit: defaultBasePrice,
+                        lastPurchasePricePerBaseUnit: defaultBasePrice,
                         status: 'Active'
                     }
                 });
 
                 if (created) {
                     newRecordsCreated++;
-                } else if (stock.totalBaseUnits !== 0) {
+                } else {
                     stock.totalBaseUnits = 0;
+                    stock.avgPurchasePricePerBaseUnit = defaultBasePrice;
+                    stock.lastPurchasePricePerBaseUnit = defaultBasePrice;
                     await stock.save();
                     recordsUpdated++;
                 }
