@@ -40,7 +40,7 @@ export const getCart = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variant',
-                    attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
+                    attributes: ['id', 'volume', 'extra', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
                     include: [
                         {
                             model: ProductPricing,
@@ -110,7 +110,7 @@ export const getCart = async (req, res) => {
                     {
                         model: ProductVariant,
                         as: 'variant',
-                        attributes: ['id', 'volume', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
+                        attributes: ['id', 'volume', 'extra', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
                         include: [
                             {
                                 model: ProductPricing,
@@ -186,6 +186,8 @@ export const getCart = async (req, res) => {
                 thumbnail: variant.image || product.thumbnail,
                 isWishlisted: wishlistedProductIds.has(product.id),
                 volumeLabel: variant.volume,
+                extra: variant.extra,
+                extraName: variant.extra,
                 baseUnitLabel: variant.baseUnitRef?.name ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel) : variant.baseUnitLabel,
                 innerUnitLabel: variant.innerUnitRef?.name ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel) : variant.innerUnitLabel,
                 sellingVolume: variant.sellingVolume,
