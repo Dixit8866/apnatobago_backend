@@ -245,6 +245,8 @@ export const createOrder = async (req, res) => {
                 variantInfo: {
                     productName: variant.product.name,
                     volume: variant.volume,
+                    extra: variant.extra || '',
+                    extraName: variant.extra || '',
                     image: variant.image || variant.product.thumbnail,
                     innerUnitLabel: variant.innerUnitRef?.name
                         ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel)
@@ -509,7 +511,7 @@ export const getOrders = async (req, res) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'image'],
+                            attributes: ['id', 'volume', 'image', 'extra'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
@@ -525,6 +527,15 @@ export const getOrders = async (req, res) => {
             const orderData = o.toJSON ? o.toJSON() : o;
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
+            }
+            if (orderData.items) {
+                orderData.items = orderData.items.map(item => {
+                    if (item.variant) {
+                        item.variant.extraName = item.variant.extra || '';
+                        item.variant.extra = item.variant.extra || '';
+                    }
+                    return item;
+                });
             }
             return orderData;
         });
@@ -557,7 +568,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'image'],
+                            attributes: ['id', 'volume', 'image', 'extra'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
@@ -575,6 +586,15 @@ export const getOrderDetails = async (req, res) => {
         const orderData = order.toJSON ? order.toJSON() : order;
         if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
             orderData.orderStatus = 'Delivered';
+        }
+        if (orderData.items) {
+            orderData.items = orderData.items.map(item => {
+                if (item.variant) {
+                    item.variant.extraName = item.variant.extra || '';
+                    item.variant.extra = item.variant.extra || '';
+                }
+                return item;
+            });
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", orderData);
@@ -793,7 +813,7 @@ export const getOrdersWithPaymentStatus = async (req, res) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'image'],
+                            attributes: ['id', 'volume', 'image', 'extra'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
@@ -809,6 +829,15 @@ export const getOrdersWithPaymentStatus = async (req, res) => {
             const orderData = o.toJSON ? o.toJSON() : o;
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
+            }
+            if (orderData.items) {
+                orderData.items = orderData.items.map(item => {
+                    if (item.variant) {
+                        item.variant.extraName = item.variant.extra || '';
+                        item.variant.extra = item.variant.extra || '';
+                    }
+                    return item;
+                });
             }
             return orderData;
         });
