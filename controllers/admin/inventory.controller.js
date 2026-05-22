@@ -349,7 +349,14 @@ export const getInventoryTransactions = async (req, res, next) => {
         const result = await InventoryTransaction.findAndCountAll({
             include: [
                 { model: Product, as: 'product', attributes: ['id', 'name'] },
-                { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] },
+                {
+                    model: ProductVariant,
+                    as: 'variant',
+                    attributes: ['id', 'volume', 'extra', 'volumeId'],
+                    include: [
+                        { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
+                    ]
+                },
                 { model: Godown, as: 'godown', attributes: ['id', 'name'] },
             ],
             limit,
@@ -357,8 +364,43 @@ export const getInventoryTransactions = async (req, res, next) => {
             order: [['createdAt', 'DESC']],
         });
 
+        const transactionRows = result.rows || [];
+        const unitIds = [
+            ...new Set(
+                transactionRows
+                    .flatMap((row) => [row.primaryUnitId, row.secondaryUnitId])
+                    .filter(Boolean)
+            ),
+        ];
+
+        const unitRows = unitIds.length
+            ? await Volume.findAll({
+                where: { id: { [Op.in]: unitIds } },
+                attributes: ['id', 'name'],
+            })
+            : [];
+
+        const getUnitLabel = (volume) => {
+            if (!volume?.name || typeof volume.name !== 'object') return 'Unit';
+            return volume.name.gu || volume.name.en || Object.values(volume.name)[0] || 'Unit';
+        };
+        const unitMap = new Map(unitRows.map((u) => [u.id, getUnitLabel(u)]));
+
         const responseData = formatPaginatedResponse(result, page, limit);
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Inventory transactions fetched successfully.', responseData);
+        const enriched = responseData.data.map((row) => {
+            const primaryUnitName = unitMap.get(row.primaryUnitId) || 'Unit';
+            const secondaryUnitName = row.secondaryUnitId ? (unitMap.get(row.secondaryUnitId) || 'Unit') : null;
+            return {
+                ...row.toJSON(),
+                primaryUnitName,
+                secondaryUnitName,
+            };
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Inventory transactions fetched successfully.', {
+            ...responseData,
+            data: enriched,
+        });
     } catch (error) {
         next(error);
     }
