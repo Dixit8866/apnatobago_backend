@@ -42,10 +42,13 @@ export const getDeliveryDashboardStats = async (req, res) => {
         // Define the date range for TODAY aligned to Indian Standard Time (IST) 00:00:00 to 23:59:59.999
         const { todayStart, todayEnd } = getTodayRangeIST();
 
-        // 1. Total Assigned Orders Today (all order assignments for today)
+        // 1. Total Assigned Orders Today (only count active pending/assigned orders)
         const assignedOrdersCount = await OrderAssignment.count({
             where: {
                 deliveryBoyId,
+                status: {
+                    [Op.in]: ['Assigned', 'Pending']
+                },
                 assignedAt: {
                     [Op.between]: [todayStart, todayEnd]
                 }
