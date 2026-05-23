@@ -665,9 +665,12 @@ export const cancelOrder = async (req, res) => {
                         if (!compVariant) continue;
 
                         const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
+                        const compSellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
                         const baseUnitsToRestore = item.sellUnit === 'Inner'
                             ? Number(item.quantity)
-                            : Number(item.quantity) * compBUPP;
+                            : Number(item.quantity) * compSellingVolume * compBUPP;
+
+                        logger.info(`[Cancel Order Restore Combo]: comboProductId=${cpId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, compSellingVolume=${compSellingVolume}, compBUPP=${compBUPP}, restoring=${baseUnitsToRestore} base units`);
 
                         const stock = await InventoryStock.findOne({
                             where: { productId: cpId },
@@ -679,9 +682,12 @@ export const cancelOrder = async (req, res) => {
                     }
                 } else {
                     const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                    const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
                     const baseUnitsToRestore = item.sellUnit === 'Inner' 
                         ? Number(item.quantity) 
-                        : Number(item.quantity) * bUPP;
+                        : Number(item.quantity) * sellingVolume * bUPP;
+
+                    logger.info(`[Cancel Order Restore]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore} base units`);
 
                     const stock = await InventoryStock.findOne({
                         where: { productId: item.productId },

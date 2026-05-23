@@ -250,9 +250,12 @@ export const updateMyAssignmentStatus = async (req, res) => {
                     for (const item of order.items) {
                         const variant = await ProductVariant.findByPk(item.variantId);
                         const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
                         const baseUnitsToRestore = item.sellUnit === 'Inner' 
                             ? Number(item.quantity) 
-                            : Number(item.quantity) * bUPP;
+                            : Number(item.quantity) * sellingVolume * bUPP;
+
+                        logger.info(`[Delivery Cancel Restore (no-assignment)]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
 
                         const stock = await InventoryStock.findOne({
                             where: { productId: item.productId },
@@ -294,9 +297,12 @@ export const updateMyAssignmentStatus = async (req, res) => {
                     for (const item of order.items) {
                         const variant = await ProductVariant.findByPk(item.variantId);
                         const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
                         const baseUnitsToRestore = item.sellUnit === 'Inner' 
                             ? Number(item.quantity) 
-                            : Number(item.quantity) * bUPP;
+                            : Number(item.quantity) * sellingVolume * bUPP;
+
+                        logger.info(`[Delivery Cancel Restore (assignment)]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
 
                         const stock = await InventoryStock.findOne({
                             where: { productId: item.productId },

@@ -336,6 +336,27 @@ export const updateOrderStatus = async (req, res) => {
                         { where: { orderId: order.id } }
                     );
                 }
+
+                // Restore inventory stock for all order items
+                const orderItemsToRestore = await OrderItem.findAll({ where: { orderId: order.id } });
+                for (const item of orderItemsToRestore) {
+                    const variant = await ProductVariant.findByPk(item.variantId);
+                    const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                    const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                    const baseUnitsToRestore = item.sellUnit === 'Inner'
+                        ? Number(item.quantity)
+                        : Number(item.quantity) * sellingVolume * bUPP;
+
+                    logger.info(`[Admin Cancel Restore]: orderId=${order.id}, productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
+
+                    const stock = await InventoryStock.findOne({
+                        where: { productId: item.productId },
+                        order: [['createdAt', 'DESC']]
+                    });
+                    if (stock) {
+                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                    }
+                }
             }
         }
 
@@ -398,10 +419,40 @@ export const bulkUpdateOrderStatus = async (req, res) => {
         }
 
         // Update all matching orders
+        const ordersToCancel = await Order.findAll({
+            where: { id: orderIds },
+            include: [{ model: OrderItem, as: 'items' }]
+        });
+
         await Order.update(
             { orderStatus },
             { where: { id: orderIds } }
         );
+
+        // If cancelling, restore inventory stock for each order
+        if (orderStatus === 'Cancelled') {
+            for (const cancelOrder of ordersToCancel) {
+                if (!cancelOrder.items || cancelOrder.items.length === 0) continue;
+                for (const item of cancelOrder.items) {
+                    const variant = await ProductVariant.findByPk(item.variantId);
+                    const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                    const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                    const baseUnitsToRestore = item.sellUnit === 'Inner'
+                        ? Number(item.quantity)
+                        : Number(item.quantity) * sellingVolume * bUPP;
+
+                    logger.info(`[Admin Bulk Cancel Restore]: orderId=${cancelOrder.id}, productId=${item.productId}, qty=${item.quantity}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
+
+                    const stock = await InventoryStock.findOne({
+                        where: { productId: item.productId },
+                        order: [['createdAt', 'DESC']]
+                    });
+                    if (stock) {
+                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                    }
+                }
+            }
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders status updated successfully.");
     } catch (error) {
