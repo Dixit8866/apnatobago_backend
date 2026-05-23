@@ -391,6 +391,10 @@ export const updateOrderStatus = async (req, res) => {
             }
         }
 
+        if (order.orderStatus === 'Cancelled') {
+            order.dueAmount = 0;
+        }
+
         await order.save();
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", order);
@@ -424,8 +428,13 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             include: [{ model: OrderItem, as: 'items' }]
         });
 
+        const updateFields = { orderStatus };
+        if (orderStatus === 'Cancelled') {
+            updateFields.dueAmount = 0;
+        }
+
         await Order.update(
-            { orderStatus },
+            updateFields,
             { where: { id: orderIds } }
         );
 

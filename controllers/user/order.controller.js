@@ -637,6 +637,7 @@ export const cancelOrder = async (req, res) => {
         }
 
         order.orderStatus = 'Cancelled';
+        order.dueAmount = 0;
         order.notes = order.notes ? `${order.notes}\n[Customer Cancelled]` : `[Customer Cancelled]`;
         await order.save();
 

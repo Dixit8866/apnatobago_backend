@@ -303,7 +303,10 @@ export const getProfile = async (req, res) => {
 
         // Sum the dueAmount for all orders of this user
         const totalDueAmount = await Order.sum('dueAmount', {
-            where: { userId: req.user.id }
+            where: { 
+                userId: req.user.id,
+                orderStatus: { [Op.ne]: 'Cancelled' }
+            }
         }) || 0;
 
         // Nest totalDueAmount directly inside the user object (with both casings to avoid client mismatch)
@@ -387,7 +390,10 @@ export const editProfile = async (req, res) => {
 
         // Sum the dueAmount for all orders of this user so editProfile has it too!
         const totalDueAmount = await Order.sum('dueAmount', {
-            where: { userId: req.user.id }
+            where: { 
+                userId: req.user.id,
+                orderStatus: { [Op.ne]: 'Cancelled' }
+            }
         }) || 0;
 
         // Nest totalDueAmount directly inside the user object (with both casings to avoid client mismatch)

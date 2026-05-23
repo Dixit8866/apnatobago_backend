@@ -228,6 +228,9 @@ const runManualMigrations = async () => {
         // Add createdBy to inventory_transactions
         await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255) DEFAULT \'System\'');
 
+        // Fix existing cancelled orders having positive dueAmount
+        await sequelize.query('UPDATE orders SET "dueAmount" = 0 WHERE "orderStatus" = \'Cancelled\' AND "dueAmount" > 0');
+
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);
