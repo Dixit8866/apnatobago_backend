@@ -292,6 +292,15 @@ export const getProducts = async (req, res) => {
             productJson.isWishlisted = wishlistedProductIds.has(productJson.id);
 
             if (productJson.variants) {
+                productJson.variants = productJson.variants.filter(v => {
+                    const totalStock = parseFloat(v.totalStock) || 0;
+                    const hasExtra = v.extra && v.extra.toString().trim() !== '';
+                    if (hasExtra) {
+                        return totalStock > 0;
+                    }
+                    return true;
+                });
+
                 productJson.variants = productJson.variants.map(v => {
                     if (v.baseUnitRef && v.baseUnitRef.name) {
                         v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
@@ -543,6 +552,15 @@ export const searchCatalogue = async (req, res) => {
             productJson.isWishlisted = wishlistedProductIds.has(productJson.id);
 
             if (productJson.variants) {
+                productJson.variants = productJson.variants.filter(v => {
+                    const totalStock = parseFloat(v.totalStock) || 0;
+                    const hasExtra = v.extra && v.extra.toString().trim() !== '';
+                    if (hasExtra) {
+                        return totalStock > 0;
+                    }
+                    return true;
+                });
+
                 productJson.variants = productJson.variants.map(v => {
                     if (v.baseUnitRef && v.baseUnitRef.name) {
                         v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
