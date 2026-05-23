@@ -221,7 +221,21 @@ export const getProducts = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variants',
-                    attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                    attributes: {
+                        exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'],
+                        include: [
+                            [
+                                sequelize.literal(`(
+                                    SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
+                                    FROM "inventory_stocks" AS "stock"
+                                    WHERE "stock"."variantId" = "variants"."id"
+                                      AND "stock"."status" = 'Active'
+                                      AND "stock"."deletedAt" IS NULL
+                                )`),
+                                'totalStock'
+                            ]
+                        ]
+                    },
                     include: [
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                         { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -452,7 +466,21 @@ export const searchCatalogue = async (req, res) => {
                 {
                     model: ProductVariant,
                     as: 'variants',
-                    attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                    attributes: {
+                        exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'],
+                        include: [
+                            [
+                                sequelize.literal(`(
+                                    SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
+                                    FROM "inventory_stocks" AS "stock"
+                                    WHERE "stock"."variantId" = "variants"."id"
+                                      AND "stock"."status" = 'Active'
+                                      AND "stock"."deletedAt" IS NULL
+                                )`),
+                                'totalStock'
+                            ]
+                        ]
+                    },
                     include: [
                         { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                         { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },

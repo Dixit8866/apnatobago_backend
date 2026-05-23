@@ -87,7 +87,9 @@ export const createOrder = async (req, res) => {
             // Volume-wise/Unit-wise stock check
             const deductionRequired = sellUnit === 'Inner'
                 ? Number(quantity)
-                : Number(quantity) * bUPP;
+                : (variant.sellingVolume 
+                    ? Number(quantity) * bUPP * Number(variant.sellingVolume)
+                    : Number(quantity) * bUPP);
 
             let combo1Variant = null;
             let combo2Variant = null;
@@ -124,10 +126,18 @@ export const createOrder = async (req, res) => {
                 }
 
                 const bUPP1 = Number(combo1Variant.baseUnitsPerPack || 1);
-                const deduction1 = sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP1;
+                const deduction1 = sellUnit === 'Inner' 
+                    ? Number(quantity) 
+                    : (combo1Variant.sellingVolume
+                        ? Number(quantity) * bUPP1 * Number(combo1Variant.sellingVolume)
+                        : Number(quantity) * bUPP1);
 
                 const bUPP2 = Number(combo2Variant.baseUnitsPerPack || 1);
-                const deduction2 = sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP2;
+                const deduction2 = sellUnit === 'Inner' 
+                    ? Number(quantity) 
+                    : (combo2Variant.sellingVolume
+                        ? Number(quantity) * bUPP2 * Number(combo2Variant.sellingVolume)
+                        : Number(quantity) * bUPP2);
 
                 let stock1 = 0;
                 if (targetGodownId) {
@@ -360,7 +370,9 @@ export const createOrder = async (req, res) => {
                         const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
                         const compDeduction = item.sellUnit === 'Inner'
                             ? Number(item.quantity)
-                            : Number(item.quantity) * compBUPP;
+                            : (compVariant.sellingVolume
+                                ? Number(item.quantity) * compBUPP * Number(compVariant.sellingVolume)
+                                : Number(item.quantity) * compBUPP);
 
                         const stocks = await InventoryStock.findAll({
                             where: {
@@ -408,7 +420,9 @@ export const createOrder = async (req, res) => {
                     // NORMAL PRODUCT STOCK DEDUCTION
                     const deductionRequired = item.sellUnit === 'Inner'
                         ? item.quantity
-                        : item.quantity * (variant.baseUnitsPerPack || 1);
+                        : (variant.sellingVolume
+                            ? item.quantity * (variant.baseUnitsPerPack || 1) * Number(variant.sellingVolume)
+                            : item.quantity * (variant.baseUnitsPerPack || 1));
 
                     // Find available stock batches for this variant in the target godown (FIFO)
                     const stocks = await InventoryStock.findAll({
@@ -667,7 +681,9 @@ export const cancelOrder = async (req, res) => {
                         const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
                         const baseUnitsToRestore = item.sellUnit === 'Inner'
                             ? Number(item.quantity)
-                            : Number(item.quantity) * compBUPP;
+                            : (compVariant.sellingVolume
+                                ? Number(item.quantity) * compBUPP * Number(compVariant.sellingVolume)
+                                : Number(item.quantity) * compBUPP);
 
                         const stock = await InventoryStock.findOne({
                             where: { productId: cpId },
@@ -681,7 +697,9 @@ export const cancelOrder = async (req, res) => {
                     const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
                     const baseUnitsToRestore = item.sellUnit === 'Inner' 
                         ? Number(item.quantity) 
-                        : Number(item.quantity) * bUPP;
+                        : (variant?.sellingVolume
+                            ? Number(item.quantity) * bUPP * Number(variant.sellingVolume)
+                            : Number(item.quantity) * bUPP);
 
                     const stock = await InventoryStock.findOne({
                         where: { productId: item.productId },
