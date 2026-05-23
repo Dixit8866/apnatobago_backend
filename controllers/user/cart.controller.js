@@ -299,9 +299,8 @@ export const addToCart = async (req, res) => {
         const currentCartQty = cartItem ? Number(cartItem.quantity) : 0;
         const totalProposedQty = currentCartQty + qtyToAdd;
 
-        const deductionRequired = variant.sellingVolume 
-            ? totalProposedQty * Number(variant.sellingVolume) * bUPP
-            : totalProposedQty * bUPP;
+        // last aya change karo cho je koi biji product ma aa issues ave to 
+        const deductionRequired = totalProposedQty * bUPP;
 
         // Check stock first — sum across ALL godowns
         const availableStock = await getAvailableStock(productId);
@@ -409,9 +408,7 @@ export const updateCartItem = async (req, res) => {
                 }
             }
             const bUPP = variant ? Number(variant.baseUnitsPerPack || 1) : 1;
-            const deductionRequired = variant && variant.sellingVolume 
-                ? proposedQty * Number(variant.sellingVolume) * bUPP
-                : proposedQty * bUPP;
+            const deductionRequired = proposedQty * bUPP;
 
             const availableStock = await getAvailableStock(cartItem.productId);
             if (deductionRequired > availableStock) {

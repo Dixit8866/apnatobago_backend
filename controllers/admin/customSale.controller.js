@@ -126,12 +126,7 @@ export const createCustomSale = async (req, res) => {
         // 4. Deduct Stock from Inventory
         for (const item of orderItemsData) {
             const isLoose = item.sellUnit === 'Inner';
-            const bUPP = Number(item.variantInfo.baseUnitsPerPack || 1);
-            const deductionRequired = isLoose 
-                ? Number(item.quantity) 
-                : (item.variantInfo.sellingVolume
-                    ? Number(item.quantity) * bUPP * Number(item.variantInfo.sellingVolume)
-                    : Number(item.quantity) * bUPP);
+            const deductionRequired = isLoose ? item.quantity : (item.quantity * (item.variantInfo.baseUnitsPerPack || 1));
             
             const stocks = await InventoryStock.findAll({
                 where: { 
