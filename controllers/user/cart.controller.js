@@ -30,6 +30,7 @@ export const getCart = async (req, res) => {
         const userAppLevel = req.user.applevel;
         const page = req.query.page ? parseInt(req.query.page) : null;
         const limit = req.query.limit ? parseInt(req.query.limit) : null;
+        const paginate = req.query.paginate === 'true';
 
         let cartItemsRaw = await Cart.findAll({
             where: { userId },
@@ -259,9 +260,9 @@ export const getCart = async (req, res) => {
             };
         }).filter(item => item !== null);
 
-        // Slice items based on page and limit for frontend pagination / infinite scroll
+        // Slice items based on page and limit ONLY if paginate is set to true
         let paginatedItems = formattedItems;
-        if (page !== null && limit !== null) {
+        if (paginate && page !== null && limit !== null) {
             const startIndex = (page - 1) * limit;
             const endIndex = startIndex + limit;
             paginatedItems = formattedItems.slice(startIndex, endIndex);
