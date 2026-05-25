@@ -199,20 +199,11 @@ export const getCart = async (req, res) => {
             };
         }).filter(item => item !== null);
 
-        // Paginate items based on page and limit query parameters if provided
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const startIndex = (page - 1) * limit;
-        const endIndex = page * limit;
-        const paginatedItems = (req.query.page || req.query.limit)
-            ? formattedItems.slice(startIndex, endIndex)
-            : formattedItems;
-
         // Simple delivery logic (can be adjusted based on requirements)
         const deliveryCharges = 0;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", {
-            items: paginatedItems,
+            items: formattedItems,
             billDetails: {
                 totalCount: formattedItems.length,
                 itemTotal: Number(itemTotal.toFixed(2)),
