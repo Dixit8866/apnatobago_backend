@@ -28,6 +28,8 @@ export const getCart = async (req, res) => {
     try {
         const userId = req.user.id;
         const userAppLevel = req.user.applevel;
+        const page = req.query.page ? parseInt(req.query.page) : null;
+        const limit = req.query.limit ? parseInt(req.query.limit) : null;
 
         let cartItemsRaw = await Cart.findAll({
             where: { userId },
@@ -259,11 +261,19 @@ export const getCart = async (req, res) => {
             };
         }).filter(item => item !== null);
 
+        // Slice items based on page and limit for frontend pagination / infinite scroll
+        let paginatedItems = formattedItems;
+        if (page !== null && limit !== null) {
+            const startIndex = (page - 1) * limit;
+            const endIndex = startIndex + limit;
+            paginatedItems = formattedItems.slice(startIndex, endIndex);
+        }
+
         // Simple delivery logic (can be adjusted based on requirements)
         const deliveryCharges = 0;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart fetched successfully", {
-            items: formattedItems,
+            items: paginatedItems,
             billDetails: {
                 totalCount: formattedItems.length,
                 itemTotal: Number(itemTotal.toFixed(2)),
