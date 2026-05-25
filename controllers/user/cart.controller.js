@@ -228,10 +228,8 @@ export const getCart = async (req, res) => {
             const rawPrice = applicablePricing ? Number(applicablePricing.price) : Number(variant.purchasePrice);
             const rawMrp = applicablePricing ? Number(applicablePricing.mrp) : rawPrice;
 
-            // Price in DB is for 1 PACK (Dando). User buys in UNITS (Box).
-            // So unitPrice = Price / Multiplier
-            const unitPrice = rawPrice / bUPP;
-            const unitMrp = rawMrp / bUPP;
+            const unitPrice = rawPrice;
+            const unitMrp = rawMrp;
 
             const totalPrice = unitPrice * quantity;
             const totalItemMrp = unitMrp * quantity;
