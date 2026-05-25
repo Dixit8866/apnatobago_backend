@@ -25,7 +25,7 @@ export const createUser = async (req, res, next) => {
         let finalAppLevel = applevel;
         if (!finalAppLevel) {
             const basicLevel = await CustomLevel.findOne({ 
-                where: { name: { [Op.iLike]: 'Basic' } } 
+                where: { name: { [Op.iLike]: 'Standard' } } 
             });
             if (basicLevel) {
                 finalAppLevel = basicLevel.id;

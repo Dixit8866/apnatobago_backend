@@ -85,9 +85,9 @@ export const createOrder = async (req, res) => {
             const bUPP = Number(variant.baseUnitsPerPack || 1);
 
             // Volume-wise/Unit-wise stock check
-            const deductionRequired = sellUnit === 'Inner'
+            const deductionRequired = Math.round(sellUnit === 'Inner'
                 ? Number(quantity)
-                : Number(quantity) * bUPP;
+                : Number(quantity) * bUPP);
 
             let combo1Variant = null;
             let combo2Variant = null;
@@ -124,10 +124,10 @@ export const createOrder = async (req, res) => {
                 }
 
                 const bUPP1 = Number(combo1Variant.baseUnitsPerPack || 1);
-                const deduction1 = sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP1;
+                const deduction1 = Math.round(sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP1);
 
                 const bUPP2 = Number(combo2Variant.baseUnitsPerPack || 1);
-                const deduction2 = sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP2;
+                const deduction2 = Math.round(sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP2);
 
                 let stock1 = 0;
                 if (targetGodownId) {
@@ -358,9 +358,9 @@ export const createOrder = async (req, res) => {
                         if (!compVariant) continue;
 
                         const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
-                        const compDeduction = item.sellUnit === 'Inner'
+                        const compDeduction = Math.round(item.sellUnit === 'Inner'
                             ? Number(item.quantity)
-                            : Number(item.quantity) * compBUPP;
+                            : Number(item.quantity) * compBUPP);
 
                         const stocks = await InventoryStock.findAll({
                             where: {
@@ -406,9 +406,9 @@ export const createOrder = async (req, res) => {
                     }
                 } else {
                     // NORMAL PRODUCT STOCK DEDUCTION
-                    const deductionRequired = item.sellUnit === 'Inner'
-                        ? item.quantity
-                        : item.quantity * (variant.baseUnitsPerPack || 1);
+                    const deductionRequired = Math.round(item.sellUnit === 'Inner'
+                        ? Number(item.quantity)
+                        : Number(item.quantity) * (variant.baseUnitsPerPack || 1));
 
                     // Find available stock batches for this variant in the target godown (FIFO)
                     const stocks = await InventoryStock.findAll({
@@ -667,9 +667,9 @@ export const cancelOrder = async (req, res) => {
 
                         const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
                         const compSellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = item.sellUnit === 'Inner'
+                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
                             ? Number(item.quantity)
-                            : Number(item.quantity) * compSellingVolume * compBUPP;
+                            : Number(item.quantity) * compSellingVolume * compBUPP);
 
                         logger.info(`[Cancel Order Restore Combo]: comboProductId=${cpId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, compSellingVolume=${compSellingVolume}, compBUPP=${compBUPP}, restoring=${baseUnitsToRestore} base units`);
 
@@ -684,9 +684,9 @@ export const cancelOrder = async (req, res) => {
                 } else {
                     const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
                     const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                    const baseUnitsToRestore = item.sellUnit === 'Inner' 
+                    const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
                         ? Number(item.quantity) 
-                        : Number(item.quantity) * sellingVolume * bUPP;
+                        : Number(item.quantity) * sellingVolume * bUPP);
 
                     logger.info(`[Cancel Order Restore]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore} base units`);
 

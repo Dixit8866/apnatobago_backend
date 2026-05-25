@@ -178,7 +178,7 @@ export const registerUser = async (req, res) => {
         // Auto-assign Basic level to new users
         let defaultAppLevel = null;
         try {
-            const basicLevel = await CustomLevel.findOne({ where: { name: { [Op.iLike]: 'Basic' }, status: 'Active' } });
+            const basicLevel = await CustomLevel.findOne({ where: { name: { [Op.iLike]: 'Standard' }, status: 'Active' } });
             if (basicLevel) defaultAppLevel = basicLevel.id;
         } catch (_) { /* silent — don't block registration if level fetch fails */ }
 
