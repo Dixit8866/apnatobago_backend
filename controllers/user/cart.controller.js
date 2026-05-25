@@ -126,6 +126,66 @@ export const getCart = async (req, res) => {
             });
         }
 
+        // Consolidate/merge duplicate items with the same productId and variantId
+        const consolidatedMap = new Map();
+        const itemsToDelete = [];
+        let needsRefetch = false;
+
+        for (const item of cartItemsRaw) {
+            if (!item.productId || !item.variantId) continue;
+            const key = `${item.productId}_${item.variantId}`;
+            if (consolidatedMap.has(key)) {
+                const existingItem = consolidatedMap.get(key);
+                existingItem.quantity = Number(existingItem.quantity) + Number(item.quantity);
+                itemsToDelete.push(item.id);
+                needsRefetch = true;
+            } else {
+                consolidatedMap.set(key, item);
+            }
+        }
+
+        if (needsRefetch) {
+            // Delete duplicates from DB
+            await Cart.destroy({
+                where: {
+                    id: itemsToDelete
+                }
+            });
+            // Update the kept items' quantities in the DB
+            for (const item of consolidatedMap.values()) {
+                await Cart.update(
+                    { quantity: item.quantity },
+                    { where: { id: item.id } }
+                );
+            }
+            // Re-fetch populated cart to ensure clean data and order
+            cartItemsRaw = await Cart.findAll({
+                where: { userId },
+                include: [
+                    {
+                        model: Product,
+                        as: 'product',
+                        attributes: ['id', 'name', 'thumbnail']
+                    },
+                    {
+                        model: ProductVariant,
+                        as: 'variant',
+                        attributes: ['id', 'volume', 'extra', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
+                        include: [
+                            {
+                                model: ProductPricing,
+                                as: 'pricings',
+                                attributes: ['customLevelId', 'minQty', 'maxQty', 'price', 'mrp']
+                            },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                        ]
+                    }
+                ],
+                order: [['createdAt', 'DESC']]
+            });
+        }
+
         // Fetch user's wishlist to mark items as wishlisted
         const wishlist = await Wishlist.findAll({
             where: { userId },
@@ -282,10 +342,28 @@ export const addToCart = async (req, res) => {
         const bUPP = Number(variant.baseUnitsPerPack || 1);
         const qtyToAdd = Number(quantity);
 
-        // Check if item already exists in cart
-        let cartItem = await Cart.findOne({
+        // Check if item already exists in cart (using findAll to handle potential duplicate rows)
+        let cartItems = await Cart.findAll({
             where: { userId, productId, variantId: resolvedVariantId }
         });
+
+        let cartItem = null;
+        if (cartItems.length > 0) {
+            cartItem = cartItems[0];
+            if (cartItems.length > 1) {
+                // Merge all duplicate records' quantities into the first one
+                let totalQty = 0;
+                for (const item of cartItems) {
+                    totalQty += Number(item.quantity);
+                }
+                cartItem.quantity = totalQty;
+                await cartItem.save();
+
+                // Delete the redundant duplicate rows from DB
+                const duplicateIds = cartItems.slice(1).map(item => item.id);
+                await Cart.destroy({ where: { id: duplicateIds } });
+            }
+        }
 
         const currentCartQty = cartItem ? Number(cartItem.quantity) : 0;
         const totalProposedQty = currentCartQty + qtyToAdd;
