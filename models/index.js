@@ -35,6 +35,7 @@ import AdminNotification from './superadmin-models/AdminNotification.js';
 import BusinessProfile from './user/BusinessProfile.js';
 import HelpSupport from './user/HelpSupport.js';
 import OrderPayment from './user/OrderPayment.js';
+import SalesReturn from './superadmin-models/SalesReturn.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -181,6 +182,22 @@ OrderAssignment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliv
 Product.belongsTo(Product, { foreignKey: 'comboProduct1Id', as: 'comboProduct1' });
 Product.belongsTo(Product, { foreignKey: 'comboProduct2Id', as: 'comboProduct2' });
 
+// Sales Return Associations
+Order.hasMany(SalesReturn, { foreignKey: 'orderId', as: 'returns' });
+SalesReturn.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
+
+User.hasMany(SalesReturn, { foreignKey: 'userId', as: 'returns' });
+SalesReturn.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+DeliveryBoy.hasMany(SalesReturn, { foreignKey: 'deliveryBoyId', as: 'returns' });
+SalesReturn.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
+
+Product.hasMany(SalesReturn, { foreignKey: 'productId', as: 'returns' });
+SalesReturn.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+
+ProductVariant.hasMany(SalesReturn, { foreignKey: 'variantId', as: 'returns' });
+SalesReturn.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
+
 // ─── Manual Migrations (Production Safe) ───────────────────────────────────
 // These ensure that new columns are added if they don't exist yet
 import sequelize from '../config/db.js';
@@ -273,5 +290,6 @@ export {
     BusinessProfile,
     HelpSupport,
     OrderPayment,
+    SalesReturn,
     runManualMigrations
 };

@@ -380,7 +380,13 @@ export const getProducts = async (req, res, next) => {
                 whereWithFilters.status = 'Deleted';
             }
         } else {
-            if (status) {
+            if (status === 'Low Stock') {
+                whereWithFilters.status = 'Active';
+                whereWithFilters[Op.and] = [
+                    ...(searchWhere[Op.and] || []),
+                    sequelize.literal(`${stockSubquery} <= 10`)
+                ];
+            } else if (status) {
                 whereWithFilters.status = status;
             } else {
                 whereWithFilters.status = { [Op.ne]: 'Deleted' };
@@ -394,7 +400,7 @@ export const getProducts = async (req, res, next) => {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
-        let activeCount, inactiveCount, deletedCount, totalCount;
+        let activeCount, inactiveCount, deletedCount, totalCount, lowStockCount = 0;
 
         const countBaseWhere = { ...searchWhere };
         if (mainCategoryId) {
@@ -437,6 +443,18 @@ export const getProducts = async (req, res, next) => {
                 })
             ]);
         } else {
+            const lowStockVal = await Product.count({
+                where: {
+                    ...countBaseWhere,
+                    status: 'Active',
+                    [Op.and]: [
+                        ...(countBaseWhere[Op.and] || []),
+                        sequelize.literal(`${stockSubquery} <= 10`)
+                    ]
+                }
+            });
+            lowStockCount = lowStockVal;
+
             [activeCount, inactiveCount, deletedCount, totalCount] = await Promise.all([
                 Product.count({ where: { ...searchWhere, status: 'Active', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
                 Product.count({ where: { ...searchWhere, status: 'Inactive', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
@@ -444,7 +462,7 @@ export const getProducts = async (req, res, next) => {
                 Product.count({ where: { ...searchWhere, ...(mainCategoryId ? { mainCategoryId } : {}) } }),
             ]);
         }
-        const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
+        const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount, 'Low Stock': lowStockCount };
 
         const include = [
             { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },

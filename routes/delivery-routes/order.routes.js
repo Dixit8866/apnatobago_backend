@@ -8,6 +8,7 @@ import {
     getUserCreditDetails,
     settleSingleOrderPayment 
 } from '../../controllers/delivery/order.controller.js';
+import { createSalesReturn } from '../../controllers/common/salesReturn.controller.js';
 import { protectDeliveryBoy } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
@@ -22,5 +23,6 @@ router.put('/reorder', reorderAssignments);
 router.put('/settle-single', settleSingleOrderPayment);
 router.put('/:assignmentId/status', updateMyAssignmentStatus);
 router.put('/:assignmentId/complete-settle', completeOrderAndSettlePayment);
+router.post('/sales-return', createSalesReturn);
 
 export default router;

@@ -477,7 +477,7 @@ export const bulkUpdateOrderStatus = async (req, res) => {
  */
 export const bulkVerifyPayments = async (req, res) => {
     try {
-        const { orderIds } = req.body;
+        const { orderIds, note } = req.body;
 
         if (!Array.isArray(orderIds) || orderIds.length === 0) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide an array of orderIds.");
@@ -489,7 +489,11 @@ export const bulkVerifyPayments = async (req, res) => {
             order.orderStatus = 'Payment Verify';
             order.paymentCollectStatus = 'Verified';
 
-
+            if (note) {
+                const timestamp = new Date().toLocaleString();
+                const prefix = `[Payment Verified on ${timestamp}]: `;
+                order.notes = order.notes ? `${order.notes}\n${prefix}${note}` : `${prefix}${note}`;
+            }
 
             await order.save();
 
