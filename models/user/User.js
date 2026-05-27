@@ -14,7 +14,7 @@ const User = sequelize.define('User', {
     },
     email: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
     },
     dialcode: {
         type: DataTypes.STRING,
@@ -35,7 +35,7 @@ const User = sequelize.define('User', {
     },
     password: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
     },
     showtabacco: {
         type: DataTypes.BOOLEAN,

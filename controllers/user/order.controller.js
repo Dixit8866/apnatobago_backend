@@ -630,12 +630,12 @@ export const cancelOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        const nonCancellableStatuses = ['Delivered', 'Cancelled'];
+        const nonCancellableStatuses = ['Delivered', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
         if (nonCancellableStatuses.includes(order.orderStatus)) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Cannot cancel order that is already '${order.orderStatus}'.`);
         }
 
-        order.orderStatus = 'Cancelled';
+        order.orderStatus = 'User Cancel';
         order.dueAmount = 0;
         order.notes = order.notes ? `${order.notes}\n[Customer Cancelled]` : `[Customer Cancelled]`;
         await order.save();

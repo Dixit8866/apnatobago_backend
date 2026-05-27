@@ -335,15 +335,19 @@ export const updateOrderStatus = async (req, res) => {
         }
 
         if (orderStatus) {
-            const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled'];
+            const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
             if (!validStatuses.includes(orderStatus)) {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
             }
-            order.orderStatus = orderStatus;
+            if (orderStatus === 'Cancelled') {
+                order.orderStatus = 'Admin Cancel';
+            } else {
+                order.orderStatus = orderStatus;
+            }
 
             if (notes) {
                 const timestamp = new Date().toLocaleString();
-                const prefix = orderStatus === 'Cancelled' ? `[Cancelled on ${timestamp}] Reason: ` : `[Status ${orderStatus} on ${timestamp}]: `;
+                const prefix = (orderStatus === 'Cancelled' || orderStatus === 'Admin Cancel') ? `[Cancelled on ${timestamp}] Reason: ` : `[Status ${orderStatus} on ${timestamp}]: `;
                 order.notes = order.notes ? `${order.notes}\n${prefix}${notes}` : `${prefix}${notes}`;
             }
 
@@ -356,7 +360,7 @@ export const updateOrderStatus = async (req, res) => {
             }
 
             // If cancelled, also cancel associated assignment if exists
-            if (orderStatus === 'Cancelled') {
+            if (orderStatus === 'Cancelled' || orderStatus === 'Admin Cancel') {
                 const OrderAssignment = order.sequelize.models.OrderAssignment;
                 if (OrderAssignment) {
                     await OrderAssignment.update(
@@ -419,7 +423,7 @@ export const updateOrderStatus = async (req, res) => {
             }
         }
 
-        if (order.orderStatus === 'Cancelled') {
+        if (order.orderStatus === 'Cancelled' || order.orderStatus === 'Admin Cancel' || order.orderStatus === 'User Cancel' || order.orderStatus === 'Delivery Boy Cancel') {
             order.dueAmount = 0;
         }
 
@@ -445,7 +449,7 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide an array of orderIds.");
         }
 
-        const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled'];
+        const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
         if (!validStatuses.includes(orderStatus)) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
         }
@@ -456,8 +460,9 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             include: [{ model: OrderItem, as: 'items' }]
         });
 
-        const updateFields = { orderStatus };
-        if (orderStatus === 'Cancelled') {
+        const targetStatus = orderStatus === 'Cancelled' ? 'Admin Cancel' : orderStatus;
+        const updateFields = { orderStatus: targetStatus };
+        if (orderStatus === 'Cancelled' || orderStatus === 'Admin Cancel') {
             updateFields.dueAmount = 0;
         }
 
@@ -552,7 +557,14 @@ export const getOrderDetails = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode']
+                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                        }
+                    ]
                 },
                 {
                     model: OrderItem,

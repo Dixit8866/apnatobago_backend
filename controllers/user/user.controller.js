@@ -136,15 +136,26 @@ export const verifyOtp = async (req, res) => {
         }
 
         const user = await User.findOne({ where: { number } });
-        if (user) {
-            user.status = 'Active';
-            await user.save();
-            console.log(`[Auth Debug] User ${number} status updated to Active`);
+        if (!user) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found with this number");
         }
+
+        user.status = 'Active';
+        const token = generateToken(user.id);
+        user.logintoken = token;
+        await user.save();
+        console.log(`[Auth Debug] User ${number} status updated to Active and token generated`);
 
         await OTP.destroy({ where: { number } });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP verified successfully");
+        const userData = user.toJSON();
+        delete userData.password;
+        delete userData.logintoken;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP verified successfully", {
+            user: userData,
+            token
+        });
     } catch (error) {
         console.error(`[Auth Debug] Error in verifyOtp:`, error.message);
         logger.error(`[Verify OTP Error]: ${error.message}`);
@@ -159,15 +170,11 @@ export const verifyOtp = async (req, res) => {
  */
 export const registerUser = async (req, res) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, confirmPassword, fcmtoken } = req.body;
+        const { fullname, dialcode, number, fcmtoken } = req.body;
         console.log(`[Auth Debug] registerUser called - Number: ${number}`);
 
-        if (!fullname || !dialcode || !number || !password || !confirmPassword) {
+        if (!fullname || !dialcode || !number) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
-        }
-
-        if (password !== confirmPassword) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Passwords do not match");
         }
 
         const userExists = await User.findOne({ where: { number } });
@@ -184,12 +191,8 @@ export const registerUser = async (req, res) => {
 
         const user = await User.create({
             fullname,
-            email,
             dialcode,
             number,
-            city,
-            postcode,
-            password,
             fcmtoken,
             applevel: defaultAppLevel,
             showtabacco: false,
@@ -236,54 +239,34 @@ export const registerUser = async (req, res) => {
  */
 export const loginUser = async (req, res) => {
     try {
-        const { number, password, fcmtoken } = req.body;
+        const { number, dialcode = '+91', fcmtoken } = req.body;
         console.log(`[Auth Debug] loginUser called - Number: ${number}`);
 
-        if (!number || !password) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide number and password");
+        if (!number) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide mobile number");
         }
 
         const user = await User.findOne({ where: { number } });
 
         if (!user || user.status === 'Deleted') {
-            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Invalid number or password");
+            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "User not registered with this mobile number");
         }
 
-        const isMatch = await user.matchPassword(password);
-        if (!isMatch) {
-            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Invalid number or password");
-        }
-
-        if (user.status === 'Inactive') {
-            console.log(`[Auth Debug] User Inactive. Re-sending OTP...`);
-            const pureDialcode = (user.dialcode || '+91').replace('+', '');
-            const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
-            
-            const otp = Math.floor(100000 + Math.random() * 900000).toString();
-            const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-            await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-            await sendSMS(fullNumber, otp);
-            
-            return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, "Account not verified. OTP sent again.");
-        }
-
-        const token = generateToken(user.id);
-        user.logintoken = token;
+        console.log(`[Auth Debug] User found. Sending login OTP...`);
+        const pureDialcode = (dialcode || user.dialcode || '+91').replace('+', '');
+        const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
+        
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
+        await sendSMS(fullNumber, otp);
         
         if (fcmtoken) {
             user.fcmtoken = fcmtoken;
+            await user.save();
         }
 
-        await user.save();
-
-        const userData = user.toJSON();
-        delete userData.password;
-        delete userData.logintoken;
-
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Login successful", {
-            user: userData,
-            token
-        });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP sent successfully to your mobile number");
     } catch (error) {
         console.error(`[Auth Debug] Error in loginUser:`, error.message);
         logger.error(`[User Login Error]: ${error.message}`);
@@ -362,17 +345,29 @@ export const deleteAccount = async (req, res) => {
  */
 export const editProfile = async (req, res) => {
     try {
-        const { fullname, email, city, postcode, orderReminder, reminderTime } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, orderReminder, reminderTime } = req.body;
         const user = await User.findByPk(req.user.id);
         
         if (!user) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
         }
 
+        if (number && number !== user.number) {
+            const numberExists = await User.findOne({ where: { number } });
+            if (numberExists) {
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Mobile number already in use by another account");
+            }
+            user.number = number;
+        }
+
+        if (dialcode !== undefined) {
+            user.dialcode = dialcode;
+        }
+
         user.fullname = fullname || user.fullname;
-        user.email = email || user.email;
-        user.city = city || user.city;
-        user.postcode = postcode || user.postcode;
+        user.email = email !== undefined ? email : user.email;
+        user.city = city !== undefined ? city : user.city;
+        user.postcode = postcode !== undefined ? postcode : user.postcode;
         
         if (orderReminder !== undefined) {
             user.orderReminder = orderReminder;

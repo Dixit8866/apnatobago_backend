@@ -204,9 +204,12 @@ import sequelize from '../config/db.js';
 
 const runManualMigrations = async () => {
     try {
-        // Ensure 'Payment Verify' exists in enum_orders_orderStatus enum type
+        // Ensure cancellation statuses exist in enum_orders_orderStatus enum type
         try {
             await sequelize.query('ALTER TYPE "enum_orders_orderStatus" ADD VALUE IF NOT EXISTS \'Payment Verify\'');
+            await sequelize.query('ALTER TYPE "enum_orders_orderStatus" ADD VALUE IF NOT EXISTS \'Admin Cancel\'');
+            await sequelize.query('ALTER TYPE "enum_orders_orderStatus" ADD VALUE IF NOT EXISTS \'User Cancel\'');
+            await sequelize.query('ALTER TYPE "enum_orders_orderStatus" ADD VALUE IF NOT EXISTS \'Delivery Boy Cancel\'');
         } catch (e) {
             console.log('[Migration Warning] enum_orders_orderStatus type alter failed or value already exists:', e.message);
         }
@@ -217,6 +220,10 @@ const runManualMigrations = async () => {
         
         // Add blockcredit to users table if missing
         await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "blockcredit" BOOLEAN DEFAULT false');
+
+        // Drop NOT NULL constraints from email and password
+        await sequelize.query('ALTER TABLE users ALTER COLUMN "email" DROP NOT NULL');
+        await sequelize.query('ALTER TABLE users ALTER COLUMN "password" DROP NOT NULL');
         
         // Fix deliveryBoyId in order_payments (ensure column exists and has correct constraint)
         await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID');

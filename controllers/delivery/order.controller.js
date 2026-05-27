@@ -262,7 +262,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
             }
 
             if (status === 'Cancelled') {
-                order.orderStatus = 'Cancelled';
+                order.orderStatus = 'Delivery Boy Cancel';
                 order.dueAmount = 0;
                 order.notes = order.notes ? `${order.notes}\n[Delivery Boy Cancelled]: ${notes || 'Refused'}` : `[Delivery Boy Cancelled]: ${notes || 'Refused'}`;
                 await order.save();
@@ -310,7 +310,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
                 include: [{ model: OrderItem, as: 'items' }]
             });
             if (order) {
-                order.orderStatus = 'Cancelled';
+                order.orderStatus = 'Delivery Boy Cancel';
                 order.dueAmount = 0;
                 order.notes = order.notes ? `${order.notes}\n[Delivery Boy Cancelled]: ${notes || 'Refused'}` : `[Delivery Boy Cancelled]: ${notes || 'Refused'}`;
                 await order.save();
