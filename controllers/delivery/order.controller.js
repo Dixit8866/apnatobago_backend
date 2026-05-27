@@ -49,19 +49,7 @@ export const getMyAssignedOrders = async (req, res) => {
                     as: 'order',
                     where: Object.keys(orderIncludeWhere).length > 0 ? orderIncludeWhere : null,
                     include: [
-                        { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'] },
-                        { 
-                            model: OrderItem, 
-                            as: 'items',
-                            include: [
-                                { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                                { 
-                                    model: ProductVariant, 
-                                    as: 'variant',
-                                    include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
-                                }
-                            ]
-                        }
+                        { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'] }
                     ]
                 }
             ],
@@ -70,6 +58,39 @@ export const getMyAssignedOrders = async (req, res) => {
             order: [['position', 'ASC'], ['assignedAt', 'DESC']],
             subQuery: false
         });
+
+        // Lazy load items for the assigned orders
+        if (result.rows.length > 0) {
+            const orderIds = result.rows.map(item => item.order?.id).filter(Boolean);
+
+            if (orderIds.length > 0) {
+                const items = await OrderItem.findAll({
+                    where: { orderId: orderIds },
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        { 
+                            model: ProductVariant, 
+                            as: 'variant',
+                            include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
+                        }
+                    ]
+                });
+
+                // Group items by orderId
+                const itemsMap = {};
+                items.forEach(item => {
+                    if (!itemsMap[item.orderId]) itemsMap[item.orderId] = [];
+                    itemsMap[item.orderId].push(item);
+                });
+
+                // Attach items to the order models
+                result.rows.forEach(item => {
+                    if (item.order) {
+                        item.order.setDataValue('items', itemsMap[item.order.id] || []);
+                    }
+                });
+            }
+        }
 
         const responseData = formatPaginatedResponse(result, page, limit);
 

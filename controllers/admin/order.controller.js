@@ -179,31 +179,9 @@ export const getAllOrders = async (req, res) => {
                     ]
                 },
                 {
-                    model: OrderItem,
-                    as: 'items',
-                    include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { 
-                            model: ProductVariant, 
-                            as: 'variant', 
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
-                            include: [
-                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
-                            ]
-                        }
-                    ]
-                },
-                {
                     model: OrderAssignment,
                     as: 'assignment',
                     include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone'] }]
-                },
-                {
-                    model: OrderPayment,
-                    as: 'payments',
-                    attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt']
                 }
             ],
             limit,
@@ -212,6 +190,56 @@ export const getAllOrders = async (req, res) => {
             distinct: true,
             subQuery: false
         });
+
+        // Fetch and attach one-to-many associations (items and payments) for the paginated subset of orders
+        if (result.rows.length > 0) {
+            const orderIds = result.rows.map(o => o.id);
+
+            // Fetch OrderItems with nested product, variant, and volumes
+            const items = await OrderItem.findAll({
+                where: { orderId: orderIds },
+                include: [
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    { 
+                        model: ProductVariant, 
+                        as: 'variant', 
+                        attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                        include: [
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
+                        ]
+                    }
+                ]
+            });
+
+            // Fetch OrderPayments
+            const payments = await OrderPayment.findAll({
+                where: { orderId: orderIds },
+                attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'orderId']
+            });
+
+            // Group items and payments by orderId
+            const itemsMap = {};
+            items.forEach(item => {
+                const oId = item.orderId;
+                if (!itemsMap[oId]) itemsMap[oId] = [];
+                itemsMap[oId].push(item);
+            });
+
+            const paymentsMap = {};
+            payments.forEach(p => {
+                const oId = p.orderId;
+                if (!paymentsMap[oId]) paymentsMap[oId] = [];
+                paymentsMap[oId].push(p);
+            });
+
+            // Attach to Sequelize models using setDataValue so they are serialized correctly
+            result.rows.forEach(order => {
+                order.setDataValue('items', itemsMap[order.id] || []);
+                order.setDataValue('payments', paymentsMap[order.id] || []);
+            });
+        }
 
         // ── Calculate Dynamic Status Counts for Tab Badges ────────────────────────
         const countWhere = { saleType: 'Online' };
