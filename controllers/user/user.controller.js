@@ -152,6 +152,14 @@ export const verifyOtp = async (req, res) => {
         delete userData.password;
         delete userData.logintoken;
 
+        // Populate CustomLevel (applevel)
+        let rewardLevel = null;
+        if (userData.applevel) {
+            rewardLevel = await CustomLevel.findByPk(userData.applevel);
+        }
+        userData.rewardLevel = rewardLevel;
+        userData.rewardlevel = rewardLevel;
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP verified successfully", {
             user: userData,
             token
@@ -296,6 +304,14 @@ export const getProfile = async (req, res) => {
         userData.totalDueAmount = parseFloat(totalDueAmount);
         userData.totaldueamount = parseFloat(totalDueAmount);
 
+        // Populate CustomLevel (applevel)
+        let rewardLevel = null;
+        if (userData.applevel) {
+            rewardLevel = await CustomLevel.findByPk(userData.applevel);
+        }
+        userData.rewardLevel = rewardLevel;
+        userData.rewardlevel = rewardLevel;
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Profile fetched successfully", {
             user: userData
         });
@@ -394,6 +410,14 @@ export const editProfile = async (req, res) => {
         // Nest totalDueAmount directly inside the user object (with both casings to avoid client mismatch)
         userData.totalDueAmount = parseFloat(totalDueAmount);
         userData.totaldueamount = parseFloat(totalDueAmount);
+
+        // Populate CustomLevel (applevel)
+        let rewardLevel = null;
+        if (userData.applevel) {
+            rewardLevel = await CustomLevel.findByPk(userData.applevel);
+        }
+        userData.rewardLevel = rewardLevel;
+        userData.rewardlevel = rewardLevel;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Profile updated successfully", {
             user: userData

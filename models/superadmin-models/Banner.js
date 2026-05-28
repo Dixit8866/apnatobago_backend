@@ -23,6 +23,10 @@ const Banner = sequelize.define('Banner', {
         type: DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 0,
+    },
+    mainCategoryId: {
+        type: DataTypes.UUID,
+        allowNull: true,
     }
 }, {
     timestamps: true,

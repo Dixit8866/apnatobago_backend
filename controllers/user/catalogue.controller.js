@@ -361,6 +361,7 @@ export const getBanners = async (req, res) => {
     try {
         const banners = await Banner.findAll({
             where: { status: 'Active' },
+            include: [{ model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] }],
             order: [['position', 'ASC']]
         });
 

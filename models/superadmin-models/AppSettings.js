@@ -38,6 +38,22 @@ const AppSettings = sequelize.define('AppSettings', {
     razorpaySecretKey: {
         type: DataTypes.STRING,
         allowNull: true,
+    },
+    morningDeliveryStart: {
+        type: DataTypes.STRING,
+        defaultValue: '08:00',
+    },
+    morningDeliveryEnd: {
+        type: DataTypes.STRING,
+        defaultValue: '13:00',
+    },
+    eveningDeliveryStart: {
+        type: DataTypes.STRING,
+        defaultValue: '15:00',
+    },
+    eveningDeliveryEnd: {
+        type: DataTypes.STRING,
+        defaultValue: '17:00',
     }
 }, {
     timestamps: true,

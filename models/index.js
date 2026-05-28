@@ -85,6 +85,10 @@ ProductPricing.belongsTo(CustomLevel, { foreignKey: 'customLevelId', as: 'custom
 MainCategory.hasMany(Product, { foreignKey: 'mainCategoryId', as: 'products' });
 Product.belongsTo(MainCategory, { foreignKey: 'mainCategoryId', as: 'mainCategory' });
 
+// Banner -> Categories
+MainCategory.hasMany(Banner, { foreignKey: 'mainCategoryId', as: 'banners' });
+Banner.belongsTo(MainCategory, { foreignKey: 'mainCategoryId', as: 'mainCategory' });
+
 SubCategory.hasMany(Product, { foreignKey: 'subCategoryId', as: 'products' });
 Product.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' });
 
@@ -254,6 +258,15 @@ const runManualMigrations = async () => {
 
         // Fix existing cancelled orders having positive dueAmount
         await sequelize.query('UPDATE orders SET "dueAmount" = 0 WHERE "orderStatus" = \'Cancelled\' AND "dueAmount" > 0');
+
+        // Add mainCategoryId to banners
+        await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "mainCategoryId" UUID REFERENCES main_categories(id) ON DELETE SET NULL');
+
+        // Add timing fields to app_settings
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryStart" VARCHAR(255) DEFAULT \'08:00\'');
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryEnd" VARCHAR(255) DEFAULT \'13:00\'');
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryStart" VARCHAR(255) DEFAULT \'15:00\'');
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryEnd" VARCHAR(255) DEFAULT \'17:00\'');
 
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
