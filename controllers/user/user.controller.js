@@ -19,6 +19,13 @@ const generateToken = (id) => {
     });
 };
 
+// Check if number is play store test review account
+const isTestNumber = (num) => {
+    if (!num) return false;
+    const clean = num.toString().replace(/\s+/g, '').replace('+91', '');
+    return clean === '8238728036';
+};
+
 /**
  * @desc    Helper function to send SMS OTP with debugging logs
  */
@@ -92,13 +99,19 @@ export const sendOtp = async (req, res) => {
         }
         console.log(`[Auth Debug] Full number for OTP: ${fullNumber}`);
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        let otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const isTest = isTestNumber(number);
+        if (isTest) {
+            otp = '987000';
+        }
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
         console.log(`[Auth Debug] OTP generated: ${otp}`);
 
-        await sendSMS(fullNumber, otp);
+        if (!isTest) {
+            await sendSMS(fullNumber, otp);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `OTP sent successfully`);
     } catch (error) {
@@ -215,11 +228,18 @@ export const registerUser = async (req, res) => {
             const pureDialcode = dialcode.replace('+', '');
             const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
             
-            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+            let otp = Math.floor(100000 + Math.random() * 900000).toString();
+            const isTest = isTestNumber(number);
+            if (isTest) {
+                otp = '987000';
+            }
             const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
             await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-            await sendSMS(fullNumber, otp);
+            
+            if (!isTest) {
+                await sendSMS(fullNumber, otp);
+            }
 
             const token = generateToken(user.id);
             user.logintoken = token;
@@ -264,10 +284,17 @@ export const loginUser = async (req, res) => {
         const pureDialcode = (dialcode || user.dialcode || '+91').replace('+', '');
         const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
         
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        let otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const isTest = isTestNumber(number);
+        if (isTest) {
+            otp = '987000';
+        }
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-        await sendSMS(fullNumber, otp);
+        
+        if (!isTest) {
+            await sendSMS(fullNumber, otp);
+        }
         
         if (fcmtoken) {
             user.fcmtoken = fcmtoken;
@@ -448,11 +475,18 @@ export const forgotPassword = async (req, res) => {
         const pureDialcode = (user.dialcode || '+91').replace('+', '');
         const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
         
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        let otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const isTest = isTestNumber(number);
+        if (isTest) {
+            otp = '987000';
+        }
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-        await sendSMS(fullNumber, otp);
+        
+        if (!isTest) {
+            await sendSMS(fullNumber, otp);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "OTP sent successfully");
     } catch (error) {
