@@ -12,7 +12,6 @@ export const getAppSettings = async (req, res) => {
     try {
         let settings = await AppSettings.findOne();
 
-        // If no settings exist yet, return defaults
         if (!settings) {
             return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", {
                 deliveryOnRoundCharge: 0,
@@ -20,7 +19,11 @@ export const getAppSettings = async (req, res) => {
                 freeDeliveryThreshold: 0,
                 androidVersion: '1.0.0',
                 iosVersion: '1.0.0',
-                forceUpdate: false
+                forceUpdate: false,
+                morningDeliveryStart: '08:00',
+                morningDeliveryEnd: '13:00',
+                eveningDeliveryStart: '15:00',
+                eveningDeliveryEnd: '17:00'
             });
         }
 
