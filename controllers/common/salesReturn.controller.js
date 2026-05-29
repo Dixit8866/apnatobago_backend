@@ -9,11 +9,14 @@ import {
     OrderAssignment,
     SalesReturn,
     User,
-    Godown
+    Godown,
+    Product,
+    DeliveryBoy
 } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
+import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 
 /**
  * @desc    Process a Sales Return for one or more items in an order
@@ -221,14 +224,14 @@ export const createSalesReturn = async (req, res) => {
                 productId,
                 variantId: variant.id,
                 godownId: targetStock.godownId,
-                type: 'ADJUSTMENT',
+                type: 'SALES_RETURN',
                 primaryUnitId: targetStock.primaryUnitId,
                 secondaryUnitId: targetStock.secondaryUnitId,
                 secondaryPerPrimary: targetStock.secondaryPerPrimary,
                 totalQtyBaseUnits: baseUnitsToRestore,
                 balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
                 note: `Sales Return for Order #${order.orderId}`,
-                createdBy: req.user?.fullname || 'Delivery Boy'
+                createdBy: req.user?.fullname || req.user?.name || 'Delivery Boy'
             }, { transaction: t });
 
             // F. Adjust Order Item
@@ -280,6 +283,90 @@ export const createSalesReturn = async (req, res) => {
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Create Sales Return Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get all sales returns (Admin)
+ * @route   GET /api/admin/orders/sales-returns
+ * @access  Private (Admin)
+ */
+export const getSalesReturns = async (req, res) => {
+    try {
+        const { search, deliveryBoyId } = req.query;
+        const where = {};
+
+        if (deliveryBoyId) {
+            where.deliveryBoyId = deliveryBoyId;
+        }
+
+        if (search) {
+            where[Op.or] = [
+                { '$order.orderId$': { [Op.iLike]: `%${search}%` } },
+                { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
+                { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$product.name$': { [Op.iLike]: `%${search}%` } },
+                { '$deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
+                { reason: { [Op.iLike]: `%${search}%` } }
+            ];
+        }
+
+        const pagination = getPaginationOptions(req.query);
+        const { limit, offset, page } = pagination;
+
+        const result = await SalesReturn.findAndCountAll({
+            where,
+            include: [
+                {
+                    model: Order,
+                    as: 'order',
+                    attributes: ['id', 'orderId', 'totalAmount', 'createdAt']
+                },
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number', 'city'],
+                    include: [
+                        {
+                            model: User.sequelize.models.BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                        }
+                    ]
+                },
+                {
+                    model: DeliveryBoy,
+                    as: 'deliveryBoy',
+                    attributes: ['id', 'name', 'phone']
+                },
+                {
+                    model: Product,
+                    as: 'product',
+                    attributes: ['id', 'name', 'thumbnail']
+                },
+                {
+                    model: ProductVariant,
+                    as: 'variant',
+                    attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                    include: [
+                        { model: User.sequelize.models.Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                        { model: User.sequelize.models.Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                        { model: User.sequelize.models.Volume, as: 'volumeRef', attributes: ['id', 'name'] }
+                    ]
+                }
+            ],
+            limit,
+            offset,
+            order: [['createdAt', 'DESC']],
+            distinct: true,
+            subQuery: false
+        });
+
+        const responseData = formatPaginatedResponse(result, page, limit);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Sales returns fetched successfully.", responseData);
+    } catch (error) {
+        logger.error(`[Get Sales Returns Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

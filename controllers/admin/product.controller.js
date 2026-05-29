@@ -224,7 +224,8 @@ export const createProduct = async (req, res, next) => {
             { transaction: t }
         );
 
-        for (const v of variants) {
+        for (let i = 0; i < variants.length; i++) {
+            const v = variants[i];
             const extra = typeof v.extra === 'string' ? v.extra.trim() : null;
             const volumeValue = String(v.volumeValue || '').trim();
             const volumeId = String(v.volumeId || '').trim();
@@ -267,6 +268,7 @@ export const createProduct = async (req, res, next) => {
                     minQty,
                     maxQty,
                     status: v.status || 'Active',
+                    position: i,
                 },
                 { transaction: t }
             );
@@ -503,7 +505,16 @@ export const getProducts = async (req, res, next) => {
         ];
 
         if (req.query.paginate === 'false') {
-            const products = await Product.findAll({ where: whereWithFilters, include, order: [['position', 'ASC'], ['createdAt', 'DESC']] });
+            const products = await Product.findAll({
+                where: whereWithFilters,
+                include,
+                order: [
+                    ['position', 'ASC'],
+                    ['createdAt', 'DESC'],
+                    [{ model: ProductVariant, as: 'variants' }, 'position', 'ASC'],
+                    [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'DESC']
+                ]
+            });
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products fetched successfully.', { products, statusCounts });
         }
 
@@ -512,7 +523,12 @@ export const getProducts = async (req, res, next) => {
             include,
             limit,
             offset,
-            order: [['position', 'ASC'], ['createdAt', 'DESC']],
+            order: [
+                ['position', 'ASC'],
+                ['createdAt', 'DESC'],
+                [{ model: ProductVariant, as: 'variants' }, 'position', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'DESC']
+            ],
             distinct: true // Required when including hasMany associations with pagination
         });
 
@@ -551,6 +567,10 @@ export const getProductById = async (req, res, next) => {
                         { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name', 'status'] },
                     ],
                 },
+            ],
+            order: [
+                [{ model: ProductVariant, as: 'variants' }, 'position', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'DESC']
             ],
         });
 
@@ -714,7 +734,8 @@ export const updateProduct = async (req, res, next) => {
         // Track the IDs of existing variants that were updated
         const matchedExistingIds = new Set();
 
-        for (const v of variants) {
+        for (let i = 0; i < variants.length; i++) {
+            const v = variants[i];
             const extra = typeof v.extra === 'string' ? v.extra.trim() : null;
             const volumeValue = String(v.volumeValue || '').trim();
             const volumeId = String(v.volumeId || '').trim();
@@ -766,6 +787,7 @@ export const updateProduct = async (req, res, next) => {
                         minQty,
                         maxQty,
                         status: v.status || 'Active',
+                        position: i,
                     },
                     { transaction: t }
                 );
@@ -788,6 +810,7 @@ export const updateProduct = async (req, res, next) => {
                         minQty,
                         maxQty,
                         status: v.status || 'Active',
+                        position: i,
                     },
                     { transaction: t }
                 );

@@ -9,6 +9,7 @@ import {
     bulkVerifyPayments,
     updateOrderItem
 } from '../../controllers/admin/order.controller.js';
+import { getSalesReturns } from '../../controllers/common/salesReturn.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
@@ -17,6 +18,7 @@ const router = express.Router();
 router.use(protect);
 
 router.get('/', getAllOrders);
+router.get('/sales-returns', getSalesReturns);
 router.get('/:id', getOrderDetails);
 router.get('/:id/invoice', downloadInvoice);
 router.get('/:id/delivery-label', downloadDeliveryLabel);

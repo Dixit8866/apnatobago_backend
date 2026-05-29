@@ -26,7 +26,7 @@ const InventoryTransaction = sequelize.define(
             allowNull: false,
         },
         type: {
-            type: DataTypes.ENUM('PURCHASE', 'SALE', 'ADJUSTMENT'),
+            type: DataTypes.ENUM('PURCHASE', 'SALE', 'ADJUSTMENT', 'SALES_RETURN'),
             allowNull: false,
         },
         primaryUnitId: {

@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -279,7 +279,7 @@ export const getAllOrders = async (req, res) => {
         const endOfToday = new Date(todayStr);
         endOfToday.setHours(23, 59, 59, 999);
 
-        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount] = await Promise.all([
+        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount] = await Promise.all([
             Order.count({ where: { ...countWhere, orderStatus: 'Pending' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Packaging' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Packed' }, include: countInclude }),
@@ -288,7 +288,8 @@ export const getAllOrders = async (req, res) => {
             Order.count({ where: { ...countWhere, orderStatus: 'Payment Collect' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Payment Verify' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Cancelled' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } }, include: countInclude })
+            Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } }, include: countInclude }),
+            SalesReturn.count({ where: deliveryBoyId ? { deliveryBoyId } : {} })
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -304,7 +305,8 @@ export const getAllOrders = async (req, res) => {
             Delivered: deliveredCount,
             'Payment Collect': paymentCollectCount,
             'Payment Verify': paymentVerifyCount,
-            Cancelled: cancelledCount
+            Cancelled: cancelledCount,
+            SalesReturn: salesReturnCount
         };
 
         if (responseData.orders) {

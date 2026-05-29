@@ -76,6 +76,11 @@ const ProductVariant = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        position: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 0,
+        },
     },
     {
         timestamps: true,

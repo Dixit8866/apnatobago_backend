@@ -218,6 +218,13 @@ const runManualMigrations = async () => {
             console.log('[Migration Warning] enum_orders_orderStatus type alter failed or value already exists:', e.message);
         }
 
+        // Ensure SALES_RETURN exists in enum_inventory_transactions_type enum type
+        try {
+            await sequelize.query('ALTER TYPE "enum_inventory_transactions_type" ADD VALUE IF NOT EXISTS \'SALES_RETURN\'');
+        } catch (e) {
+            console.log('[Migration Warning] enum_inventory_transactions_type type alter failed or value already exists:', e.message);
+        }
+
         await sequelize.query('ALTER TABLE main_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
         await sequelize.query('ALTER TABLE sub_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
         await sequelize.query('ALTER TABLE company_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
@@ -247,6 +254,9 @@ const runManualMigrations = async () => {
         
         // Add extra to product_variants
         await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "extra" VARCHAR(255)');
+
+        // Add position to product_variants
+        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "position" INTEGER DEFAULT 0');
         
         // Add isCombo, comboProduct1Id, comboProduct2Id to products
         await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "isCombo" BOOLEAN DEFAULT false');
