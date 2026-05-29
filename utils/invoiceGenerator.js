@@ -120,12 +120,73 @@ export const generateOrderInvoice = async (order) => {
                 itemY += 14;
             });
 
+            let totalReturnedAmount = 0;
+            const returns = order.returns || [];
+
+            if (returns.length > 0) {
+                itemY += 10;
+                doc.fillColor('#e11d48').font('Helvetica-Bold').fontSize(8).text('RETURNED / REFUNDED ITEMS (વેચાણ પરત વસ્તુઓ)', 25, itemY);
+                itemY += 12;
+
+                returns.forEach((ret, idx) => {
+                    if (itemY > doc.page.height - 150) return;
+
+                    doc.fillColor('#fff1f2').rect(25, itemY - 3, width, 14).fill();
+
+                    doc.fillColor('#e11d48').font('Helvetica-Bold').fontSize(7);
+                    doc.text(`${idx + 1}.`, 30, itemY);
+
+                    const pName = ret.product?.name;
+                    let nameStr = 'Product';
+                    if (pName) {
+                        if (typeof pName === 'object') {
+                            nameStr = pName.EN || pName.en || pName.GU || pName.gu || Object.values(pName)[0] || 'Product';
+                        } else {
+                            nameStr = String(pName);
+                        }
+                    }
+                    const volume = ret.variant?.volume || '';
+                    const isInner = (ret.reason || '').startsWith('[Inner]');
+                    const unitLabel = isInner ? 'Pcs' : 'Pack';
+
+                    doc.font('Helvetica').text(`${nameStr} (${volume})`, 60, itemY, { width: width - 250 });
+                    doc.text(`₹${Number(ret.price).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
+                    doc.text(`-${ret.quantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
+                    doc.font('Helvetica-Bold').text(`-₹${Number(ret.returnAmount).toFixed(2)}`, doc.page.width - 85, itemY, { width: 60, align: 'right' });
+
+                    totalReturnedAmount += Number(ret.returnAmount);
+                    itemY += 14;
+                });
+            }
+
             // ── Totals ────────────────────────────────────────────────────────
             const totalY = itemY + 10;
-            doc.lineWidth(0.3).strokeColor('#cbd5e1').moveTo(doc.page.width - 150, totalY).lineTo(doc.page.width - 25, totalY).stroke();
+            doc.lineWidth(0.3).strokeColor('#cbd5e1').moveTo(doc.page.width - 180, totalY).lineTo(doc.page.width - 25, totalY).stroke();
             
-            doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text('GRAND TOTAL:', doc.page.width - 150, totalY + 10);
-            doc.fillColor('#0d9488').fontSize(14).text(`₹${Number(order.totalAmount).toFixed(2)}`, doc.page.width - 85, totalY + 8, { width: 60, align: 'right' });
+            let currentTotalY = totalY + 8;
+            if (totalReturnedAmount > 0) {
+                const originalSubtotal = subtotal + totalReturnedAmount;
+                doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text('ORIGINAL SUB: ', doc.page.width - 180, currentTotalY);
+                doc.fillColor('#334155').fontSize(8).font('Helvetica').text(`₹${originalSubtotal.toFixed(2)}`, doc.page.width - 85, currentTotalY - 1, { width: 60, align: 'right' });
+                currentTotalY += 11;
+
+                doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text('LESS RETURNS: ', doc.page.width - 180, currentTotalY);
+                doc.fillColor('#e11d48').fontSize(8).font('Helvetica-Bold').text(`-₹${totalReturnedAmount.toFixed(2)}`, doc.page.width - 85, currentTotalY - 1, { width: 60, align: 'right' });
+                currentTotalY += 11;
+            }
+
+            const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
+            if (deliveryCharge > 0) {
+                doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text('DELIVERY CHARGE: ', doc.page.width - 180, currentTotalY);
+                doc.fillColor('#334155').fontSize(8).font('Helvetica').text(`₹${deliveryCharge.toFixed(2)}`, doc.page.width - 85, currentTotalY - 1, { width: 60, align: 'right' });
+                currentTotalY += 11;
+            }
+
+            doc.lineWidth(0.3).strokeColor('#cbd5e1').moveTo(doc.page.width - 180, currentTotalY).lineTo(doc.page.width - 25, currentTotalY).stroke();
+            currentTotalY += 5;
+
+            doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text('GRAND TOTAL:', doc.page.width - 180, currentTotalY + 2);
+            doc.fillColor('#0d9488').fontSize(12).font('Helvetica-Bold').text(`₹${Number(order.totalAmount).toFixed(2)}`, doc.page.width - 85, currentTotalY, { width: 60, align: 'right' });
 
             // ── Footer ────────────────────────────────────────────────────────
             const footerY = doc.page.height - 100;

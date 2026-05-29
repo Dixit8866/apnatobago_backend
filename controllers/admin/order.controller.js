@@ -667,6 +667,14 @@ export const downloadInvoice = async (req, res) => {
                         { model: Product, as: 'product' },
                         { model: ProductVariant, as: 'variant' }
                     ]
+                },
+                {
+                    model: SalesReturn,
+                    as: 'returns',
+                    include: [
+                        { model: Product, as: 'product' },
+                        { model: ProductVariant, as: 'variant' }
+                    ]
                 }
             ]
         });
