@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn } from '../../models/index.js';
 import { emitAdminNotification } from '../../socket.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -564,6 +564,22 @@ export const getOrders = async (req, res) => {
                             ]
                         }
                     ]
+                },
+                {
+                    model: SalesReturn,
+                    as: 'returns',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
+                    ]
                 }
             ],
             order: [['createdAt', 'DESC']]
@@ -615,6 +631,22 @@ export const getOrderDetails = async (req, res) => {
                             model: ProductVariant,
                             as: 'variant',
                             attributes: ['id', 'volume', 'image', 'extra'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    model: SalesReturn,
+                    as: 'returns',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
