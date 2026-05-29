@@ -68,6 +68,7 @@ export const createSalesReturn = async (req, res) => {
         });
         const deliveryBoyId = assignment ? assignment.deliveryBoyId : null;
 
+        let totalReturnAmount = 0;
         const salesReturnEntries = [];
 
         // 4. Process each item inside the input list
@@ -123,8 +124,11 @@ export const createSalesReturn = async (req, res) => {
             // C. Calculate Return Amount for this item
             const itemPrice = parseFloat(orderItem.price);
             const returnAmount = returnQty * itemPrice;
+            totalReturnAmount += returnAmount;
 
             // D. Create SalesReturn Record with PENDING status
+            // Use a prefix in reason to record whether it was sold as 'Inner' or 'Base' (avoids schema migrations)
+            const sellUnitPrefix = orderItem.sellUnit === 'Inner' ? '[Inner]' : '[Base]';
             const salesReturnEntry = await SalesReturn.create({
                 orderId: order.id,
                 userId: order.userId,
@@ -135,17 +139,56 @@ export const createSalesReturn = async (req, res) => {
                 quantity: returnQty,
                 price: itemPrice,
                 returnAmount,
-                reason: rootReason || itemReason || "Customer Return",
+                reason: `${sellUnitPrefix} ${rootReason || itemReason || "Customer Return"}`,
                 status: "Pending" // Explicitly start in Pending status!
             }, { transaction: t });
 
             salesReturnEntries.push(salesReturnEntry);
+
+            // E. Adjust Order Item IMMEDIATELY (so quantities decrease on customer invoice/order detail screen)
+            const remainingQty = orderedQty - returnQty;
+            if (remainingQty <= 0) {
+                // Remove the item completely from the order items
+                await orderItem.destroy({ transaction: t });
+            } else {
+                // Update quantity of order item
+                await orderItem.update({ quantity: remainingQty }, { transaction: t });
+            }
         }
+
+        // 5. Recalculate order total amount using remaining items IMMEDIATELY
+        const remainingItems = await OrderItem.findAll({
+            where: { orderId: order.id },
+            transaction: t
+        });
+
+        let newSubtotal = 0;
+        for (const item of remainingItems) {
+            newSubtotal += parseFloat(item.price) * parseFloat(item.quantity);
+        }
+
+        const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
+        const newTotalAmount = newSubtotal + deliveryCharge;
+
+        // Update Order total and outstanding dues IMMEDIATELY
+        order.totalAmount = newTotalAmount;
+        order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
+
+        // If total outstanding becomes 0 and they paid rest, set paid status appropriately
+        if (parseFloat(order.dueAmount) <= 0) {
+            order.paymentStatus = 'Paid';
+        } else if (parseFloat(order.dueAmount) < newTotalAmount) {
+            order.paymentStatus = 'Partial';
+        }
+
+        await order.save({ transaction: t });
 
         await t.commit();
 
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sales return request submitted successfully.", {
-            salesReturns: salesReturnEntries
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sales return request submitted successfully and customer order updated.", {
+            salesReturns: salesReturnEntries,
+            newOrderTotal: order.totalAmount,
+            newOrderDueAmount: order.dueAmount
         });
 
     } catch (error) {
@@ -191,34 +234,13 @@ export const approveSalesReturn = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found.");
         }
 
-        // 4. Find OrderItem
-        const orderItem = await OrderItem.findOne({
-            where: {
-                orderId: order.id,
-                productId: salesReturn.productId,
-                variantId: salesReturn.variantId
-            },
-            transaction: t
-        });
-
-        if (!orderItem) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order item not found in order.");
-        }
-
-        const orderedQty = parseFloat(orderItem.quantity);
-        const returnQty = parseFloat(salesReturn.quantity);
-
-        if (returnQty > orderedQty) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Return quantity exceeds remaining ordered quantity.");
-        }
-
         // E. Put Stock Back to Inventory
+        const returnQty = parseFloat(salesReturn.quantity);
         const bUPP = Number(variant.baseUnitsPerPack || 1);
-        const baseUnitsToRestore = Math.round(orderItem.sellUnit === 'Inner'
-            ? returnQty
-            : returnQty * bUPP);
+
+        // Deduce the original sell unit from the reason prefix
+        const isInner = salesReturn.reason && salesReturn.reason.startsWith('[Inner]');
+        const baseUnitsToRestore = Math.round(isInner ? returnQty : returnQty * bUPP);
 
         // Find the SALE transaction to restore stock to the exact godown and stock batch if possible
         const saleTxn = await InventoryTransaction.findOne({
@@ -306,46 +328,9 @@ export const approveSalesReturn = async (req, res) => {
             createdBy: actorName
         }, { transaction: t });
 
-        // F. Adjust Order Item
-        const remainingQty = orderedQty - returnQty;
-        if (remainingQty <= 0) {
-            // Remove the item completely from the order items
-            await orderItem.destroy({ transaction: t });
-        } else {
-            // Update quantity of order item
-            await orderItem.update({ quantity: remainingQty }, { transaction: t });
-        }
-
-        // G. Recalculate order total amount using remaining items
-        const remainingItems = await OrderItem.findAll({
-            where: { orderId: order.id },
-            transaction: t
-        });
-
-        let newSubtotal = 0;
-        for (const item of remainingItems) {
-            newSubtotal += parseFloat(item.price) * parseFloat(item.quantity);
-        }
-
-        const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
-        const newTotalAmount = newSubtotal + deliveryCharge;
-
-        // Update Order total and outstanding dues
-        const returnAmount = parseFloat(salesReturn.returnAmount) || 0;
-        order.totalAmount = newTotalAmount;
-        order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - returnAmount);
-
-        // If total outstanding becomes 0 and they paid rest, set paid status appropriately
-        if (parseFloat(order.dueAmount) <= 0) {
-            order.paymentStatus = 'Paid';
-        } else if (parseFloat(order.dueAmount) < newTotalAmount) {
-            order.paymentStatus = 'Partial';
-        }
-
-        await order.save({ transaction: t });
-
-        // H. Finally update status to Approved
+        // H. Finally update status to Approved and clean the unit prefix from reason if visible
         salesReturn.status = 'Approved';
+        salesReturn.reason = salesReturn.reason ? salesReturn.reason.replace(/^\[Inner\]\s*|^\[Base\]\s*/, '') : salesReturn.reason;
         await salesReturn.save({ transaction: t });
 
         await t.commit();
