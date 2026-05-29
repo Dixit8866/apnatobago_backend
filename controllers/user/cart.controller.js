@@ -308,7 +308,12 @@ export const addToCart = async (req, res) => {
         }
 
         // Fetch variant to calculate base units required
-        let variant = await ProductVariant.findByPk(variantId);
+        let variant = await ProductVariant.findByPk(variantId, {
+            include: [
+                { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+            ]
+        });
         let resolvedVariantId = variantId;
         if (!variant) {
             console.log(`[DEBUG addToCart] Variant not found (active), checking soft-deleted...`);
@@ -319,14 +324,22 @@ export const addToCart = async (req, res) => {
                         productId: deletedVariant.productId,
                         volumeId: deletedVariant.volumeId,
                         status: 'Active'
-                    }
+                    },
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                    ]
                 });
                 if (!activeVariant) {
                     activeVariant = await ProductVariant.findOne({
                         where: {
                             productId: deletedVariant.productId,
                             status: 'Active'
-                        }
+                        },
+                        include: [
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                        ]
                     });
                 }
                 if (activeVariant) {
@@ -393,10 +406,32 @@ export const addToCart = async (req, res) => {
 
         if (deductionRequired > availableStock) {
             console.log(`[DEBUG addToCart] BLOCKED: deductionRequired(${deductionRequired}) > availableStock(${availableStock})`);
+            const productName = typeof variant.product?.name === 'object'
+                ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')
+                : (variant.product?.name || 'Product');
+
+            const unitLabel = variant.baseUnitRef?.name
+                ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel || 'Pack')
+                : (variant.baseUnitLabel || 'Pack');
+
+            const availableInUserUnit = Math.floor(availableStock / bUPP);
+
             return sendErrorResponse(
                 res, 
                 HTTP_STATUS.BAD_REQUEST, 
-                `Insufficient stock. Available stock: ${availableStock} base units. Your cart requires: ${deductionRequired} base units.`
+                "Insufficient stock.",
+                {
+                    outOfStockItems: [
+                        {
+                            productId,
+                            variantId: variant.id,
+                            productName,
+                            availableQty: availableInUserUnit,
+                            unitLabel,
+                            requestedQty: totalProposedQty
+                        }
+                    ]
+                }
             );
         }
 
@@ -459,7 +494,12 @@ export const updateCartItem = async (req, res) => {
 
         const proposedQty = Number(quantity);
         if (proposedQty > 0) {
-            let variant = await ProductVariant.findByPk(cartItem.variantId);
+            let variant = await ProductVariant.findByPk(cartItem.variantId, {
+                include: [
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                ]
+            });
             if (!variant) {
                 const deletedVariant = await ProductVariant.findByPk(cartItem.variantId, { paranoid: false });
                 if (deletedVariant) {
@@ -468,14 +508,22 @@ export const updateCartItem = async (req, res) => {
                             productId: deletedVariant.productId,
                             volumeId: deletedVariant.volumeId,
                             status: 'Active'
-                        }
+                        },
+                        include: [
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                        ]
                     });
                     if (!activeVariant) {
                         activeVariant = await ProductVariant.findOne({
                             where: {
                                 productId: deletedVariant.productId,
                                 status: 'Active'
-                            }
+                            },
+                            include: [
+                                { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
                         });
                     }
                     if (activeVariant) {
@@ -490,10 +538,32 @@ export const updateCartItem = async (req, res) => {
 
             const availableStock = await getAvailableStock(cartItem.productId);
             if (deductionRequired > availableStock) {
+                const productName = typeof variant?.product?.name === 'object'
+                    ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')
+                    : (variant?.product?.name || 'Product');
+
+                const unitLabel = variant?.baseUnitRef?.name
+                    ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel || 'Pack')
+                    : (variant?.baseUnitLabel || 'Pack');
+
+                const availableInUserUnit = Math.floor(availableStock / bUPP);
+
                 return sendErrorResponse(
                     res, 
                     HTTP_STATUS.BAD_REQUEST, 
-                    `Insufficient stock. Available stock: ${availableStock} base units. Your request requires: ${deductionRequired} base units.`
+                    "Insufficient stock.",
+                    {
+                        outOfStockItems: [
+                            {
+                                productId: cartItem.productId,
+                                variantId: variant?.id || cartItem.variantId,
+                                productName,
+                                availableQty: availableInUserUnit,
+                                unitLabel,
+                                requestedQty: proposedQty
+                            }
+                        ]
+                    }
                 );
             }
         }
