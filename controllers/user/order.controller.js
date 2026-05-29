@@ -190,13 +190,38 @@ export const createOrder = async (req, res) => {
 
                 if (deductionRequired > availableStock) {
                     await t.rollback();
-                    const productName = typeof variant.product?.name === 'object' 
-                        ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product') 
+
+                    // Build friendly product name
+                    const productName = typeof variant.product?.name === 'object'
+                        ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')
                         : (variant.product?.name || 'Product');
+
+                    // Determine the unit label shown to the user
+                    const unitLabel = sellUnit === 'Inner'
+                        ? (variant.innerUnitRef?.name
+                            ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel || 'Unit')
+                            : (variant.innerUnitLabel || 'Unit'))
+                        : (variant.baseUnitRef?.name
+                            ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel || 'Pack')
+                            : (variant.baseUnitLabel || 'Pack'));
+
+                    // Convert available base units back to user-facing unit quantity
+                    const availableInUserUnit = sellUnit === 'Inner'
+                        ? Math.floor(availableStock)
+                        : Math.floor(availableStock / bUPP);
+
                     return sendErrorResponse(
                         res,
                         HTTP_STATUS.BAD_REQUEST,
-                        `Insufficient stock for ${productName}. Required: ${deductionRequired} units, Available: ${availableStock} units.`
+                        `Insufficient stock for "${productName}". Only ${availableInUserUnit} ${unitLabel}(s) available.`,
+                        {
+                            productId: item.productId,
+                            variantId: item.variantId,
+                            productName,
+                            availableQty: availableInUserUnit,
+                            unitLabel,
+                            requestedQty: quantity
+                        }
                     );
                 }
             }
