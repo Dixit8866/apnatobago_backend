@@ -248,7 +248,16 @@ export const getAllOrders = async (req, res) => {
                 attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'orderId']
             });
 
-            // Group items and payments by orderId
+            // Fetch SalesReturns
+            const returns = await SalesReturn.findAll({
+                where: { orderId: orderIds },
+                include: [
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'] }
+                ]
+            });
+
+            // Group items, payments, and returns by orderId
             const itemsMap = {};
             items.forEach(item => {
                 const oId = item.orderId;
@@ -263,10 +272,18 @@ export const getAllOrders = async (req, res) => {
                 paymentsMap[oId].push(p);
             });
 
+            const returnsMap = {};
+            returns.forEach(r => {
+                const oId = r.orderId;
+                if (!returnsMap[oId]) returnsMap[oId] = [];
+                returnsMap[oId].push(r);
+            });
+
             // Attach to Sequelize models using setDataValue so they are serialized correctly
             result.rows.forEach(order => {
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
+                order.setDataValue('returns', returnsMap[order.id] || []);
             });
         }
 
@@ -632,6 +649,14 @@ export const getOrderDetails = async (req, res) => {
                     model: OrderPayment,
                     as: 'payments',
                     attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt']
+                },
+                {
+                    model: SalesReturn,
+                    as: 'returns',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'] }
+                    ]
                 }
             ]
         });
