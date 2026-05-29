@@ -19,7 +19,7 @@ import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 
 /**
- * @desc    Process a Sales Return for one or more items in an order
+ * @desc    Process a Sales Return for one or more items in an order (Submitted by Delivery Boy, status set to 'Pending')
  * @route   POST /api/delivery/orders/sales-return
  * @access  Private
  */
@@ -68,7 +68,6 @@ export const createSalesReturn = async (req, res) => {
         });
         const deliveryBoyId = assignment ? assignment.deliveryBoyId : null;
 
-        let totalReturnAmount = 0;
         const salesReturnEntries = [];
 
         // 4. Process each item inside the input list
@@ -124,9 +123,8 @@ export const createSalesReturn = async (req, res) => {
             // C. Calculate Return Amount for this item
             const itemPrice = parseFloat(orderItem.price);
             const returnAmount = returnQty * itemPrice;
-            totalReturnAmount += returnAmount;
 
-            // D. Create SalesReturn Record
+            // D. Create SalesReturn Record with PENDING status
             const salesReturnEntry = await SalesReturn.create({
                 orderId: order.id,
                 userId: order.userId,
@@ -138,114 +136,187 @@ export const createSalesReturn = async (req, res) => {
                 price: itemPrice,
                 returnAmount,
                 reason: rootReason || itemReason || "Customer Return",
-                status: "Approved"
+                status: "Pending" // Explicitly start in Pending status!
             }, { transaction: t });
 
             salesReturnEntries.push(salesReturnEntry);
+        }
 
-            // E. Put Stock Back to Inventory
-            const bUPP = Number(variant.baseUnitsPerPack || 1);
-            const baseUnitsToRestore = Math.round(orderItem.sellUnit === 'Inner'
-                ? returnQty
-                : returnQty * bUPP);
+        await t.commit();
 
-            // Find the SALE transaction to restore stock to the exact godown and stock batch if possible
-            const saleTxn = await InventoryTransaction.findOne({
-                where: {
-                    productId,
-                    variantId: variant.id,
-                    type: 'SALE',
-                    note: { [Op.like]: `%${order.orderId}%` }
-                },
-                order: [['createdAt', 'DESC']],
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sales return request submitted successfully.", {
+            salesReturns: salesReturnEntries
+        });
+
+    } catch (error) {
+        if (t) await t.rollback();
+        logger.error(`[Create Sales Return Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Approve a Sales Return (Admin physically verifies the stock and updates)
+ * @route   PUT /api/admin/orders/sales-returns/:id/approve
+ * @access  Private (Admin)
+ */
+export const approveSalesReturn = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+
+        // 1. Fetch SalesReturn Entry
+        const salesReturn = await SalesReturn.findByPk(id, { transaction: t });
+        if (!salesReturn) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Sales return entry not found.");
+        }
+
+        if (salesReturn.status === 'Approved') {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "This sales return is already approved.");
+        }
+
+        // 2. Fetch Order
+        const order = await Order.findByPk(salesReturn.orderId, { transaction: t });
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Associated order not found.");
+        }
+
+        // 3. Fetch Product Variant
+        const variant = await ProductVariant.findByPk(salesReturn.variantId, { transaction: t });
+        if (!variant) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found.");
+        }
+
+        // 4. Find OrderItem
+        const orderItem = await OrderItem.findOne({
+            where: {
+                orderId: order.id,
+                productId: salesReturn.productId,
+                variantId: salesReturn.variantId
+            },
+            transaction: t
+        });
+
+        if (!orderItem) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order item not found in order.");
+        }
+
+        const orderedQty = parseFloat(orderItem.quantity);
+        const returnQty = parseFloat(salesReturn.quantity);
+
+        if (returnQty > orderedQty) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Return quantity exceeds remaining ordered quantity.");
+        }
+
+        // E. Put Stock Back to Inventory
+        const bUPP = Number(variant.baseUnitsPerPack || 1);
+        const baseUnitsToRestore = Math.round(orderItem.sellUnit === 'Inner'
+            ? returnQty
+            : returnQty * bUPP);
+
+        // Find the SALE transaction to restore stock to the exact godown and stock batch if possible
+        const saleTxn = await InventoryTransaction.findOne({
+            where: {
+                productId: salesReturn.productId,
+                variantId: variant.id,
+                type: 'SALE',
+                note: { [Op.like]: `%${order.orderId}%` }
+            },
+            order: [['createdAt', 'DESC']],
+            transaction: t
+        });
+
+        let targetStock = null;
+        if (saleTxn) {
+            targetStock = await InventoryStock.findOne({
+                where: { id: saleTxn.stockId },
                 transaction: t
             });
-
-            let targetStock = null;
-            if (saleTxn) {
-                targetStock = await InventoryStock.findOne({
-                    where: { id: saleTxn.stockId },
-                    transaction: t
-                });
-                if (targetStock) {
-                    await targetStock.update({
-                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
-                    }, { transaction: t });
-                }
-            }
-
-            // Fallback: If no SALE txn or specific batch found, find/create stock batch in user postcode godown or any godown
-            if (!targetStock) {
-                let targetGodownId = null;
-                if (order.userId) {
-                    const user = await User.findByPk(order.userId, { transaction: t });
-                    if (user && user.postcode) {
-                        const godown = await Godown.findOne({
-                            where: { pincodes: { [Op.contains]: [user.postcode] } },
-                            transaction: t
-                        });
-                        if (godown) targetGodownId = godown.id;
-                    }
-                }
-                if (!targetGodownId) {
-                    const godown = await Godown.findOne({ transaction: t });
-                    if (godown) targetGodownId = godown.id;
-                }
-
-                if (!targetGodownId) {
-                    await t.rollback();
-                    return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "No Godown available to return stock to.");
-                }
-
-                targetStock = await InventoryStock.findOne({
-                    where: { productId, variantId: variant.id, godownId: targetGodownId },
-                    transaction: t
-                });
-
-                if (targetStock) {
-                    await targetStock.update({
-                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
-                    }, { transaction: t });
-                } else {
-                    targetStock = await InventoryStock.create({
-                        productId,
-                        variantId: variant.id,
-                        godownId: targetGodownId,
-                        primaryUnitId: variant.baseUnitLabel || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
-                        totalBaseUnits: baseUnitsToRestore,
-                        status: 'Active'
-                    }, { transaction: t });
-                }
-            }
-
-            // Log the stock adjustment transaction
-            await InventoryTransaction.create({
-                stockId: targetStock.id,
-                productId,
-                variantId: variant.id,
-                godownId: targetStock.godownId,
-                type: 'SALES_RETURN',
-                primaryUnitId: targetStock.primaryUnitId,
-                secondaryUnitId: targetStock.secondaryUnitId,
-                secondaryPerPrimary: targetStock.secondaryPerPrimary,
-                totalQtyBaseUnits: baseUnitsToRestore,
-                balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
-                note: `Sales Return for Order #${order.orderId}`,
-                createdBy: req.user?.fullname || req.user?.name || 'Delivery Boy'
-            }, { transaction: t });
-
-            // F. Adjust Order Item
-            const remainingQty = orderedQty - returnQty;
-            if (remainingQty <= 0) {
-                // Remove the item completely from the order items
-                await orderItem.destroy({ transaction: t });
-            } else {
-                // Update quantity of order item
-                await orderItem.update({ quantity: remainingQty }, { transaction: t });
+            if (targetStock) {
+                await targetStock.update({
+                    totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
+                }, { transaction: t });
             }
         }
 
-        // 5. Recalculate order total amount using remaining items
+        // Fallback: If no SALE txn or specific batch found, find/create stock batch in user postcode godown or any godown
+        if (!targetStock) {
+            let targetGodownId = null;
+            if (order.userId) {
+                const user = await User.findByPk(order.userId, { transaction: t });
+                if (user && user.postcode) {
+                    const godown = await Godown.findOne({
+                        where: { pincodes: { [Op.contains]: [user.postcode] } },
+                        transaction: t
+                    });
+                    if (godown) targetGodownId = godown.id;
+                }
+            }
+            if (!targetGodownId) {
+                const godown = await Godown.findOne({ transaction: t });
+                if (godown) targetGodownId = godown.id;
+            }
+
+            if (!targetGodownId) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "No Godown available to return stock to.");
+            }
+
+            targetStock = await InventoryStock.findOne({
+                where: { productId: salesReturn.productId, variantId: variant.id, godownId: targetGodownId },
+                transaction: t
+            });
+
+            if (targetStock) {
+                await targetStock.update({
+                    totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
+                }, { transaction: t });
+            } else {
+                targetStock = await InventoryStock.create({
+                    productId: salesReturn.productId,
+                    variantId: variant.id,
+                    godownId: targetGodownId,
+                    primaryUnitId: variant.baseUnitLabel || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
+                    totalBaseUnits: baseUnitsToRestore,
+                    status: 'Active'
+                }, { transaction: t });
+            }
+        }
+
+        // Log the stock adjustment transaction - ACTION BY: Logged-in admin/user name!
+        const actorName = req.user?.fullname || req.user?.name || 'Admin';
+        await InventoryTransaction.create({
+            stockId: targetStock.id,
+            productId: salesReturn.productId,
+            variantId: variant.id,
+            godownId: targetStock.godownId,
+            type: 'SALES_RETURN',
+            primaryUnitId: targetStock.primaryUnitId,
+            secondaryUnitId: targetStock.secondaryUnitId,
+            secondaryPerPrimary: targetStock.secondaryPerPrimary,
+            totalQtyBaseUnits: baseUnitsToRestore,
+            balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
+            note: `Sales Return Approved for Order #${order.orderId}`,
+            createdBy: actorName
+        }, { transaction: t });
+
+        // F. Adjust Order Item
+        const remainingQty = orderedQty - returnQty;
+        if (remainingQty <= 0) {
+            // Remove the item completely from the order items
+            await orderItem.destroy({ transaction: t });
+        } else {
+            // Update quantity of order item
+            await orderItem.update({ quantity: remainingQty }, { transaction: t });
+        }
+
+        // G. Recalculate order total amount using remaining items
         const remainingItems = await OrderItem.findAll({
             where: { orderId: order.id },
             transaction: t
@@ -260,8 +331,9 @@ export const createSalesReturn = async (req, res) => {
         const newTotalAmount = newSubtotal + deliveryCharge;
 
         // Update Order total and outstanding dues
+        const returnAmount = parseFloat(salesReturn.returnAmount) || 0;
         order.totalAmount = newTotalAmount;
-        order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
+        order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - returnAmount);
 
         // If total outstanding becomes 0 and they paid rest, set paid status appropriately
         if (parseFloat(order.dueAmount) <= 0) {
@@ -272,17 +344,21 @@ export const createSalesReturn = async (req, res) => {
 
         await order.save({ transaction: t });
 
+        // H. Finally update status to Approved
+        salesReturn.status = 'Approved';
+        await salesReturn.save({ transaction: t });
+
         await t.commit();
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Sales return processed successfully.", {
-            salesReturns: salesReturnEntries,
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Sales return approved successfully and inventory updated.", {
+            salesReturn,
             newOrderTotal: order.totalAmount,
             newOrderDueAmount: order.dueAmount
         });
 
     } catch (error) {
         if (t) await t.rollback();
-        logger.error(`[Create Sales Return Error]: ${error.message}`);
+        logger.error(`[Approve Sales Return Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

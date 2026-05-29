@@ -62,11 +62,13 @@ export const createOrder = async (req, res) => {
 
         let calculatedSubtotal = 0;
         const orderItemsData = [];
+        const outOfStockItems = [];
 
+        // 1. Perform stock check for all items first
         for (const item of items) {
             const { productId, variantId, quantity, sellUnit } = item;
 
-            // 1. Fetch Product and Variant
+            // Fetch Product and Variant
             const variant = await ProductVariant.findByPk(variantId, {
                 include: [
                     { model: Product, as: 'product' },
@@ -88,11 +90,9 @@ export const createOrder = async (req, res) => {
                 ? Number(quantity)
                 : Number(quantity) * bUPP);
 
-            let combo1Variant = null;
-            let combo2Variant = null;
             if (variant.product?.isCombo) {
                 // Find matching or default variant for Combo Product 1
-                combo1Variant = await ProductVariant.findOne({
+                let combo1Variant = await ProductVariant.findOne({
                     where: { 
                         productId: variant.product.comboProduct1Id,
                         ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
@@ -104,7 +104,7 @@ export const createOrder = async (req, res) => {
                 });
 
                 // Find matching or default variant for Combo Product 2
-                combo2Variant = await ProductVariant.findOne({
+                let combo2Variant = await ProductVariant.findOne({
                     where: { 
                         productId: variant.product.comboProduct2Id,
                         ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
@@ -114,9 +114,7 @@ export const createOrder = async (req, res) => {
                     where: { productId: variant.product.comboProduct2Id },
                     transaction: t
                 });
-            }
 
-            if (variant.product?.isCombo) {
                 if (!combo1Variant || !combo2Variant) {
                     await t.rollback();
                     return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Combo components variants not found for this product.`);
@@ -141,14 +139,16 @@ export const createOrder = async (req, res) => {
                 }
 
                 if (deduction1 > stock1) {
-                    await t.rollback();
                     const prod1 = await Product.findByPk(variant.product.comboProduct1Id, { transaction: t });
                     const prod1Name = prod1?.name ? (prod1.name.en || Object.values(prod1.name)[0] || 'Product 1') : 'Product 1';
-                    return sendErrorResponse(
-                        res,
-                        HTTP_STATUS.BAD_REQUEST,
-                        `Insufficient stock for combo component: ${prod1Name}. Required: ${deduction1} units, Available: ${stock1} units.`
-                    );
+                    outOfStockItems.push({
+                        productId: variant.product.comboProduct1Id,
+                        variantId: combo1Variant.id,
+                        productName: `${prod1Name} (Combo Component)`,
+                        availableQty: stock1,
+                        unitLabel: 'units',
+                        requestedQty: deduction1
+                    });
                 }
 
                 let stock2 = 0;
@@ -164,14 +164,16 @@ export const createOrder = async (req, res) => {
                 }
 
                 if (deduction2 > stock2) {
-                    await t.rollback();
                     const prod2 = await Product.findByPk(variant.product.comboProduct2Id, { transaction: t });
                     const prod2Name = prod2?.name ? (prod2.name.en || Object.values(prod2.name)[0] || 'Product 2') : 'Product 2';
-                    return sendErrorResponse(
-                        res,
-                        HTTP_STATUS.BAD_REQUEST,
-                        `Insufficient stock for combo component: ${prod2Name}. Required: ${deduction2} units, Available: ${stock2} units.`
-                    );
+                    outOfStockItems.push({
+                        productId: variant.product.comboProduct2Id,
+                        variantId: combo2Variant.id,
+                        productName: `${prod2Name} (Combo Component)`,
+                        availableQty: stock2,
+                        unitLabel: 'units',
+                        requestedQty: deduction2
+                    });
                 }
             } else {
                 // NORMAL PRODUCT STOCK CHECK
@@ -189,8 +191,6 @@ export const createOrder = async (req, res) => {
                 }
 
                 if (deductionRequired > availableStock) {
-                    await t.rollback();
-
                     // Build friendly product name
                     const productName = typeof variant.product?.name === 'object'
                         ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')
@@ -210,23 +210,45 @@ export const createOrder = async (req, res) => {
                         ? Math.floor(availableStock)
                         : Math.floor(availableStock / bUPP);
 
-                    return sendErrorResponse(
-                        res,
-                        HTTP_STATUS.BAD_REQUEST,
-                        `Insufficient stock for "${productName}". Only ${availableInUserUnit} ${unitLabel}(s) available.`,
-                        {
-                            productId: item.productId,
-                            variantId: item.variantId,
-                            productName,
-                            availableQty: availableInUserUnit,
-                            unitLabel,
-                            requestedQty: quantity
-                        }
-                    );
+                    outOfStockItems.push({
+                        productId: item.productId,
+                        variantId: item.variantId,
+                        productName,
+                        availableQty: availableInUserUnit,
+                        unitLabel,
+                        requestedQty: quantity
+                    });
                 }
             }
+        }
 
-            // 2. Fetch all pricings for this variant
+        // If any items are out of stock, reject the entire order with list
+        if (outOfStockItems.length > 0) {
+            await t.rollback();
+            return sendErrorResponse(
+                res,
+                HTTP_STATUS.BAD_REQUEST,
+                "Insufficient stock for some products.",
+                { outOfStockItems }
+            );
+        }
+
+        // 2. Fetch prices, build order items and subtotal since everything is in stock
+        for (const item of items) {
+            const { productId, variantId, quantity, sellUnit } = item;
+
+            const variant = await ProductVariant.findByPk(variantId, {
+                include: [
+                    { model: Product, as: 'product' },
+                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                ],
+                transaction: t
+            });
+
+            const bUPP = Number(variant.baseUnitsPerPack || 1);
+
+            // Fetch all pricings for this variant
             const pricings = await ProductPricing.findAll({
                 where: { variantId },
                 order: [['minQty', 'ASC']]

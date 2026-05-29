@@ -125,10 +125,39 @@ export const getAllOrders = async (req, res) => {
             ];
         }
 
+        // Helper to get today's 24-hour date range in India Standard Time (IST)
+        const getISTTodayRange = () => {
+            const now = new Date();
+            // Offset to IST (+5.5 hours)
+            const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+            
+            const startOfIstToday = new Date(istTime);
+            startOfIstToday.setUTCHours(0, 0, 0, 0);
+            const startOfTodayUTC = new Date(startOfIstToday.getTime() - (5.5 * 60 * 60 * 1000));
+
+            const endOfIstToday = new Date(istTime);
+            endOfIstToday.setUTCHours(23, 59, 59, 999);
+            const endOfTodayUTC = new Date(endOfIstToday.getTime() - (5.5 * 60 * 60 * 1000));
+
+            return { startOfTodayUTC, endOfTodayUTC };
+        };
+
+        const { startOfTodayUTC, endOfTodayUTC } = getISTTodayRange();
+
         // Apply status filter
         if (status && status !== 'All') {
             if (status === 'Delivered') {
                 where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+                // Restrict Delivered/Payment Collect/Payment Verify to today by default unless filtered
+                if (!startDate && !endDate && !date) {
+                    where.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+                }
+            } else if (status === 'Cancelled') {
+                where.orderStatus = 'Cancelled';
+                // Restrict Cancelled orders to today by default unless filtered
+                if (!startDate && !endDate && !date) {
+                    where.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+                }
             } else {
                 where.orderStatus = status;
             }
@@ -273,22 +302,31 @@ export const getAllOrders = async (req, res) => {
             countWhere.createdAt = { [Op.between]: [startOfDay, endOfDay] };
         }
 
-        const todayStr = new Date().toISOString().split('T')[0];
-        const startOfToday = new Date(todayStr);
-        startOfToday.setHours(0, 0, 0, 0);
-        const endOfToday = new Date(todayStr);
-        endOfToday.setHours(23, 59, 59, 999);
+        // Setup count filters
+        const isDateFiltered = !!(startDate || endDate || date);
+        const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
+        const paymentCollectCountWhere = { ...countWhere, orderStatus: 'Payment Collect' };
+        const paymentVerifyCountWhere = { ...countWhere, orderStatus: 'Payment Verify' };
+        const cancelledCountWhere = { ...countWhere, orderStatus: 'Cancelled' };
+
+        // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set
+        if (!isDateFiltered) {
+            deliveredCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            paymentCollectCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            paymentVerifyCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            cancelledCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+        }
 
         const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount] = await Promise.all([
             Order.count({ where: { ...countWhere, orderStatus: 'Pending' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Packaging' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Packed' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Shipping' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }, include: countInclude }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Payment Collect' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Payment Verify' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Cancelled' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } }, include: countInclude }),
+            Order.count({ where: deliveredCountWhere, include: countInclude }),
+            Order.count({ where: paymentCollectCountWhere, include: countInclude }),
+            Order.count({ where: paymentVerifyCountWhere, include: countInclude }),
+            Order.count({ where: cancelledCountWhere, include: countInclude }),
+            Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }, include: countInclude }),
             SalesReturn.count({ where: deliveryBoyId ? { deliveryBoyId } : {} })
         ]);
 
