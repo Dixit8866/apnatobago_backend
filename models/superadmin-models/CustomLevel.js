@@ -13,6 +13,10 @@ const CustomLevel = sequelize.define(
             type: DataTypes.STRING,
             allowNull: false,
         },
+        icon: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
         status: {
             type: DataTypes.STRING,
             defaultValue: 'Active',

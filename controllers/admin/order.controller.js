@@ -158,6 +158,9 @@ export const getAllOrders = async (req, res) => {
                 if (!startDate && !endDate && !date) {
                     where.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
                 }
+            } else if (status === 'Pending Due Order') {
+                where.paymentStatus = { [Op.ne]: 'Paid' };
+                where.orderStatus = { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
             } else {
                 where.orderStatus = status;
             }
@@ -326,6 +329,12 @@ export const getAllOrders = async (req, res) => {
         const paymentVerifyCountWhere = { ...countWhere, orderStatus: 'Payment Verify' };
         const cancelledCountWhere = { ...countWhere, orderStatus: 'Cancelled' };
 
+        const pendingDueCountWhere = { 
+            ...countWhere, 
+            paymentStatus: { [Op.ne]: 'Paid' },
+            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+        };
+
         // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set
         if (!isDateFiltered) {
             deliveredCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
@@ -334,7 +343,7 @@ export const getAllOrders = async (req, res) => {
             cancelledCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
         }
 
-        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount] = await Promise.all([
+        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount, pendingDueCount] = await Promise.all([
             Order.count({ where: { ...countWhere, orderStatus: 'Pending' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Packaging' }, include: countInclude }),
             Order.count({ where: { ...countWhere, orderStatus: 'Packed' }, include: countInclude }),
@@ -344,7 +353,8 @@ export const getAllOrders = async (req, res) => {
             Order.count({ where: paymentVerifyCountWhere, include: countInclude }),
             Order.count({ where: cancelledCountWhere, include: countInclude }),
             Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }, include: countInclude }),
-            SalesReturn.count({ where: deliveryBoyId ? { deliveryBoyId } : {} })
+            SalesReturn.count({ where: deliveryBoyId ? { deliveryBoyId } : {} }),
+            Order.count({ where: pendingDueCountWhere, include: countInclude })
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -361,7 +371,8 @@ export const getAllOrders = async (req, res) => {
             'Payment Collect': paymentCollectCount,
             'Payment Verify': paymentVerifyCount,
             Cancelled: cancelledCount,
-            SalesReturn: salesReturnCount
+            SalesReturn: salesReturnCount,
+            'Pending Due Order': pendingDueCount
         };
 
         if (responseData.orders) {

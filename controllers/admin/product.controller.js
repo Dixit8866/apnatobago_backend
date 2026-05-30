@@ -383,10 +383,10 @@ export const getProducts = async (req, res, next) => {
             }
         } else {
             if (status === 'Low Stock') {
-                whereWithFilters.status = 'Active';
+                whereWithFilters.status = { [Op.ne]: 'Deleted' };
                 whereWithFilters[Op.and] = [
                     ...(searchWhere[Op.and] || []),
-                    sequelize.literal(`${stockSubquery} <= 10`)
+                    sequelize.literal(`${stockSubquery} = 0`)
                 ];
             } else if (status) {
                 whereWithFilters.status = status;
@@ -448,10 +448,10 @@ export const getProducts = async (req, res, next) => {
             const lowStockVal = await Product.count({
                 where: {
                     ...countBaseWhere,
-                    status: 'Active',
+                    status: { [Op.ne]: 'Deleted' },
                     [Op.and]: [
                         ...(countBaseWhere[Op.and] || []),
-                        sequelize.literal(`${stockSubquery} <= 10`)
+                        sequelize.literal(`${stockSubquery} = 0`)
                     ]
                 }
             });

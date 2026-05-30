@@ -7,6 +7,7 @@ import sequelize from '../../config/db.js';
 import { Op } from 'sequelize';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 
 /**
  * Generate a unique human-readable Order ID
@@ -539,70 +540,111 @@ export const createOrder = async (req, res) => {
 export const getOrders = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { id } = req.query; // Check if a specific ID is requested
+        const { id, paginate } = req.query; // Check if a specific ID or paginate is requested
 
         const where = { userId };
         if (id) {
             where.id = id;
         }
 
-        const orders = await Order.findAll({
-            where,
-            include: [
-                {
-                    model: OrderItem,
-                    as: 'items',
-                    include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        {
-                            model: ProductVariant,
-                            as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'extra'],
-                            include: [
-                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    model: SalesReturn,
-                    as: 'returns',
-                    include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        {
-                            model: ProductVariant,
-                            as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
-                            include: [
-                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
-                            ]
-                        }
-                    ]
-                }
-            ],
-            order: [['createdAt', 'DESC']]
-        });
-
-        const updatedOrders = orders.map(o => {
-            const orderData = o.toJSON ? o.toJSON() : o;
-            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-                orderData.orderStatus = 'Delivered';
-            }
-            if (orderData.items) {
-                orderData.items = orderData.items.map(item => {
-                    if (item.variant) {
-                        item.variant.extraName = item.variant.extra || '';
-                        item.variant.extra = item.variant.extra || '';
+        const include = [
+            {
+                model: OrderItem,
+                as: 'items',
+                include: [
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    {
+                        model: ProductVariant,
+                        as: 'variant',
+                        attributes: ['id', 'volume', 'image', 'extra'],
+                        include: [
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                        ]
                     }
-                    return item;
-                });
+                ]
+            },
+            {
+                model: SalesReturn,
+                as: 'returns',
+                include: [
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    {
+                        model: ProductVariant,
+                        as: 'variant',
+                        attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                        include: [
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                        ]
+                    }
+                ]
             }
-            return orderData;
+        ];
+
+        const orderOptions = [['createdAt', 'DESC']];
+
+        if (paginate === 'false') {
+            const orders = await Order.findAll({
+                where,
+                include,
+                order: orderOptions
+            });
+
+            const updatedOrders = orders.map(o => {
+                const orderData = o.toJSON ? o.toJSON() : o;
+                if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                    orderData.orderStatus = 'Delivered';
+                }
+                if (orderData.items) {
+                    orderData.items = orderData.items.map(item => {
+                        if (item.variant) {
+                            item.variant.extraName = item.variant.extra || '';
+                            item.variant.extra = item.variant.extra || '';
+                        }
+                        return item;
+                    });
+                }
+                return orderData;
+            });
+
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
+        }
+
+        const pagination = getPaginationOptions(req.query);
+        const { limit, offset, page } = pagination;
+
+        const result = await Order.findAndCountAll({
+            where,
+            include,
+            limit,
+            offset,
+            order: orderOptions,
+            distinct: true
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
+        const formattedResult = formatPaginatedResponse(result, page, limit);
+
+        if (formattedResult.items) {
+            formattedResult.items = formattedResult.items.map(o => {
+                const orderData = o.toJSON ? o.toJSON() : o;
+                if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                    orderData.orderStatus = 'Delivered';
+                }
+                if (orderData.items) {
+                    orderData.items = orderData.items.map(item => {
+                        if (item.variant) {
+                            item.variant.extraName = item.variant.extra || '';
+                            item.variant.extra = item.variant.extra || '';
+                        }
+                        return item;
+                    });
+                }
+                return orderData;
+            });
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", formattedResult);
     } catch (error) {
         logger.error(`[Get Orders Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);

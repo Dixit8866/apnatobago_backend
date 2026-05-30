@@ -2,6 +2,7 @@ import { Wishlist, Product, ProductVariant, ProductPricing, Volume, CustomLevel 
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
+import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 
 /**
  * @desc    Get current user's wishlist with populated data
@@ -13,67 +14,113 @@ export const getWishlist = async (req, res) => {
         const userId = req.user.id;
         const userLevel = req.user.applevel || null;
         const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
+        const { paginate } = req.query;
 
-        const wishlistItems = await Wishlist.findAll({
-            where: { userId },
-            include: [
-                {
-                    model: Product,
-                    as: 'product',
-                    where: req.user && !req.user.showtabacco ? { isTobaccoProduct: false } : {},
-                    attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
-                    include: [
-                        {
-                            model: ProductVariant,
-                            as: 'variants',
-                            attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
-                            include: [
-                                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { 
-                                    model: ProductPricing, 
-                                    as: 'pricings',
-                                    where: pricingWhere,
-                                    required: false,
-                                    attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt', 'customLevelId'] },
-                                    include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }],
-                                    order: [['minQty', 'ASC']]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ],
-            order: [
-                ['createdAt', 'DESC'],
-                [{ model: Product, as: 'product' }, { model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
-                [{ model: Product, as: 'product' }, { model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
-            ]
-        });
-
-        const formattedWishlist = wishlistItems.map(item => {
-            const itemJson = item.toJSON();
-            if (itemJson.product && itemJson.product.variants) {
-                itemJson.product.variants = itemJson.product.variants.map(v => {
-                    const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
-                    const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
-                    
-                    return {
-                        ...v,
-                        baseUnitLabel: baseUnitName || v.baseUnitLabel,
-                        innerUnitLabel: innerUnitName || v.innerUnitLabel,
-                        extra: v.extra || '',
-                        extraName: v.extra || '',
-                        image: v.image || itemJson.product.thumbnail,
-                        thumbnail: v.image || itemJson.product.thumbnail
-                    };
-                });
+        const include = [
+            {
+                model: Product,
+                as: 'product',
+                where: req.user && !req.user.showtabacco ? { isTobaccoProduct: false } : {},
+                attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
+                include: [
+                    {
+                        model: ProductVariant,
+                        as: 'variants',
+                        attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                        include: [
+                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                            { 
+                                model: ProductPricing, 
+                                as: 'pricings',
+                                where: pricingWhere,
+                                required: false,
+                                attributes: { exclude: ['purchasePrice', 'variantId', 'createdAt', 'updatedAt', 'deletedAt', 'customLevelId'] },
+                                include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }],
+                                order: [['minQty', 'ASC']]
+                            }
+                        ]
+                    }
+                ]
             }
-            return itemJson;
+        ];
+
+        const order = [
+            ['createdAt', 'DESC'],
+            [{ model: Product, as: 'product' }, { model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
+            [{ model: Product, as: 'product' }, { model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
+        ];
+
+        if (paginate === 'false') {
+            const wishlistItems = await Wishlist.findAll({
+                where: { userId },
+                include,
+                order
+            });
+
+            const formattedWishlist = wishlistItems.map(item => {
+                const itemJson = item.toJSON();
+                if (itemJson.product && itemJson.product.variants) {
+                    itemJson.product.variants = itemJson.product.variants.map(v => {
+                        const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
+                        const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
+                        
+                        return {
+                            ...v,
+                            baseUnitLabel: baseUnitName || v.baseUnitLabel,
+                            innerUnitLabel: innerUnitName || v.innerUnitLabel,
+                            extra: v.extra || '',
+                            extraName: v.extra || '',
+                            image: v.image || itemJson.product.thumbnail,
+                            thumbnail: v.image || itemJson.product.thumbnail
+                        };
+                    });
+                }
+                return itemJson;
+            });
+
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Wishlist fetched successfully", formattedWishlist);
+        }
+
+        const pagination = getPaginationOptions(req.query);
+        const { limit, offset, page } = pagination;
+
+        const result = await Wishlist.findAndCountAll({
+            where: { userId },
+            include,
+            limit,
+            offset,
+            order,
+            distinct: true
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Wishlist fetched successfully", formattedWishlist);
+        const formattedResult = formatPaginatedResponse(result, page, limit);
+
+        if (formattedResult.items) {
+            formattedResult.items = formattedResult.items.map(item => {
+                const itemJson = item.toJSON ? item.toJSON() : item;
+                if (itemJson.product && itemJson.product.variants) {
+                    itemJson.product.variants = itemJson.product.variants.map(v => {
+                        const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
+                        const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
+                        
+                        return {
+                            ...v,
+                            baseUnitLabel: baseUnitName || v.baseUnitLabel,
+                            innerUnitLabel: innerUnitName || v.innerUnitLabel,
+                            extra: v.extra || '',
+                            extraName: v.extra || '',
+                            image: v.image || itemJson.product.thumbnail,
+                            thumbnail: v.image || itemJson.product.thumbnail
+                        };
+                    });
+                }
+                return itemJson;
+            });
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Wishlist fetched successfully", formattedResult);
     } catch (error) {
         logger.error(`Error in getWishlist: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);

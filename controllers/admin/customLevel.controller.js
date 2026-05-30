@@ -6,7 +6,7 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
 
 export const createCustomLevel = async (req, res, next) => {
     try {
-        const { name, status } = req.body;
+        const { name, status, icon } = req.body;
 
         if (!name || !name.trim()) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Level name is required.');
@@ -14,6 +14,7 @@ export const createCustomLevel = async (req, res, next) => {
 
         const customLevel = await CustomLevel.create({
             name: name.trim(),
+            icon: icon || null,
             status: status || 'Active',
         });
 
@@ -99,7 +100,7 @@ export const getCustomLevelById = async (req, res, next) => {
 
 export const updateCustomLevel = async (req, res, next) => {
     try {
-        const { name, status } = req.body;
+        const { name, status, icon } = req.body;
         const customLevel = await CustomLevel.findByPk(req.params.id);
 
         if (!customLevel) {
@@ -108,6 +109,7 @@ export const updateCustomLevel = async (req, res, next) => {
 
         if (name !== undefined) customLevel.name = name.trim();
         if (status) customLevel.status = status;
+        if (icon !== undefined) customLevel.icon = icon || null;
 
         await customLevel.save();
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Custom Level updated successfully.', customLevel);
