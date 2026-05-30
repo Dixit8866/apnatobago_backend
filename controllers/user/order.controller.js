@@ -540,7 +540,7 @@ export const createOrder = async (req, res) => {
 export const getOrders = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { id, paginate } = req.query; // Check if a specific ID or paginate is requested
+        const { id, paginate, page: queryPage, limit: queryLimit } = req.query;
 
         const where = { userId };
         if (id) {
@@ -584,7 +584,10 @@ export const getOrders = async (req, res) => {
 
         const orderOptions = [['createdAt', 'DESC']];
 
-        if (paginate === 'false') {
+        // Backward compatibility: if page & limit are not provided (old app), return all data
+        const shouldPaginate = (queryPage || queryLimit) && paginate !== 'false';
+
+        if (!shouldPaginate) {
             const orders = await Order.findAll({
                 where,
                 include,
