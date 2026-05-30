@@ -153,7 +153,7 @@ export const getAllOrders = async (req, res) => {
                     where.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
                 }
             } else if (status === 'Cancelled') {
-                where.orderStatus = 'Cancelled';
+                where.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
                 // Restrict Cancelled orders to today by default unless filtered
                 if (!startDate && !endDate && !date) {
                     where.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
@@ -327,7 +327,7 @@ export const getAllOrders = async (req, res) => {
         const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
         const paymentCollectCountWhere = { ...countWhere, orderStatus: 'Payment Collect' };
         const paymentVerifyCountWhere = { ...countWhere, orderStatus: 'Payment Verify' };
-        const cancelledCountWhere = { ...countWhere, orderStatus: 'Cancelled' };
+        const cancelledCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } };
 
         const pendingDueCountWhere = { 
             ...countWhere, 

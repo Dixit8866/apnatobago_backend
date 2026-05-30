@@ -325,6 +325,20 @@ export const createProduct = async (req, res, next) => {
     }
 };
 
+const sortVariants = (productJson) => {
+    if (productJson && productJson.variants && productJson.variants.length) {
+        productJson.variants.sort((a, b) => {
+            const posA = a.position !== undefined && a.position !== null ? Number(a.position) : 0;
+            const posB = b.position !== undefined && b.position !== null ? Number(b.position) : 0;
+            if (posA !== posB) return posA - posB;
+            const dateA = new Date(a.createdAt || 0);
+            const dateB = new Date(b.createdAt || 0);
+            return dateA - dateB;
+        });
+    }
+    return productJson;
+};
+
 export const getProducts = async (req, res, next) => {
     try {
         const { search = '', status, mainCategoryId, isTobacco } = req.query;
@@ -512,10 +526,11 @@ export const getProducts = async (req, res, next) => {
                     ['position', 'ASC'],
                     ['createdAt', 'DESC'],
                     [{ model: ProductVariant, as: 'variants' }, 'position', 'ASC'],
-                    [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'DESC']
+                    [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC']
                 ]
             });
-            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products fetched successfully.', { products, statusCounts });
+            const productsJson = products.map(p => sortVariants(p.toJSON()));
+            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products fetched successfully.', { products: productsJson, statusCounts });
         }
 
         const result = await Product.findAndCountAll({
@@ -527,12 +542,15 @@ export const getProducts = async (req, res, next) => {
                 ['position', 'ASC'],
                 ['createdAt', 'DESC'],
                 [{ model: ProductVariant, as: 'variants' }, 'position', 'ASC'],
-                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'DESC']
+                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC']
             ],
             distinct: true // Required when including hasMany associations with pagination
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
+        if (responseData.items) {
+            responseData.items = responseData.items.map(p => sortVariants(p.toJSON ? p.toJSON() : p));
+        }
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Products fetched successfully.', {
             ...responseData,
             statusCounts,
@@ -570,12 +588,13 @@ export const getProductById = async (req, res, next) => {
             ],
             order: [
                 [{ model: ProductVariant, as: 'variants' }, 'position', 'ASC'],
-                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'DESC']
+                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC']
             ],
         });
 
         if (!product) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product fetched successfully.', product);
+        const productJson = sortVariants(product.toJSON());
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product fetched successfully.', productJson);
     } catch (error) {
         next(error);
     }
@@ -958,9 +977,9 @@ export const reorderProducts = async (req, res, next) => {
             for (let i = 0; i < combined.length; i++) {
                 await Product.update(
                     { position: i },
-                    { 
+                    {
                         where: { id: combined[i].id },
-                        transaction 
+                        transaction
                     }
                 );
             }

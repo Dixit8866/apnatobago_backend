@@ -32,8 +32,8 @@ export const getWishlist = async (req, res) => {
                             { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                            { 
-                                model: ProductPricing, 
+                            {
+                                model: ProductPricing,
                                 as: 'pricings',
                                 where: pricingWhere,
                                 required: false,
@@ -69,7 +69,7 @@ export const getWishlist = async (req, res) => {
                     itemJson.product.variants = itemJson.product.variants.map(v => {
                         const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
                         const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
-                        
+
                         return {
                             ...v,
                             baseUnitLabel: baseUnitName || v.baseUnitLabel,
@@ -108,7 +108,7 @@ export const getWishlist = async (req, res) => {
                     itemJson.product.variants = itemJson.product.variants.map(v => {
                         const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
                         const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
-                        
+
                         return {
                             ...v,
                             baseUnitLabel: baseUnitName || v.baseUnitLabel,
@@ -172,7 +172,7 @@ export const removeFromWishlist = async (req, res) => {
         const productId = req.query.productId;
 
         let whereClause = { userId };
-        
+
         if (id && id !== 'undefined') {
             whereClause.id = id;
         } else if (productId) {

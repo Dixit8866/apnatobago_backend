@@ -173,7 +173,7 @@ export const getCompanyCategories = async (req, res) => {
 export const getProducts = async (req, res) => {
     try {
         const { mainCategoryId, subCategoryId, companyCategoryId, page, limit } = req.query;
-        
+
         const user = req.user;
         const userLevel = user?.applevel || null;
 
@@ -216,21 +216,21 @@ export const getProducts = async (req, res) => {
             ],
             attributes: { exclude: ['isTobaccoProduct', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
-                { 
-                    model: MainCategory, 
-                    as: 'mainCategory', 
+                {
+                    model: MainCategory,
+                    as: 'mainCategory',
                     attributes: ['id', 'title', 'isTobacco'],
                     where: user && !user.showtabacco ? { isTobacco: false } : {}
                 },
-                { 
-                    model: SubCategory, 
-                    as: 'subCategory', 
+                {
+                    model: SubCategory,
+                    as: 'subCategory',
                     attributes: ['id', 'title', 'isTobacco'],
                     where: user && !user.showtabacco ? { isTobacco: false } : {}
                 },
-                { 
-                    model: CompanyCategory, 
-                    as: 'companyCategory', 
+                {
+                    model: CompanyCategory,
+                    as: 'companyCategory',
                     attributes: ['id', 'title', 'isTobacco'],
                     where: user && !user.showtabacco ? { isTobacco: false } : {}
                 },
@@ -486,21 +486,21 @@ export const searchCatalogue = async (req, res) => {
             ],
             attributes: { exclude: ['isTobaccoProduct', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
-                { 
-                    model: MainCategory, 
-                    as: 'mainCategory', 
+                {
+                    model: MainCategory,
+                    as: 'mainCategory',
                     attributes: ['id', 'title', 'isTobacco'],
                     where: user && !user.showtabacco ? { isTobacco: false } : {}
                 },
-                { 
-                    model: SubCategory, 
-                    as: 'subCategory', 
+                {
+                    model: SubCategory,
+                    as: 'subCategory',
                     attributes: ['id', 'title', 'isTobacco'],
                     where: user && !user.showtabacco ? { isTobacco: false } : {}
                 },
-                { 
-                    model: CompanyCategory, 
-                    as: 'companyCategory', 
+                {
+                    model: CompanyCategory,
+                    as: 'companyCategory',
                     attributes: ['id', 'title', 'isTobacco'],
                     where: user && !user.showtabacco ? { isTobacco: false } : {}
                 },
