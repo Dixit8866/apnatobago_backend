@@ -99,19 +99,33 @@ export const generateOrderInvoice = async (order) => {
                 let nameStr = 'Product';
                 if (pName) {
                     if (typeof pName === 'object') {
-                        nameStr = pName.EN || pName.en || pName.GU || pName.gu || Object.values(pName)[0] || 'Product';
+                        nameStr = pName.en || pName.EN || pName.eng || pName.ENG || pName.gu || pName.GU || pName.guj || pName.GUJ || Object.values(pName)[0] || 'Product';
                     } else {
                         nameStr = String(pName);
                     }
                 }
                 const volume = it.variant?.volume || it.variantInfo?.volume || '';
+                let volStr = '';
+                if (volume) {
+                    if (typeof volume === 'object') {
+                        volStr = volume.en || volume.EN || volume.eng || volume.ENG || volume.gu || volume.GU || volume.guj || volume.GUJ || Object.values(volume)[0] || '';
+                    } else {
+                        volStr = String(volume);
+                    }
+                }
                 
                 // Determine unit label (pcs vs carton)
                 const sellUnit = it.sellUnit || 'Base';
                 const vInfo = it.variantInfo || {};
-                const unitLabel = sellUnit === 'Inner' ? (vInfo.innerUnitLabel || 'Pcs') : (vInfo.baseUnitLabel || 'Carton');
+                const rawLabel = sellUnit === 'Inner' ? (vInfo.innerUnitLabel || 'Pcs') : (vInfo.baseUnitLabel || 'Carton');
+                let unitLabel = '';
+                if (typeof rawLabel === 'object') {
+                    unitLabel = rawLabel.en || rawLabel.EN || rawLabel.eng || rawLabel.ENG || rawLabel.gu || rawLabel.GU || rawLabel.guj || rawLabel.GUJ || Object.values(rawLabel)[0] || '';
+                } else {
+                    unitLabel = String(rawLabel);
+                }
                 
-                doc.font('Helvetica').text(`${nameStr} (${volume})`, 60, itemY, { width: width - 250 });
+                doc.font('Helvetica').text(`${nameStr} (${volStr})`, 60, itemY, { width: width - 250 });
                 doc.text(`₹${Number(it.price).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
                 doc.text(`${it.quantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
                 doc.font('Helvetica-Bold').text(`₹${(it.price * it.quantity).toFixed(2)}`, doc.page.width - 85, itemY, { width: 60, align: 'right' });
@@ -140,16 +154,24 @@ export const generateOrderInvoice = async (order) => {
                     let nameStr = 'Product';
                     if (pName) {
                         if (typeof pName === 'object') {
-                            nameStr = pName.EN || pName.en || pName.GU || pName.gu || Object.values(pName)[0] || 'Product';
+                            nameStr = pName.en || pName.EN || pName.eng || pName.ENG || pName.gu || pName.GU || pName.guj || pName.GUJ || Object.values(pName)[0] || 'Product';
                         } else {
                             nameStr = String(pName);
                         }
                     }
                     const volume = ret.variant?.volume || '';
+                    let volStr = '';
+                    if (volume) {
+                        if (typeof volume === 'object') {
+                            volStr = volume.en || volume.EN || volume.eng || volume.ENG || volume.gu || volume.GU || volume.guj || volume.GUJ || Object.values(volume)[0] || '';
+                        } else {
+                            volStr = String(volume);
+                        }
+                    }
                     const isInner = (ret.reason || '').startsWith('[Inner]');
                     const unitLabel = isInner ? 'Pcs' : 'Pack';
 
-                    doc.font('Helvetica').text(`${nameStr} (${volume})`, 60, itemY, { width: width - 250 });
+                    doc.font('Helvetica').text(`${nameStr} (${volStr})`, 60, itemY, { width: width - 250 });
                     doc.text(`₹${Number(ret.price).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
                     doc.text(`-${ret.quantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
                     doc.font('Helvetica-Bold').text(`-₹${Number(ret.returnAmount).toFixed(2)}`, doc.page.width - 85, itemY, { width: 60, align: 'right' });
@@ -293,7 +315,20 @@ export const generatePurchaseBill = async (bill) => {
                 doc.text(`${idx + 1}.`, 30, itemY);
                 
                 const productName = it.productName || 'Product';
-                doc.font('Helvetica').text(`${productName} (${it.volume || ''})`, 60, itemY, { width: width - 250 });
+                let prodNameStr = 'Product';
+                if (typeof productName === 'object') {
+                    prodNameStr = productName.en || productName.EN || productName.eng || productName.ENG || productName.gu || productName.GU || productName.guj || productName.GUJ || Object.values(productName)[0] || 'Product';
+                } else {
+                    prodNameStr = String(productName);
+                }
+                const volume = it.volume || '';
+                let volStr = '';
+                if (typeof volume === 'object') {
+                    volStr = volume.en || volume.EN || volume.eng || volume.ENG || volume.gu || volume.GU || volume.guj || volume.GUJ || Object.values(volume)[0] || '';
+                } else {
+                    volStr = String(volume);
+                }
+                doc.font('Helvetica').text(`${prodNameStr} (${volStr})`, 60, itemY, { width: width - 250 });
                 doc.text(`₹${Number(it.purchasePrice).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
                 doc.text(String(it.qty), doc.page.width - 120, itemY, { width: 30, align: 'center' });
                 doc.font('Helvetica-Bold').text(`₹${(it.purchasePrice * it.qty).toFixed(2)}`, doc.page.width - 85, itemY, { width: 60, align: 'right' });
@@ -399,10 +434,18 @@ export const generateDeliveryLabel = async (order) => {
             doc.strokeColor('#000000').lineWidth(0.5).moveTo(20, currentY).lineTo(canvasWidth - 20, currentY).stroke();
             currentY += 8;
 
+            const getLabel = (val) => {
+                if (!val) return '';
+                if (typeof val === 'object') {
+                    return val.en || val.EN || val.eng || val.ENG || val.gu || val.GU || val.guj || val.GUJ || val.HN || Object.values(val)[0] || '';
+                }
+                return val;
+            };
+
             items.forEach((it) => {
                 const sellUnit = it.sellUnit || 'Base';
                 const vInfo = it.variantInfo || {};
-                const unitLabel = sellUnit === 'Inner' ? (vInfo.innerUnitLabel || 'Pcs') : (vInfo.baseUnitLabel || 'Pack');
+                const unitLabel = sellUnit === 'Inner' ? getLabel(vInfo.innerUnitLabel || 'Pcs') : getLabel(vInfo.baseUnitLabel || 'Pack');
                 
                 // Qty & Unit
                 doc.fillColor('#000000').fontSize(9).font('Helvetica-Bold').text(Math.round(it.quantity), 20, currentY);
@@ -410,8 +453,8 @@ export const generateDeliveryLabel = async (order) => {
                 
                 // Item Name
                 const pName = vInfo.productName || 'Product';
-                const name = typeof pName === 'object' ? (pName.en || Object.values(pName)[0]) : pName;
-                const vol = vInfo.volume || '';
+                const name = getLabel(pName);
+                const vol = getLabel(vInfo.volume || '');
                 doc.fillColor('#0f172a').fontSize(8).font('Helvetica-Bold').text(name, 65, currentY, { width: 100 });
                 doc.fontSize(7).font('Helvetica').fillColor('#64748b').text(vol, 65, currentY + 9);
                 
@@ -482,7 +525,7 @@ export const generateDeliveryLabelHTML = (order) => {
         const getLabel = (val) => {
             if (!val) return '';
             if (typeof val === 'object') {
-                return val.en || val.en || val.gu || val.HN || Object.values(val)[0] || '';
+                return val.en || val.EN || val.eng || val.ENG || val.gu || val.GU || val.guj || val.GUJ || val.HN || Object.values(val)[0] || '';
             }
             return val;
         };
@@ -523,7 +566,7 @@ export const generateDeliveryLabelHTML = (order) => {
                 margin: 0; 
                 padding: 5mm; 
                 font-family: 'Courier New', Courier, monospace; 
-                font-size: 12px; 
+                font-size: 14px; 
                 line-height: 1.2;
                 color: #000;
                 background: #fff;
@@ -533,32 +576,32 @@ export const generateDeliveryLabelHTML = (order) => {
             .bold { font-weight: bold; }
             
             .header { margin-bottom: 15px; }
-            .brand { font-size: 20px; font-weight: 900; letter-spacing: 1px; }
-            .subtitle { font-size: 10px; margin-top: 2px; }
+            .brand { font-size: 22px; font-weight: 900; letter-spacing: 1px; }
+            .subtitle { font-size: 12px; margin-top: 2px; }
             
-            .info-line { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px; }
+            .info-line { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px; }
             
             .separator { border-bottom: 1px dashed #000; margin: 10px 0; }
             
             .customer-section { margin-bottom: 15px; border: 1px solid #000; padding: 5px; }
-            .cust-label { font-size: 8px; text-decoration: underline; margin-bottom: 3px; }
-            .cust-name { font-size: 14px; font-weight: bold; margin-bottom: 2px; }
-            .cust-addr { font-size: 10px; margin-bottom: 3px; }
+            .cust-label { font-size: 10px; text-decoration: underline; margin-bottom: 3px; }
+            .cust-name { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
+            .cust-addr { font-size: 12px; margin-bottom: 3px; }
             
             .items-header { display: flex; justify-content: space-between; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 3px; margin-bottom: 8px; }
             
             .item-entry { margin-bottom: 10px; }
-            .item-main { display: flex; justify-content: space-between; font-weight: bold; font-size: 13px; }
-            .item-sub { display: flex; justify-content: space-between; font-size: 10px; color: #333; margin-top: 1px; }
+            .item-main { display: flex; justify-content: space-between; font-weight: bold; font-size: 15px; }
+            .item-sub { display: flex; justify-content: space-between; font-size: 12px; color: #333; margin-top: 1px; }
             .item-qty { font-style: italic; }
             
             .totals { margin-top: 10px; }
-            .total-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
-            .grand-total { border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 5px 0; margin-top: 5px; font-size: 16px; font-weight: bold; }
+            .total-row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 3px; }
+            .grand-total { border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 5px 0; margin-top: 5px; font-size: 18px; font-weight: bold; }
             
-            .remark { margin-top: 10px; font-size: 10px; font-style: italic; border: 1px solid #000; padding: 5px; }
+            .remark { margin-top: 10px; font-size: 12px; font-style: italic; border: 1px solid #000; padding: 5px; }
             
-            .footer { margin-top: 20px; font-size: 10px; }
+            .footer { margin-top: 20px; font-size: 12px; }
             
             @media print {
                 body { width: 100%; padding: 2mm; }
