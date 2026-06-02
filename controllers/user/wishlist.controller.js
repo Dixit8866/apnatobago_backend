@@ -70,7 +70,8 @@ export const getWishlist = async (req, res) => {
                         const volumeName = v.volumeRef?.name ? (Object.values(v.volumeRef.name)[0]) : null;
                         const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
                         const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
-
+                        connsole.log(baseUnitName, "==baseUnitName")
+                        connsole.log(innerUnitName, "==innerUnitName")
                         return {
                             ...v,
                             volumeLabel: volumeName || v.volumeLabel,
