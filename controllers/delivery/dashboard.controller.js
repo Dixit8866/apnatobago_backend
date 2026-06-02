@@ -48,7 +48,7 @@ export const getDeliveryDashboardStats = async (req, res) => {
 
         // Define the date range for TODAY aligned to Indian Standard Time (IST) 00:00:00 to 23:59:59.999
         const { todayStart, todayEnd } = getTodayRangeIST();
-
+        conole.log(`[Delivery Dashboard]: Calculated todayStart=${todayStart.toISOString()} todayEnd=${todayEnd.toISOString()}`);
         // 1. Total Assigned Orders Today (only count active pending/assigned orders)
         const assignedOrdersCount = await OrderAssignment.count({
             where: {
@@ -60,7 +60,9 @@ export const getDeliveryDashboardStats = async (req, res) => {
                     [Op.between]: [todayStart, todayEnd]
                 }
             }
-        });
+        }); 
+
+        console.log(`[Delivery Dashboard]: Assigned orders count for today: ${assignedOrdersCount}`);
 
         if (debug) {
             const sampleAssigned = await OrderAssignment.findAll({
@@ -86,6 +88,8 @@ export const getDeliveryDashboardStats = async (req, res) => {
             }
         });
 
+        console.log(`[Delivery Dashboard]: Completed orders count for today: ${completedOrdersCount}`);
+
         if (debug) {
             const sampleCompleted = await OrderAssignment.findAll({
                 where: {
@@ -110,6 +114,8 @@ export const getDeliveryDashboardStats = async (req, res) => {
                 }
             }
         });
+
+        console.log(`[Delivery Dashboard]: Cancelled orders count for today: ${cancelledOrdersCount}`);
 
         if (debug) {
             const sampleCancelled = await OrderAssignment.findAll({
