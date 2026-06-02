@@ -32,12 +32,17 @@ export const getTodayRangeIST = () => {
  */
 export const getDeliveryDashboardStats = async (req, res) => {
     try {
+        const debug = req.query.debug === 'true';
         const deliveryBoyId = req.user.id;
         const riderName = req.user.name;
         const riderPhone = req.user.phone;
         const riderProfileImage = req.user.profileImage;
 
         logger.info(`[Delivery Dashboard]: Fetching dashboard statistics for rider ${riderName} (${deliveryBoyId})`);
+
+        if (debug) {
+            logger.info(`[Delivery Dashboard Debug]: requestQuery=${JSON.stringify(req.query)}`);
+        }
 
         // Define the date range for TODAY aligned to Indian Standard Time (IST) 00:00:00 to 23:59:59.999
         const { todayStart, todayEnd } = getTodayRangeIST();
@@ -55,6 +60,19 @@ export const getDeliveryDashboardStats = async (req, res) => {
             }
         });
 
+        if (debug) {
+            const sampleAssigned = await OrderAssignment.findAll({
+                where: {
+                    deliveryBoyId,
+                    assignedAt: { [Op.between]: [todayStart, todayEnd] }
+                },
+                limit: 5,
+                order: [['assignedAt', 'DESC']]
+            });
+            logger.info(`[Delivery Dashboard Debug]: todayStart=${todayStart.toISOString()} todayEnd=${todayEnd.toISOString()} sampleAssignedCount=${sampleAssigned.length}`);
+            logger.info(`[Delivery Dashboard Debug]: sampleAssigned=${JSON.stringify(sampleAssigned.map(a => ({ id: a.id, orderId: a.orderId, status: a.status, assignedAt: a.assignedAt })))}`);
+        }
+
         // 2. Completed Orders Today
         const completedOrdersCount = await OrderAssignment.count({
             where: {
@@ -66,6 +84,20 @@ export const getDeliveryDashboardStats = async (req, res) => {
             }
         });
 
+        if (debug) {
+            const sampleCompleted = await OrderAssignment.findAll({
+                where: {
+                    deliveryBoyId,
+                    status: 'Completed',
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                },
+                limit: 5,
+                order: [['updatedAt', 'DESC']]
+            });
+            logger.info(`[Delivery Dashboard Debug]: sampleCompletedCount=${sampleCompleted.length}`);
+            logger.info(`[Delivery Dashboard Debug]: sampleCompleted=${JSON.stringify(sampleCompleted.map(a => ({ id: a.id, orderId: a.orderId, status: a.status, updatedAt: a.updatedAt })))}`);
+        }
+
         // 3. Cancelled Orders Today
         const cancelledOrdersCount = await OrderAssignment.count({
             where: {
@@ -76,6 +108,20 @@ export const getDeliveryDashboardStats = async (req, res) => {
                 }
             }
         });
+
+        if (debug) {
+            const sampleCancelled = await OrderAssignment.findAll({
+                where: {
+                    deliveryBoyId,
+                    status: 'Cancelled',
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                },
+                limit: 5,
+                order: [['updatedAt', 'DESC']]
+            });
+            logger.info(`[Delivery Dashboard Debug]: sampleCancelledCount=${sampleCancelled.length}`);
+            logger.info(`[Delivery Dashboard Debug]: sampleCancelled=${JSON.stringify(sampleCancelled.map(a => ({ id: a.id, orderId: a.orderId, status: a.status, updatedAt: a.updatedAt })))}`);
+        }
 
         // 4. Fetch all payment transactions received by this delivery boy today
         const todayPayments = await OrderPayment.findAll({

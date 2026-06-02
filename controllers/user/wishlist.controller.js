@@ -70,12 +70,6 @@ export const getWishlist = async (req, res) => {
 
         // Backward compatibility: if page & limit are not provided (old app), return all data
         const shouldPaginate = (queryPage || queryLimit) && paginate !== 'false';
-        console.log('[Wishlist request]', {
-            userId,
-            originalUrl: req.originalUrl,
-            query: req.query,
-            shouldPaginate
-        });
 
         if (!shouldPaginate) {
             const wishlistItems = await Wishlist.findAll({
