@@ -74,8 +74,8 @@ export const getWishlist = async (req, res) => {
                         return {
                             ...v,
                             volumeLabel: volumeName || v.volumeLabel,
-                            baseUnitLabel: baseUnitName || v.baseUnitLabel,
-                            innerUnitLabel: innerUnitName || v.innerUnitLabel,
+                            baseUnitLabel: baseUnitName,
+                            innerUnitLabel: innerUnitName,
                             extra: v.extra || '',
                             extraName: v.extra || '',
                             image: v.image || itemJson.product.thumbnail,
@@ -115,8 +115,8 @@ export const getWishlist = async (req, res) => {
                         return {
                             ...v,
                             volumeLabel: volumeName || v.volumeLabel,
-                            baseUnitLabel: baseUnitName || v.baseUnitLabel,
-                            innerUnitLabel: innerUnitName || v.innerUnitLabel,
+                            baseUnitLabel: baseUnitName,
+                            innerUnitLabel: innerUnitName,
                             extra: v.extra || '',
                             extraName: v.extra || '',
                             image: v.image || itemJson.product.thumbnail,
