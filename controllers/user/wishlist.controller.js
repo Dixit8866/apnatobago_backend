@@ -24,7 +24,7 @@ export const getWishlist = async (req, res) => {
         const userLevel = req.user.applevel || null;
         const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
-
+        const debug = req.query.debug === 'true';
 
         const include = [
             {
@@ -76,9 +76,21 @@ export const getWishlist = async (req, res) => {
                 const itemJson = item.toJSON();
                 if (itemJson.product && itemJson.product.variants) {
                     itemJson.product.variants = itemJson.product.variants.map(v => {
-                        const volumeName = getVolumeLabel(v.volumeRef, v.volumeLabel);
-                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.baseUnitLabel);
-                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.innerUnitLabel);
+                        const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
+                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');
+                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.volume || '');
+                        if (debug) {
+                            console.log('[Wishlist debug] variant=', {
+                                variantId: v.id,
+                                volume: v.volume,
+                                baseUnitLabelRaw: v.baseUnitLabel,
+                                innerUnitLabelRaw: v.innerUnitLabel,
+                                baseUnitRefName: v.baseUnitRef?.name,
+                                innerUnitRefName: v.innerUnitRef?.name,
+                                resolvedBaseUnitLabel: baseUnitName,
+                                resolvedInnerUnitLabel: innerUnitName
+                            });
+                        }
                         return {
                             ...v,
                             volumeLabel: volumeName,
@@ -116,9 +128,21 @@ export const getWishlist = async (req, res) => {
                 const itemJson = item.toJSON ? item.toJSON() : item;
                 if (itemJson.product && itemJson.product.variants) {
                     itemJson.product.variants = itemJson.product.variants.map(v => {
-                        const volumeName = getVolumeLabel(v.volumeRef, v.volumeLabel);
-                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.baseUnitLabel);
-                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.innerUnitLabel);
+                        const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
+                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');
+                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.volume || '');
+                        if (debug) {
+                            console.log('[Wishlist debug] variant=', {
+                                variantId: v.id,
+                                volume: v.volume,
+                                baseUnitLabelRaw: v.baseUnitLabel,
+                                innerUnitLabelRaw: v.innerUnitLabel,
+                                baseUnitRefName: v.baseUnitRef?.name,
+                                innerUnitRefName: v.innerUnitRef?.name,
+                                resolvedBaseUnitLabel: baseUnitName,
+                                resolvedInnerUnitLabel: innerUnitName
+                            });
+                        }
 
                         return {
                             ...v,
