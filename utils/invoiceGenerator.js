@@ -604,7 +604,7 @@ export const generateDeliveryLabelHTML = (order) => {
             .footer { margin-top: 20px; font-size: 12px; }
             
             @media print {
-                body { width: 100%; padding: 2mm; }
+                body { width: 100%; padding: 4mm; }
             }
         </style>
     </head>

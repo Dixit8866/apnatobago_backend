@@ -663,61 +663,137 @@ export const getOrderDetails = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user.id;
+        const { paginate, page: queryPage, limit: queryLimit } = req.query;
 
-        const order = await Order.findOne({
-            where: { id, userId },
-            include: [
-                {
-                    model: OrderItem,
-                    as: 'items',
-                    include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        {
-                            model: ProductVariant,
-                            as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'extra'],
-                            include: [
-                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    model: SalesReturn,
-                    as: 'returns',
-                    include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        {
-                            model: ProductVariant,
-                            as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
-                            include: [
-                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        });
+        // Build the include array for OrderItem
+        const orderItemInclude = [
+            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+            {
+                model: ProductVariant,
+                as: 'variant',
+                attributes: ['id', 'volume', 'image', 'extra'],
+                include: [
+                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                ]
+            }
+        ];
 
-        if (!order) {
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
-        }
+        // Backward compatibility: if page & limit are not provided (old app), return all items
+        const shouldPaginateItems = (queryPage || queryLimit) && paginate !== 'false';
 
-        const orderData = order.toJSON ? order.toJSON() : order;
-        if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-            orderData.orderStatus = 'Delivered';
-        }
-        if (orderData.items) {
-            orderData.items = orderData.items.map(item => {
-                if (item.variant) {
-                    item.variant.extraName = item.variant.extra || '';
-                    item.variant.extra = item.variant.extra || '';
-                }
-                return item;
+        let order;
+        if (shouldPaginateItems) {
+            // Get order with paginated items
+            const pagination = getPaginationOptions(req.query);
+            const { limit, offset, page } = pagination;
+
+            // First get the order without items to get order details
+            order = await Order.findOne({
+                where: { id, userId },
+                include: [
+                    {
+                        model: SalesReturn,
+                        as: 'returns',
+                        include: [
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            {
+                                model: ProductVariant,
+                                as: 'variant',
+                                attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                                include: [
+                                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                                ]
+                            }
+                        ]
+                    }
+                ]
             });
+
+            if (!order) {
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+            }
+
+            // Get paginated items separately
+            const itemsResult = await OrderItem.findAndCountAll({
+                where: { orderId: order.id },
+                include: orderItemInclude,
+                limit,
+                offset,
+                order: [['createdAt', 'ASC']],
+                distinct: true
+            });
+
+            const orderData = order.toJSON ? order.toJSON() : order;
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                orderData.orderStatus = 'Delivered';
+            }
+
+            // Format paginated items
+            const formattedItems = itemsResult.rows.map(item => {
+                const itemData = item.toJSON ? item.toJSON() : item;
+                if (itemData.variant) {
+                    itemData.variant.extraName = itemData.variant.extra || '';
+                    itemData.variant.extra = itemData.variant.extra || '';
+                }
+                return itemData;
+            });
+
+            // Add paginated items to order data
+            orderData.items = formattedItems;
+            orderData.itemsPagination = {
+                total: itemsResult.count,
+                page,
+                limit,
+                totalPages: Math.ceil(itemsResult.count / limit)
+            };
+        } else {
+            // Get order with all items (backward compatibility)
+            order = await Order.findOne({
+                where: { id, userId },
+                include: [
+                    {
+                        model: OrderItem,
+                        as: 'items',
+                        include: orderItemInclude
+                    },
+                    {
+                        model: SalesReturn,
+                        as: 'returns',
+                        include: [
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            {
+                                model: ProductVariant,
+                                as: 'variant',
+                                attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                                include: [
+                                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            });
+
+            if (!order) {
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+            }
+
+            const orderData = order.toJSON ? order.toJSON() : order;
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                orderData.orderStatus = 'Delivered';
+            }
+            if (orderData.items) {
+                orderData.items = orderData.items.map(item => {
+                    if (item.variant) {
+                        item.variant.extraName = item.variant.extra || '';
+                        item.variant.extra = item.variant.extra || '';
+                    }
+                    return item;
+                });
+            }
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", orderData);
