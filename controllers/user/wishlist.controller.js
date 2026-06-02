@@ -137,8 +137,8 @@ export const getWishlist = async (req, res) => {
 
         const formattedResult = formatPaginatedResponse(result, page, limit);
         console.log(formattedResult, "===formattedResult")
-        if (formattedResult.items) {
-            formattedResult.items = formattedResult.items.map(item => {
+        if (formattedResult.data) {
+            formattedResult.data = formattedResult.data.map(item => {
                 const itemJson = item.toJSON ? item.toJSON() : item;
                 if (itemJson.product && itemJson.product.variants) {
                     itemJson.product.variants = itemJson.product.variants.map(v => {
