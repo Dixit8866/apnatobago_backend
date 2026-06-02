@@ -32,16 +32,18 @@ export const getTodayRangeIST = () => {
  */
 export const getDeliveryDashboardStats = async (req, res) => {
     try {
-        const debug = req.query.debug === 'true';
+        const debug = req.query.debug === 'true' || process.env.DEBUG_DELIVERY === 'true';
         const deliveryBoyId = req.user.id;
         const riderName = req.user.name;
         const riderPhone = req.user.phone;
         const riderProfileImage = req.user.profileImage;
 
+        console.log(`[Delivery Dashboard]: Fetching dashboard stats for rider ${riderName} (${deliveryBoyId}) with query:`, req.query);
+
         logger.info(`[Delivery Dashboard]: Fetching dashboard statistics for rider ${riderName} (${deliveryBoyId})`);
 
         if (debug) {
-            logger.info(`[Delivery Dashboard Debug]: requestQuery=${JSON.stringify(req.query)}`);
+            logger.info(`[Delivery Dashboard Debug]: requestQuery=${JSON.stringify(req.query)} envDebug=${process.env.DEBUG_DELIVERY === 'true'}`);
         }
 
         // Define the date range for TODAY aligned to Indian Standard Time (IST) 00:00:00 to 23:59:59.999
