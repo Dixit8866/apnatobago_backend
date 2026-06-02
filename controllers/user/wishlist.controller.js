@@ -26,6 +26,12 @@ export const getWishlist = async (req, res) => {
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
         const debug = req.query.debug === 'true';
 
+        console.log(userId, userLevel, pricingWhere);
+        console.log(paginate, queryPage, queryLimit);
+        if (debug) {
+            console.log('[Wishlist debug] request query=', req.query);
+        }
+
         const include = [
             {
                 model: Product,
@@ -64,6 +70,12 @@ export const getWishlist = async (req, res) => {
 
         // Backward compatibility: if page & limit are not provided (old app), return all data
         const shouldPaginate = (queryPage || queryLimit) && paginate !== 'false';
+        console.log('[Wishlist request]', {
+            userId,
+            originalUrl: req.originalUrl,
+            query: req.query,
+            shouldPaginate
+        });
 
         if (!shouldPaginate) {
             const wishlistItems = await Wishlist.findAll({
