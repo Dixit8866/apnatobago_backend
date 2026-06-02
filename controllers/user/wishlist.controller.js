@@ -4,6 +4,15 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 
+const getVolumeLabel = (volumeRef, fallback = '') => {
+    if (!volumeRef || !volumeRef.name) return fallback;
+    const name = volumeRef.name;
+    if (typeof name === 'string') return name;
+    if (name.en) return name.en;
+    const stringValues = Object.values(name).filter(v => typeof v === 'string');
+    return stringValues.length ? stringValues[0] : fallback;
+};
+
 /**
  * @desc    Get current user's wishlist with populated data
  * @route   GET /api/user/wishlist
@@ -67,14 +76,12 @@ export const getWishlist = async (req, res) => {
                 const itemJson = item.toJSON();
                 if (itemJson.product && itemJson.product.variants) {
                     itemJson.product.variants = itemJson.product.variants.map(v => {
-                        const volumeName = v.volumeRef?.name ? (Object.values(v.volumeRef.name)[0]) : null;
-                        const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
-                        const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
-                        connsole.log(baseUnitName, "==baseUnitName")
-                        connsole.log(innerUnitName, "==innerUnitName")
+                        const volumeName = getVolumeLabel(v.volumeRef, v.volumeLabel);
+                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.baseUnitLabel);
+                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.innerUnitLabel);
                         return {
                             ...v,
-                            volumeLabel: volumeName || v.volumeLabel,
+                            volumeLabel: volumeName,
                             baseUnitLabel: baseUnitName,
                             innerUnitLabel: innerUnitName,
                             extra: v.extra || '',
@@ -109,13 +116,13 @@ export const getWishlist = async (req, res) => {
                 const itemJson = item.toJSON ? item.toJSON() : item;
                 if (itemJson.product && itemJson.product.variants) {
                     itemJson.product.variants = itemJson.product.variants.map(v => {
-                        const volumeName = v.volumeRef?.name ? (Object.values(v.volumeRef.name)[0]) : null;
-                        const baseUnitName = v.baseUnitRef?.name ? (Object.values(v.baseUnitRef.name)[0]) : null;
-                        const innerUnitName = v.innerUnitRef?.name ? (Object.values(v.innerUnitRef.name)[0]) : null;
+                        const volumeName = getVolumeLabel(v.volumeRef, v.volumeLabel);
+                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.baseUnitLabel);
+                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.innerUnitLabel);
 
                         return {
                             ...v,
-                            volumeLabel: volumeName || v.volumeLabel,
+                            volumeLabel: volumeName,
                             baseUnitLabel: baseUnitName,
                             innerUnitLabel: innerUnitName,
                             extra: v.extra || '',
