@@ -302,6 +302,8 @@ export const getProfile = async (req, res) => {
     try {
         const userData = req.user.toJSON();
         delete userData.logintoken;
+        userData.deviceType = req.user.deviceType || null;
+        userData.version = req.user.version || null;
 
         // Sum the dueAmount for all orders of this user
         const totalDueAmount = await Order.sum('dueAmount', {
