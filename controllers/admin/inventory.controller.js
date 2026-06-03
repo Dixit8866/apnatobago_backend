@@ -62,16 +62,12 @@ async function validateGodown(godownId, transaction) {
 
 async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }) {
     const ids = [primaryUnitId, secondaryUnitId].filter(Boolean);
-    console.log(`[DEBUG validateVolumeIds] original ids:`, ids);
     const uniqueIds = [...new Set(ids)];
-    console.log(`[DEBUG validateVolumeIds] unique ids:`, uniqueIds);
     if (!uniqueIds.length) return false;
     const rows = await Volume.findAll({
         where: { id: { [Op.in]: uniqueIds }, status: 'Active' },
         transaction,
     });
-    console.log(`[DEBUG validateVolumeIds] found active volumes rows count: ${rows.length}`, rows.map(r => ({ id: r.id, name: r.name, status: r.status })));
-    return rows.length === uniqueIds.length;
 }
 
 export const getInventoryOptions = async (req, res, next) => {
@@ -444,24 +440,18 @@ export const createPurchaseTransaction = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'purchasePricePerBaseUnit must be greater than zero.');
         }
 
-        console.log(`[DEBUG createPurchase] req.body:`, JSON.stringify(req.body, null, 2));
-
         const valid = await validateProductVariant(productId, variantId, t);
         if (!valid) {
-            console.log(`[DEBUG createPurchase] Invalid product/variant: productId=${productId}, variantId=${variantId}`);
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid product/variant selection.');
         }
         const validGodown = await validateGodown(godownId, t);
         if (!validGodown) {
-            console.log(`[DEBUG createPurchase] Invalid godown: godownId=${godownId}`);
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid godown selection.');
         }
-        console.log(`[DEBUG createPurchase] validUnits check: primaryUnitId=${primaryUnitId}, secondaryUnitId=${secondaryUnitId}`);
         const validUnits = await validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction: t });
         if (!validUnits) {
-            console.log(`[DEBUG createPurchase] BLOCKED: validUnits is false for primaryUnitId=${primaryUnitId}, secondaryUnitId=${secondaryUnitId}`);
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
@@ -667,18 +657,20 @@ export const updateInventoryStock = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
 
-        const existing = await InventoryStock.findOne({
-            where: {
-                productId,
-                variantId,
-                godownId,
-                id: { [Op.ne]: stock.id },
-            },
-            transaction: t,
-        });
-        if (existing) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Stock already exists for selected product, variant and godown.');
+        if (productId !== stock.productId || variantId !== stock.variantId || godownId !== stock.godownId) {
+            const existing = await InventoryStock.findOne({
+                where: {
+                    productId,
+                    variantId,
+                    godownId,
+                    id: { [Op.ne]: stock.id },
+                },
+                transaction: t,
+            });
+            if (existing) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Stock already exists for selected product, variant and godown.');
+            }
         }
 
         const previousBaseUnits = Number(stock.totalBaseUnits || 0);

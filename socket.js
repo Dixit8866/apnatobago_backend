@@ -18,7 +18,6 @@ export const initSocket = (server) => {
         socket.on('join_admin_room', () => {
             socket.join('admin_notifications');
             logger.info(`[Socket] Client ${socket.id} joined admin_notifications room`);
-            console.log(`[Socket] Client ${socket.id} joined admin_notifications room`);
         });
 
         socket.on('disconnect', () => {
@@ -41,7 +40,6 @@ export const getIO = () => {
  */
 export const emitAdminNotification = (notification) => {
     if (io) {
-        console.log('Emitting admin notification:', notification.title);
         io.to('admin_notifications').emit('new_admin_notification', notification);
     } else {
         console.log('IO not initialized, cannot emit notification');

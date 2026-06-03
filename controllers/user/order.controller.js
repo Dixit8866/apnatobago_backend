@@ -519,7 +519,6 @@ export const createOrder = async (req, res) => {
 
         // 9. Trigger Admin Notification (Real-time)
         try {
-            console.log('Creating AdminNotification for Order:', newOrder.orderId);
             const adminNotify = await AdminNotification.create({
                 title: 'New Order Received!',
                 message: `User ${userData.fullname} has placed a new order #${newOrder.orderId} of ₹${newOrder.totalAmount}.`,
@@ -527,7 +526,6 @@ export const createOrder = async (req, res) => {
                 referenceId: newOrder.id,
                 clickAction: `/sales/user-orders`
             });
-            console.log('AdminNotification created successfully:', adminNotify.id);
             emitAdminNotification(adminNotify);
         } catch (notifyErr) {
             console.error('[Admin Notification Error]:', notifyErr);

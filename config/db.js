@@ -45,8 +45,6 @@ const sequelize = new Sequelize(
 export const connectDB = async () => {
     try {
         await sequelize.authenticate();
-        console.log(`[Database] PostgreSQL Connected Successfully (${process.env.NODE_ENV} mode)`);
-        console.log(`[Database] Host: ${process.env.DB_HOST}:${process.env.DB_PORT} | DB: ${process.env.DB_NAME}`);
     } catch (error) {
         console.error(`[Database Error] Unable to connect to PostgreSQL: ${error.message}`);
         process.exit(1);

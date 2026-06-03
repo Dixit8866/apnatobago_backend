@@ -136,11 +136,8 @@ function normalizeVariantPricings(variant) {
 }
 
 export const createProduct = async (req, res, next) => {
-    console.log('[Product API] createProduct CALLED');
     const t = await sequelize.transaction();
     try {
-        console.log('[Product API Create] Payload variants:', JSON.stringify(req.body.variants, null, 2));
-
         const {
             name,
             thumbnail,
@@ -601,11 +598,8 @@ export const getProductById = async (req, res, next) => {
 };
 
 export const updateProduct = async (req, res, next) => {
-    console.log('[Product API] updateProduct CALLED for ID:', req.params.id);
     const t = await sequelize.transaction();
     try {
-        console.log('[Product API Update] Payload variants:', JSON.stringify(req.body.variants, null, 2));
-
         const {
             name,
             thumbnail,

@@ -297,12 +297,6 @@ export const addToCart = async (req, res) => {
         const userId = req.user.id;
         const { productId, variantId, quantity } = req.body;
 
-        console.log(`\n[DEBUG addToCart] ───────────────────────────────`);
-        console.log(`[DEBUG addToCart] userId=${userId}`);
-        console.log(`[DEBUG addToCart] productId=${productId}`);
-        console.log(`[DEBUG addToCart] variantId=${variantId}`);
-        console.log(`[DEBUG addToCart] quantity=${quantity}`);
-
         if (!productId || !variantId || quantity === undefined) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide product, variant and quantity");
         }
@@ -316,7 +310,6 @@ export const addToCart = async (req, res) => {
         });
         let resolvedVariantId = variantId;
         if (!variant) {
-            console.log(`[DEBUG addToCart] Variant not found (active), checking soft-deleted...`);
             const deletedVariant = await ProductVariant.findByPk(variantId, { paranoid: false });
             if (deletedVariant) {
                 let activeVariant = await ProductVariant.findOne({
@@ -345,21 +338,13 @@ export const addToCart = async (req, res) => {
                 if (activeVariant) {
                     variant = activeVariant;
                     resolvedVariantId = activeVariant.id;
-                    console.log(`[DEBUG addToCart] Resolved to active variant: ${resolvedVariantId}`);
                 }
             }
         }
 
         if (!variant) {
-            console.log(`[DEBUG addToCart] ERROR: No variant found at all`);
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found");
         }
-
-        console.log(`[DEBUG addToCart] variant.id=${variant.id}`);
-        console.log(`[DEBUG addToCart] variant.volume=${variant.volume}`);
-        console.log(`[DEBUG addToCart] variant.baseUnitsPerPack=${variant.baseUnitsPerPack}`);
-        console.log(`[DEBUG addToCart] variant.sellingVolume=${variant.sellingVolume}`);
-        console.log(`[DEBUG addToCart] variant.status=${variant.status}`);
 
         const bUPP = Number(variant.baseUnitsPerPack || 1);
         const qtyToAdd = Number(quantity);
@@ -396,16 +381,7 @@ export const addToCart = async (req, res) => {
         // Check stock first — sum across ALL godowns
         const availableStock = await getAvailableStock(productId);
 
-        console.log(`[DEBUG addToCart] bUPP=${bUPP}`);
-        console.log(`[DEBUG addToCart] currentCartQty=${currentCartQty}`);
-        console.log(`[DEBUG addToCart] totalProposedQty=${totalProposedQty}`);
-        console.log(`[DEBUG addToCart] sellingVolume=${variant.sellingVolume}`);
-        console.log(`[DEBUG addToCart] deductionRequired=${deductionRequired}`);
-        console.log(`[DEBUG addToCart] availableStock (all godowns)=${availableStock}`);
-        console.log(`[DEBUG addToCart] PASS? ${deductionRequired} <= ${availableStock} = ${deductionRequired <= availableStock}`);
-
         if (deductionRequired > availableStock) {
-            console.log(`[DEBUG addToCart] BLOCKED: deductionRequired(${deductionRequired}) > availableStock(${availableStock})`);
             const productName = typeof variant.product?.name === 'object'
                 ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')
                 : (variant.product?.name || 'Product');
@@ -456,8 +432,6 @@ export const addToCart = async (req, res) => {
                 quantity: Number(quantity)
             });
         }
-
-        console.log(`[DEBUG addToCart] SUCCESS — cart updated`);
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart updated successfully", cartItem);
     } catch (error) {
         logger.error(`Error in addToCart: ${error.message}`);

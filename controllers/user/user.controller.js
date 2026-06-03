@@ -57,12 +57,7 @@ const sendSMS = async (fullNumber, otp) => {
         const urlParams = new URLSearchParams(smsParams).toString();
         const fullUrl = `${baseURL}?${urlParams}`;
 
-        console.log(`[SMS Debug] Sending OTP to: ${cleanNumber}`);
-        console.log(`[SMS Debug] Using DLT Template Text: ${text}`);
-        console.log(`[SMS Debug] Full URL: ${fullUrl}`);
-
         const response = await axios.get(fullUrl);
-        console.log(`[SMS Debug] API Response:`, response.data);
         
         return true;
     } catch (smsError) {
@@ -80,7 +75,6 @@ const sendSMS = async (fullNumber, otp) => {
 export const sendOtp = async (req, res) => {
     try {
         const { number } = req.body;
-        console.log(`[Auth Debug] sendOtp called for number: ${number}`);
 
         if (!number) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number");
@@ -97,7 +91,6 @@ export const sendOtp = async (req, res) => {
                  fullNumber = `${pureDialcode}${number}`;
              }
         }
-        console.log(`[Auth Debug] Full number for OTP: ${fullNumber}`);
 
         let otp = Math.floor(100000 + Math.random() * 900000).toString();
         const isTest = isTestNumber(number);
@@ -107,7 +100,6 @@ export const sendOtp = async (req, res) => {
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-        console.log(`[Auth Debug] OTP generated: ${otp}`);
 
         if (!isTest) {
             await sendSMS(fullNumber, otp);
@@ -129,7 +121,6 @@ export const sendOtp = async (req, res) => {
 export const verifyOtp = async (req, res) => {
     try {
         const { number, otp } = req.body;
-        console.log(`[Auth Debug] verifyOtp called - Number: ${number}, OTP: ${otp}`);
 
         if (!number || !otp) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number and OTP");
@@ -144,7 +135,6 @@ export const verifyOtp = async (req, res) => {
         });
 
         if (!otpRecord) {
-            console.log(`[Auth Debug] OTP Verification Failed`);
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired OTP");
         }
 
@@ -157,7 +147,6 @@ export const verifyOtp = async (req, res) => {
         const token = generateToken(user.id);
         user.logintoken = token;
         await user.save();
-        console.log(`[Auth Debug] User ${number} status updated to Active and token generated`);
 
         await OTP.destroy({ where: { number } });
 
@@ -192,7 +181,6 @@ export const verifyOtp = async (req, res) => {
 export const registerUser = async (req, res) => {
     try {
         const { fullname, dialcode, number, fcmtoken } = req.body;
-        console.log(`[Auth Debug] registerUser called - Number: ${number}`);
 
         if (!fullname || !dialcode || !number) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
@@ -223,8 +211,6 @@ export const registerUser = async (req, res) => {
         });
 
         if (user) {
-            console.log(`[Auth Debug] User record created. Sending OTP...`);
-            
             const pureDialcode = dialcode.replace('+', '');
             const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
             
@@ -268,7 +254,6 @@ export const registerUser = async (req, res) => {
 export const loginUser = async (req, res) => {
     try {
         const { number, dialcode = '+91', fcmtoken } = req.body;
-        console.log(`[Auth Debug] loginUser called - Number: ${number}`);
 
         if (!number) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide mobile number");
@@ -280,7 +265,6 @@ export const loginUser = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "User not registered with this mobile number");
         }
 
-        console.log(`[Auth Debug] User found. Sending login OTP...`);
         const pureDialcode = (dialcode || user.dialcode || '+91').replace('+', '');
         const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
         

@@ -168,15 +168,6 @@ export const getCompanyCategoryById = async (req, res, next) => {
         if (!category) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Company Category not found.");
         const result = category.toJSON();
 
-        // DEBUG: Log what we send back to frontend
-        console.log('[GET_BY_ID] Company Category fetched:', {
-            id:             result.id,
-            mainCategoryId: result.mainCategoryId,
-            subCategoryId:  result.subCategoryId,
-            mainCategory:   result.mainCategory,
-            subCategory:    result.subCategory,
-        });
-
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category fetched successfully.", result);
     } catch (error) {
         next(error);
