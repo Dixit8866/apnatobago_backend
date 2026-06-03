@@ -31,6 +31,7 @@ const seedAdmin = async () => {
                 role: 'superadmin',
                 status: 'Active'
             });
+            console.log('[Seed] SuperAdmin created successfully ✓');
         }
     } catch (error) {
         console.error('[Seed Error] Failed to seed admin:', error.message);
@@ -52,6 +53,10 @@ const startServer = async () => {
         
         // Seed SuperAdmin if database is empty
         // await seedAdmin();
+        server.listen(PORT, '0.0.0.0', () => {
+            console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+            console.log(`[Network] Access at http://192.168.1.50:${PORT}`);
+        });
     } catch (error) {
         console.error(`[Server Error] Failed to start server:`, error.message);
         process.exit(1);
@@ -62,5 +67,6 @@ startServer();
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
+    console.log(`[Error] Unhandled Rejection: ${err.message}`);
     server.close(() => process.exit(1));
 });
