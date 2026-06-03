@@ -19,6 +19,10 @@ const AppSettings = sequelize.define('AppSettings', {
         type: DataTypes.DECIMAL(10, 2),
         defaultValue: 10000,
     },
+    supportPhoneNumber: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     androidVersion: {
         type: DataTypes.STRING,
         defaultValue: '1.0.0',
@@ -30,6 +34,22 @@ const AppSettings = sequelize.define('AppSettings', {
     forceUpdate: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
+    },
+    deliveryAndroidVersion: {
+        type: DataTypes.STRING,
+        defaultValue: '1.0.0',
+    },
+    deliveryIosVersion: {
+        type: DataTypes.STRING,
+        defaultValue: '1.0.0',
+    },
+    deliveryForceUpdate: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    deliveryRoundSchedules: {
+        type: DataTypes.JSONB,
+        defaultValue: [],
     },
     razorpayKeyId: {
         type: DataTypes.STRING,

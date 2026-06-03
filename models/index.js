@@ -272,7 +272,12 @@ const runManualMigrations = async () => {
         // Add mainCategoryId to banners
         await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "mainCategoryId" UUID REFERENCES main_categories(id) ON DELETE SET NULL');
 
-        // Add timing fields to app_settings
+        // Add timing and app settings fields to app_settings
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "supportPhoneNumber" VARCHAR(255)');
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryAndroidVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryIosVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryForceUpdate" BOOLEAN DEFAULT false');
+        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryRoundSchedules" JSONB DEFAULT \'[]\'');
         await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryStart" VARCHAR(255) DEFAULT \'08:00\'');
         await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryEnd" VARCHAR(255) DEFAULT \'13:00\'');
         await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryStart" VARCHAR(255) DEFAULT \'15:00\'');
