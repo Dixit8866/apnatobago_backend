@@ -397,7 +397,7 @@ export const getProducts = async (req, res, next) => {
             }
         } else {
             if (status === 'Low Stock') {
-                whereWithFilters.status = { [Op.ne]: 'Deleted' };
+                whereWithFilters.status = 'Active';
                 whereWithFilters[Op.and] = [
                     ...(searchWhere[Op.and] || []),
                     sequelize.literal(`${stockSubquery} = 0`)
@@ -462,7 +462,7 @@ export const getProducts = async (req, res, next) => {
             const lowStockVal = await Product.count({
                 where: {
                     ...countBaseWhere,
-                    status: { [Op.ne]: 'Deleted' },
+                    status: 'Active',
                     [Op.and]: [
                         ...(countBaseWhere[Op.and] || []),
                         sequelize.literal(`${stockSubquery} = 0`)

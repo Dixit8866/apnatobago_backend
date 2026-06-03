@@ -3,6 +3,7 @@ import {
     createOrder, 
     getOrders, 
     getOrderDetails, 
+    getOrderDetailsV2,
     cancelOrder,
     getOrdersWithPaymentStatus,
     initializeRazorpayOrder,
@@ -18,6 +19,7 @@ router.use(protectUser);
 router.post('/', createOrder);
 router.get('/', getOrders);
 router.get('/payment-status', getOrdersWithPaymentStatus);
+router.get('/:id/order-details', getOrderDetailsV2);
 router.get('/:id', getOrderDetails);
 router.put('/:id/cancel', cancelOrder);
 

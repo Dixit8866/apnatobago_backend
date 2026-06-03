@@ -402,6 +402,7 @@ export const updateOrderStatus = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
+        const prevStatus = order.orderStatus;
         if (orderStatus) {
             const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
             if (!validStatuses.includes(orderStatus)) {
@@ -437,24 +438,64 @@ export const updateOrderStatus = async (req, res) => {
                     );
                 }
 
-                // Restore inventory stock for all order items
-                const orderItemsToRestore = await OrderItem.findAll({ where: { orderId: order.id } });
-                for (const item of orderItemsToRestore) {
-                    const variant = await ProductVariant.findByPk(item.variantId);
-                    const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                    const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                    const baseUnitsToRestore = item.sellUnit === 'Inner'
-                        ? Number(item.quantity)
-                        : Number(item.quantity) * sellingVolume * bUPP;
+                // If the order was already shipped, convert cancel into SalesReturn entries (Pending)
+                // and DO NOT restore inventory until admin approves the sales return.
+                if (prevStatus === 'Shipping') {
+                    // Create sales return entries for all order items and remove them
+                    const assignment = await OrderAssignment.findOne({ where: { orderId: order.id } });
+                    const deliveryBoyId = assignment ? assignment.deliveryBoyId : null;
+                    let totalReturnAmount = 0;
 
-                    logger.info(`[Admin Cancel Restore]: orderId=${order.id}, productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
+                    const orderItemsToProcess = await OrderItem.findAll({ where: { orderId: order.id } });
+                    for (const item of orderItemsToProcess) {
+                        const returnQty = Number(item.quantity);
+                        const returnAmount = Number(item.price) * returnQty;
 
-                    const stock = await InventoryStock.findOne({
-                        where: { productId: item.productId },
-                        order: [['createdAt', 'DESC']]
-                    });
-                    if (stock) {
-                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                        await SalesReturn.create({
+                            orderId: order.id,
+                            userId: order.userId,
+                            deliveryBoyId,
+                            productId: item.productId,
+                            variantId: item.variantId,
+                            volumeId: item.volumeId || null,
+                            quantity: returnQty,
+                            price: item.price,
+                            returnAmount,
+                            reason: 'Cancelled after shipping (Admin)',
+                            status: 'Pending'
+                        });
+
+                        totalReturnAmount += returnAmount;
+                        await item.destroy();
+                    }
+
+                    // Recalculate order totals
+                    const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
+                    let newSubtotal = 0;
+                    for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
+                    order.totalAmount = newSubtotal + (Number(order.deliveryCharge) || 0);
+                    order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
+                    await order.save();
+                } else {
+                    // Restore inventory stock for all order items (existing behaviour)
+                    const orderItemsToRestore = await OrderItem.findAll({ where: { orderId: order.id } });
+                    for (const item of orderItemsToRestore) {
+                        const variant = await ProductVariant.findByPk(item.variantId);
+                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                        const baseUnitsToRestore = item.sellUnit === 'Inner'
+                            ? Number(item.quantity)
+                            : Number(item.quantity) * sellingVolume * bUPP;
+
+                        logger.info(`[Admin Cancel Restore]: orderId=${order.id}, productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
+
+                        const stock = await InventoryStock.findOne({
+                            where: { productId: item.productId },
+                            order: [['createdAt', 'DESC']]
+                        });
+                        if (stock) {
+                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                        }
                     }
                 }
             }
@@ -539,26 +580,63 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             { where: { id: orderIds } }
         );
 
-        // If cancelling, restore inventory stock for each order
+        // If cancelling, process each order: for shipped orders create SalesReturn (pending), otherwise restore inventory
         if (orderStatus === 'Cancelled') {
+            const OrderAssignment = Order.sequelize.models.OrderAssignment;
             for (const cancelOrder of ordersToCancel) {
                 if (!cancelOrder.items || cancelOrder.items.length === 0) continue;
-                for (const item of cancelOrder.items) {
-                    const variant = await ProductVariant.findByPk(item.variantId);
-                    const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                    const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                    const baseUnitsToRestore = item.sellUnit === 'Inner'
-                        ? Number(item.quantity)
-                        : Number(item.quantity) * sellingVolume * bUPP;
 
-                    logger.info(`[Admin Bulk Cancel Restore]: orderId=${cancelOrder.id}, productId=${item.productId}, qty=${item.quantity}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
+                if (cancelOrder.orderStatus === 'Shipping') {
+                    // Create sales returns and remove items
+                    const assignment = OrderAssignment ? await OrderAssignment.findOne({ where: { orderId: cancelOrder.id } }) : null;
+                    const deliveryBoyId = assignment ? assignment.deliveryBoyId : null;
+                    let totalReturn = 0;
+                    for (const item of cancelOrder.items) {
+                        const returnQty = Number(item.quantity);
+                        const returnAmount = Number(item.price) * returnQty;
+                        await SalesReturn.create({
+                            orderId: cancelOrder.id,
+                            userId: cancelOrder.userId,
+                            deliveryBoyId,
+                            productId: item.productId,
+                            variantId: item.variantId,
+                            volumeId: item.volumeId || null,
+                            quantity: returnQty,
+                            price: item.price,
+                            returnAmount,
+                            reason: 'Cancelled after shipping (Bulk Admin)',
+                            status: 'Pending'
+                        });
+                        totalReturn += returnAmount;
+                        await OrderItem.destroy({ where: { id: item.id } });
+                    }
 
-                    const stock = await InventoryStock.findOne({
-                        where: { productId: item.productId },
-                        order: [['createdAt', 'DESC']]
-                    });
-                    if (stock) {
-                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                    // Recalculate order totals
+                    const remaining = await OrderItem.findAll({ where: { orderId: cancelOrder.id } });
+                    let newSubtotal = 0;
+                    for (const it of remaining) newSubtotal += Number(it.price) * Number(it.quantity);
+                    const orderRecord = await Order.findByPk(cancelOrder.id);
+                    orderRecord.totalAmount = newSubtotal + (Number(orderRecord.deliveryCharge) || 0);
+                    orderRecord.dueAmount = Math.max(0, orderRecord.dueAmount - totalReturn);
+                    await orderRecord.save();
+                } else {
+                    for (const item of cancelOrder.items) {
+                        const variant = await ProductVariant.findByPk(item.variantId);
+                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                        const baseUnitsToRestore = item.sellUnit === 'Inner'
+                            ? Number(item.quantity)
+                            : Number(item.quantity) * sellingVolume * bUPP;
+
+                        logger.info(`[Admin Bulk Cancel Restore]: orderId=${cancelOrder.id}, productId=${item.productId}, qty=${item.quantity}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
+
+                        const stock = await InventoryStock.findOne({
+                            where: { productId: item.productId },
+                            order: [['createdAt', 'DESC']]
+                        });
+                        if (stock) {
+                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
+                        }
                     }
                 }
             }

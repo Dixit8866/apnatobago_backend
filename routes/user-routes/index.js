@@ -56,7 +56,7 @@ router.get('/products/main-category/:id', protectUser, getProductsByMainCategory
 router.get('/products/sub-category/:id', protectUser, getProductsBySubCategory);
 router.get('/products/company-category/:id', protectUser, getProductsByCompanyCategory);
 router.get('/banners', optionalProtectUser, getBanners);
-router.get('/settings', protectUser, getAppSettings);
+router.get('/settings', getAppSettings);
 router.get('/search', protectUser, searchCatalogue);
 
 // Cart

@@ -12,9 +12,19 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 /**
  * Generate a unique human-readable Order ID
  */
-const generateUniqueOrderId = () => {
-    const random = Math.floor(10000 + Math.random() * 90000);
-    return `ORD-${random}`;
+const generateUniqueOrderId = async () => {
+    const lastOrder = await Order.findOne({
+        order: [['createdAt', 'DESC']],
+        attributes: ['orderId']
+    });
+
+    if (!lastOrder || !lastOrder.orderId) {
+        return '1001';
+    }
+
+    const numericPart = Number(lastOrder.orderId.replace(/\D/g, ''));
+    const nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
+    return `${nextId}`;
 };
 
 /**
@@ -351,7 +361,7 @@ export const createOrder = async (req, res) => {
 
         // 5. Create the Order
         const newOrder = await Order.create({
-            orderId: generateUniqueOrderId(),
+            orderId: await generateUniqueOrderId(),
             userId,
             totalAmount: finalTotal,
             paidAmount: paymentStatus === 'Paid' ? finalTotal : 0,
@@ -803,6 +813,158 @@ export const getOrderDetails = async (req, res) => {
     }
 };
 
+const normalizeOrderItem = (item) => {
+    const itemData = item.toJSON ? item.toJSON() : item;
+    if (itemData.variant) {
+        itemData.variant.extraName = itemData.variant.extra || '';
+        itemData.variant.extra = itemData.variant.extra || '';
+    }
+    return itemData;
+};
+
+const formatOrderItems = (items) => {
+    return (items || []).map(normalizeOrderItem);
+};
+
+export const getOrderDetailsV2 = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user.id;
+        const { paginate, page: queryPage, limit: queryLimit } = req.query;
+
+        const orderItemInclude = [
+            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+            {
+                model: ProductVariant,
+                as: 'variant',
+                attributes: ['id', 'volume', 'image', 'extra'],
+                include: [
+                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                ]
+            }
+        ];
+
+        const shouldPaginateItems = (queryPage || queryLimit) && paginate !== 'false';
+
+        let order;
+        let items = [];
+        let itemsPagination = null;
+
+        if (shouldPaginateItems) {
+            const pagination = getPaginationOptions(req.query);
+            const { limit, offset, page } = pagination;
+
+            order = await Order.findOne({
+                where: { id, userId },
+                include: [
+                    {
+                        model: SalesReturn,
+                        as: 'returns',
+                        include: [
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            {
+                                model: ProductVariant,
+                                as: 'variant',
+                                attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                                include: [
+                                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            });
+
+            if (!order) {
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+            }
+
+            const itemsResult = await OrderItem.findAndCountAll({
+                where: { orderId: order.id },
+                include: orderItemInclude,
+                limit,
+                offset,
+                order: [['createdAt', 'ASC']],
+                distinct: true
+            });
+
+            const orderData = order.toJSON ? order.toJSON() : order;
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                orderData.orderStatus = 'Delivered';
+            }
+
+            items = formatOrderItems(itemsResult.rows);
+            itemsPagination = {
+                total: itemsResult.count,
+                page,
+                limit,
+                totalPages: Math.ceil(itemsResult.count / limit)
+            };
+
+            const orderDetails = { ...orderData };
+            delete orderDetails.items;
+            delete orderDetails.itemsPagination;
+
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
+                orderDetails,
+                items,
+                itemsPagination
+            });
+        }
+
+        order = await Order.findOne({
+            where: { id, userId },
+            include: [
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: orderItemInclude
+                },
+                {
+                    model: SalesReturn,
+                    as: 'returns',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const orderData = order.toJSON ? order.toJSON() : order;
+        if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+            orderData.orderStatus = 'Delivered';
+        }
+
+        items = formatOrderItems(orderData.items || []);
+
+        const orderDetails = { ...orderData };
+        delete orderDetails.items;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
+            orderDetails,
+            items
+        });
+    } catch (error) {
+        logger.error(`[Get Order Details Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
 /**
  * @desc    Cancel an order
  * @route   PUT /api/user/orders/:id/cancel
@@ -835,66 +997,109 @@ export const cancelOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Cannot cancel order that is already '${order.orderStatus}'.`);
         }
 
+        const prevStatus = order.orderStatus;
+
         order.orderStatus = 'User Cancel';
         order.dueAmount = 0;
         order.notes = order.notes ? `${order.notes}\n[Customer Cancelled]` : `[Customer Cancelled]`;
         await order.save();
 
-        // Restore stock for all items
-        if (order.items && order.items.length > 0) {
-            for (const item of order.items) {
-                const variant = await ProductVariant.findByPk(item.variantId, {
-                    include: [{ model: Product, as: 'product' }]
+        // If the order was already shipped, convert cancel into Sales Return entries (Pending)
+        // and DO NOT restore inventory until admin approves the sales return.
+        if (prevStatus === 'Shipping') {
+            // Create SalesReturn entries for all items and remove them from order items
+            const assignment = await Order.sequelize.models.OrderAssignment?.findOne({ where: { orderId: order.id } });
+            const deliveryBoyId = assignment ? assignment.deliveryBoyId : null;
+
+            let totalReturnAmount = 0;
+            for (const item of order.items || []) {
+                const returnQty = Number(item.quantity);
+                const returnAmount = Number(item.price) * returnQty;
+
+                await SalesReturn.create({
+                    orderId: order.id,
+                    userId: order.userId,
+                    deliveryBoyId,
+                    productId: item.productId,
+                    variantId: item.variantId,
+                    volumeId: item.volumeId || null,
+                    quantity: returnQty,
+                    price: item.price,
+                    returnAmount,
+                    reason: 'Cancelled after shipping',
+                    status: 'Pending'
                 });
 
-                if (variant?.product?.isCombo) {
-                    const comboProducts = [
-                        variant.product.comboProduct1Id,
-                        variant.product.comboProduct2Id
-                    ];
-                    for (const cpId of comboProducts) {
-                        const compVariant = await ProductVariant.findOne({
-                            where: { 
-                                productId: cpId,
-                                ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                totalReturnAmount += returnAmount;
+
+                // Remove the order item
+                await OrderItem.destroy({ where: { id: item.id } });
+            }
+
+            // Recalculate order totals
+            const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
+            let newSubtotal = 0;
+            for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
+            order.totalAmount = newSubtotal + (Number(order.deliveryCharge) || 0);
+            order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
+            await order.save();
+        } else {
+            // Restore stock for all items (existing behaviour)
+            if (order.items && order.items.length > 0) {
+                for (const item of order.items) {
+                    const variant = await ProductVariant.findByPk(item.variantId, {
+                        include: [{ model: Product, as: 'product' }]
+                    });
+
+                    if (variant?.product?.isCombo) {
+                        const comboProducts = [
+                            variant.product.comboProduct1Id,
+                            variant.product.comboProduct2Id
+                        ];
+                        for (const cpId of comboProducts) {
+                            const compVariant = await ProductVariant.findOne({
+                                where: { 
+                                    productId: cpId,
+                                    ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                                }
+                            }) || await ProductVariant.findOne({
+                                where: { productId: cpId }
+                            });
+
+                            if (!compVariant) continue;
+
+                            const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
+                            const compSellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                            const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
+                                ? Number(item.quantity)
+                                : Number(item.quantity) * compSellingVolume * compBUPP);
+
+                            logger.info(`[Cancel Order Restore Combo]: comboProductId=${cpId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, compSellingVolume=${compSellingVolume}, compBUPP=${compBUPP}, restoring=${baseUnitsToRestore} base units`);
+
+                            const stock = await InventoryStock.findOne({
+                                where: { productId: cpId },
+                                order: [['createdAt', 'DESC']]
+                            });
+                            if (stock) {
+                                await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
                             }
-                        }) || await ProductVariant.findOne({
-                            where: { productId: cpId }
-                        });
+                        }
+                    } else {
+                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
+                            ? Number(item.quantity) 
+                            : Number(item.quantity) * sellingVolume * bUPP);
 
-                        if (!compVariant) continue;
-
-                        const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
-                        const compSellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
-                            ? Number(item.quantity)
-                            : Number(item.quantity) * compSellingVolume * compBUPP);
-
-                        logger.info(`[Cancel Order Restore Combo]: comboProductId=${cpId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, compSellingVolume=${compSellingVolume}, compBUPP=${compBUPP}, restoring=${baseUnitsToRestore} base units`);
+                        logger.info(`[Cancel Order Restore]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore} base units`);
 
                         const stock = await InventoryStock.findOne({
-                            where: { productId: cpId },
+                            where: { productId: item.productId },
                             order: [['createdAt', 'DESC']]
                         });
                         if (stock) {
                             await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
                         }
-                    }
-                } else {
-                    const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                    const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                    const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
-                        ? Number(item.quantity) 
-                        : Number(item.quantity) * sellingVolume * bUPP);
-
-                    logger.info(`[Cancel Order Restore]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore} base units`);
-
-                    const stock = await InventoryStock.findOne({
-                        where: { productId: item.productId },
-                        order: [['createdAt', 'DESC']]
-                    });
-                    if (stock) {
-                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
                     }
                 }
             }
