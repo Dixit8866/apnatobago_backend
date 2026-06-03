@@ -68,6 +68,7 @@ async function validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction }
         where: { id: { [Op.in]: uniqueIds }, status: 'Active' },
         transaction,
     });
+    return rows.length === uniqueIds.length;
 }
 
 export const getInventoryOptions = async (req, res, next) => {
