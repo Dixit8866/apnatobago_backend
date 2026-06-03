@@ -549,3 +549,41 @@ export const changePassword = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
 };
+
+/**
+ * @desc    Update user's device type and version
+ * @route   POST /api/user/device-info
+ * @access  Public
+ */
+export const updateDeviceInfo = async (req, res) => {
+    try {
+        const { userId, deviceType, version } = req.body;
+
+        if (!userId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide userId");
+        }
+
+        const user = await User.findByPk(userId);
+        if (!user || user.status === 'Deleted') {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+        }
+
+        if (deviceType !== undefined) {
+            user.deviceType = deviceType;
+        }
+        if (version !== undefined) {
+            user.version = version;
+        }
+
+        await user.save();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Device info updated successfully", {
+            userId: user.id,
+            deviceType: user.deviceType,
+            version: user.version
+        });
+    } catch (error) {
+        logger.error(`[Update Device Info Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
+    }
+};

@@ -248,6 +248,10 @@ const runManualMigrations = async () => {
         // Add latitude and longitude to users table
         await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "longitude" DECIMAL(15, 10)');
         
+        // Add deviceType and version to users table
+        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deviceType" VARCHAR(255)');
+        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "version" VARCHAR(255)');
+        
         // Add minQty and maxQty to product_variants
         await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "minQty" DECIMAL(10, 2)');
         await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "maxQty" DECIMAL(10, 2)');

@@ -10,7 +10,8 @@ import {
     editProfile,
     forgotPassword,
     resetPassword,
-    changePassword
+    changePassword,
+    updateDeviceInfo
 } from '../../controllers/user/user.controller.js';
 import {
     getMainCategories,
@@ -39,6 +40,7 @@ router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
+router.post('/device-info', updateDeviceInfo);
 
 // Profile and Account
 router.get('/profile', protectUser, getProfile);

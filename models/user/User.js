@@ -85,6 +85,14 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(15, 10),
         allowNull: true,
     },
+    deviceType: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    version: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     credit: {
         type: DataTypes.VIRTUAL,
         get() {
