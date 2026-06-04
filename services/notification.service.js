@@ -75,19 +75,33 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
         }
 
         const notificationType = data.type || 'reminder';
-        const androidSound = notificationType === 'reminder' ? 'reminder' : 'otherNotification';
-        const androidChannelId = notificationType === 'reminder' ? 'reminder_channel' : 'other_notification_channel';
-        const apnsSound = notificationType === 'reminder' ? 'reminder.mp3' : 'otherNotification.mp3';
 
+        let androidSound = 'otherNotification';
+        let androidChannelId = 'other_notification_channel';
+        let apnsSound = 'otherNotification.mp3';
         let clickActionValue = 'FLUTTER_NOTIFICATION_CLICK';
         let actionValue = null;
 
         switch (notificationType) {
             case 'reminder':
+                androidSound = 'reminder';
+                androidChannelId = 'reminder_channel';
+                apnsSound = 'reminder.mp3';
                 clickActionValue = 'categories';
                 actionValue = 'categories';
                 break;
+            case 'shipping':
+                androidSound = 'otherNotification';
+                androidChannelId = 'shipping_notification_channel';
+                apnsSound = 'otherNotification.mp3';
+                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
+                actionValue = data.action || 'shipping';
+                break;
+            case 'other':
             default:
+                androidSound = 'otherNotification';
+                androidChannelId = 'other_notification_channel';
+                apnsSound = 'otherNotification.mp3';
                 clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
                 actionValue = data.action || null;
                 break;
@@ -152,19 +166,33 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
         }
 
         const notificationType = data.type || 'reminder';
-        const androidSound = notificationType === 'reminder' ? 'reminder' : 'otherNotification';
-        const androidChannelId = notificationType === 'reminder' ? 'reminder_channel' : 'other_notification_channel';
-        const apnsSound = notificationType === 'reminder' ? 'reminder.mp3' : 'otherNotification.mp3';
 
+        let androidSound = 'otherNotification';
+        let androidChannelId = 'other_notification_channel';
+        let apnsSound = 'otherNotification.mp3';
         let clickActionValue = 'FLUTTER_NOTIFICATION_CLICK';
         let actionValue = null;
 
         switch (notificationType) {
             case 'reminder':
+                androidSound = 'reminder';
+                androidChannelId = 'reminder_channel';
+                apnsSound = 'reminder.mp3';
                 clickActionValue = 'categories';
                 actionValue = 'categories';
                 break;
+            case 'shipping':
+                androidSound = 'otherNotification';
+                androidChannelId = 'shipping_notification_channel';
+                apnsSound = 'otherNotification.mp3';
+                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
+                actionValue = data.action || 'shipping';
+                break;
+            case 'other':
             default:
+                androidSound = 'otherNotification';
+                androidChannelId = 'other_notification_channel';
+                apnsSound = 'otherNotification.mp3';
                 clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
                 actionValue = data.action || null;
                 break;
