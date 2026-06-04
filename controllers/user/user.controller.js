@@ -207,7 +207,7 @@ export const registerUser = async (req, res) => {
             showtabacco: false,
             creditline: 0,
             orderReminder: true,
-            reminderTime: '21:00',
+            reminderTime: '15:20',
             status: 'Inactive',
             kycverification: 'pending'
         });

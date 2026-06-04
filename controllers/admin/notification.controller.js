@@ -20,13 +20,13 @@ export const sendNotification = async (req, res) => {
 
         let result;
         if (type === 'TOPIC') {
-            result = await sendToTopic(target, title, body, imageUrl, { clickAction });
+            result = await sendToTopic(target, title, body, imageUrl, { clickAction, type: 'other' });
         } else if (type === 'INDIVIDUAL') {
             const user = await User.findByPk(target);
             if (!user || !user.fcmtoken) {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User or FCM token not found.");
             }
-            result = await sendToDevice(user.fcmtoken, title, body, imageUrl, { clickAction });
+            result = await sendToDevice(user.fcmtoken, title, body, imageUrl, { clickAction, type: 'other' });
         }
 
         // Log to database

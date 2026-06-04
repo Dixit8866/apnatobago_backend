@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { User } from '../models/index.js';
 import logger from '../logger/apiLogger.js';
 import { Op } from 'sequelize';
+import { sendToDevice } from '../services/notification.service.js';
 
 /**
  * Initialize Order Reminder Cron Jobs
@@ -50,21 +51,19 @@ export const initReminderCron = () => {
  */
 const sendOrderReminderNotification = async (user) => {
     try {
-        // Here you would normally use firebase-admin to send the push notification
-        // For now, we log it. If you have a notification utility, call it here.
-        logger.info(`[Push Notification]: Sent order reminder to ${user.fullname} (${user.number})`);
+        logger.info(`[Push Notification]: Initiating order reminder to ${user.fullname} (${user.number})`);
         
-        // Example structure for firebase-admin (assuming it's set up)
-        /*
-        const message = {
-            notification: {
-                title: 'Order Reminder',
-                body: `Hey ${user.fullname}, it's time to place your daily order with Apna Tobacco!`,
-            },
-            token: user.fcmtoken,
-        };
-        admin.messaging().send(message);
-        */
+        const title = 'Order Reminder';
+        const body = `Hey ${user.fullname}, it's time to place your daily order with Apna Tobacco!`;
+        
+        // Call sendToDevice with type: 'reminder' (default)
+        const result = await sendToDevice(user.fcmtoken, title, body, null, { type: 'reminder' });
+        
+        if (result.success) {
+            logger.info(`[Push Notification Success]: Sent order reminder to ${user.fullname}`);
+        } else {
+            logger.error(`[Push Notification Failed] for ${user.fullname}: ${result.error}`);
+        }
     } catch (err) {
         logger.error(`[Notification Error] for ${user.fullname}: ${err.message}`);
     }

@@ -74,6 +74,11 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
             throw new Error('Firebase Admin not initialized');
         }
 
+        const notificationType = data.type || 'reminder';
+        const androidSound = notificationType === 'reminder' ? 'reminder' : 'otherNotification';
+        const androidChannelId = notificationType === 'reminder' ? 'reminder_channel' : 'other_notification_channel';
+        const apnsSound = notificationType === 'reminder' ? 'reminder.mp3' : 'otherNotification.mp3';
+
         const message = {
             token,
             notification: {
@@ -82,7 +87,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                 ...(imageUrl && { image: imageUrl })
             },
             data: {
-                type: 'reminder',
+                type: notificationType,
                 ...data,
                 click_action: 'FLUTTER_NOTIFICATION_CLICK',
             },
@@ -90,15 +95,15 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                 notification: {
                     ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
-                    sound: 'reminder',
-                    channelId: 'reminder_channel'
+                    sound: androidSound,
+                    channelId: androidChannelId
                 }
             },
             apns: {
                 payload: {
                     aps: {
                         contentAvailable: true,
-                        sound: 'reminder.mp3'
+                        sound: apnsSound
                     }
                 },
                 fcm_options: {
@@ -131,6 +136,11 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
             throw new Error('Firebase Admin not initialized');
         }
 
+        const notificationType = data.type || 'reminder';
+        const androidSound = notificationType === 'reminder' ? 'reminder' : 'otherNotification';
+        const androidChannelId = notificationType === 'reminder' ? 'reminder_channel' : 'other_notification_channel';
+        const apnsSound = notificationType === 'reminder' ? 'reminder.mp3' : 'otherNotification.mp3';
+
         const message = {
             topic,
             notification: {
@@ -139,7 +149,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                 ...(imageUrl && { image: imageUrl })
             },
             data: {
-                type: 'reminder',
+                type: notificationType,
                 ...data,
                 click_action: 'FLUTTER_NOTIFICATION_CLICK',
             },
@@ -147,15 +157,15 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                 notification: {
                     ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
-                    sound: 'reminder',
-                    channelId: 'reminder_channel'
+                    sound: androidSound,
+                    channelId: androidChannelId
                 }
             },
             apns: {
                 payload: {
                     aps: {
                         contentAvailable: true,
-                        sound: 'otherNotification.mp3'
+                        sound: apnsSound
                     }
                 },
                 fcm_options: {
