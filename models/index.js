@@ -273,6 +273,11 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Users reminderTime migration failed:', e.message); }
 
         try {
+            // Update all existing users to have orderReminder = true
+            await sequelize.query('UPDATE users SET "orderReminder" = true WHERE "orderReminder" IS NOT TRUE');
+        } catch (e) { console.log('[Migration Warning] Users orderReminder update failed:', e.message); }
+
+        try {
             // Add minQty and maxQty to product_variants
             await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "minQty" DECIMAL(10, 2)');
             await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "maxQty" DECIMAL(10, 2)');
