@@ -79,7 +79,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
             notification: {
                 title,
                 body,
-                ...(imageUrl && { imageUrl })
+                ...(imageUrl && { image: imageUrl })
             },
             data: {
                 ...data,
@@ -87,7 +87,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
             },
             android: {
                 notification: {
-                    ...(imageUrl && { imageUrl }),
+                    ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
                     sound: 'default'
                 }
@@ -100,7 +100,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                     }
                 },
                 fcm_options: {
-                    ...(imageUrl && { imageUrl })
+                    ...(imageUrl && { image: imageUrl })
                 }
             }
         };
@@ -134,7 +134,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
             notification: {
                 title,
                 body,
-                ...(imageUrl && { imageUrl })
+                ...(imageUrl && { image: imageUrl })
             },
             data: {
                 ...data,
@@ -142,7 +142,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
             },
             android: {
                 notification: {
-                    ...(imageUrl && { imageUrl }),
+                    ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
                     sound: 'default'
                 }
@@ -155,7 +155,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                     }
                 },
                 fcm_options: {
-                    ...(imageUrl && { imageUrl })
+                    ...(imageUrl && { image: imageUrl })
                 }
             }
         };
