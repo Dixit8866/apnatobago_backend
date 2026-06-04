@@ -15,10 +15,10 @@ export const initReminderCron = () => {
             const now = new Date();
             const currentTime = now.toLocaleTimeString('en-US', { 
                 timeZone: 'Asia/Kolkata',
-                hour12: false, 
+                hour12: true, 
                 hour: '2-digit', 
                 minute: '2-digit' 
-            }); // Returns "HH:mm" in IST (India Standard Time)
+            }); // Returns "hh:mm AM/PM" in IST (India Standard Time) (e.g., "09:00 PM")
 
             console.log(`[ReminderCron] Running minute-check... Current Time: ${currentTime} (IST)`);
 

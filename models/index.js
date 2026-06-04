@@ -267,9 +267,9 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Users device info columns failed:', e.message); }
 
         try {
-            // Update default reminderTime for new rows, and existing rows that have '15:20' to '21:00'
-            await sequelize.query('ALTER TABLE users ALTER COLUMN "reminderTime" SET DEFAULT \'21:00\'');
-            await sequelize.query('UPDATE users SET "reminderTime" = \'21:00\' WHERE "reminderTime" = \'15:20\'');
+            // Update default reminderTime for new rows, and existing rows that don't match AM/PM format to '09:00 PM'
+            await sequelize.query('ALTER TABLE users ALTER COLUMN "reminderTime" SET DEFAULT \'09:00 PM\'');
+            await sequelize.query('UPDATE users SET "reminderTime" = \'09:00 PM\' WHERE "reminderTime" IS NOT NULL AND "reminderTime" NOT LIKE \'%AM\' AND "reminderTime" NOT LIKE \'%PM\'');
         } catch (e) { console.log('[Migration Warning] Users reminderTime migration failed:', e.message); }
 
         try {

@@ -74,8 +74,8 @@ const User = sequelize.define('User', {
         defaultValue: true,
     },
     reminderTime: {
-        type: DataTypes.STRING, // Store as "HH:mm" like "21:00"
-        defaultValue: '21:00',
+        type: DataTypes.STRING, // Store as "hh:mm a" like "09:00 PM"
+        defaultValue: '09:00 PM',
         allowNull: true,
     },
     latitude: {
