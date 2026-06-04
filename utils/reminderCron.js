@@ -19,6 +19,8 @@ export const initReminderCron = () => {
                 minute: '2-digit' 
             }); // Returns "HH:mm"
 
+            console.log(`[ReminderCron] Running minute-check... Current Time: ${currentTime}`);
+
             // Find users with reminders enabled for this specific time
             const usersToRemind = await User.findAll({
                 where: {
@@ -29,6 +31,8 @@ export const initReminderCron = () => {
                 }
             });
 
+            console.log(`[ReminderCron] Query completed. Found ${usersToRemind.length} user(s) matching reminderTime: '${currentTime}'`);
+
             if (usersToRemind.length > 0) {
                 logger.info(`[ReminderCron]: Sending reminders to ${usersToRemind.length} users at ${currentTime}`);
                 
@@ -38,6 +42,7 @@ export const initReminderCron = () => {
                 }
             }
         } catch (error) {
+            console.error(`[ReminderCron Error] Job execution failed:`, error.message);
             logger.error(`[ReminderCron Error]: ${error.message}`);
         }
     });
@@ -51,6 +56,7 @@ export const initReminderCron = () => {
  */
 const sendOrderReminderNotification = async (user) => {
     try {
+        console.log(`[ReminderCron] Initiating push notification for User: ${user.fullname} (Phone: ${user.number})`);
         logger.info(`[Push Notification]: Initiating order reminder to ${user.fullname} (${user.number})`);
         
         const title = 'Order Reminder';
@@ -60,11 +66,14 @@ const sendOrderReminderNotification = async (user) => {
         const result = await sendToDevice(user.fcmtoken, title, body, null, { type: 'reminder' });
         
         if (result.success) {
+            console.log(`[ReminderCron Success] Notification successfully sent to ${user.fullname}`);
             logger.info(`[Push Notification Success]: Sent order reminder to ${user.fullname}`);
         } else {
+            console.error(`[ReminderCron Error] Notification failed for ${user.fullname}:`, result.error);
             logger.error(`[Push Notification Failed] for ${user.fullname}: ${result.error}`);
         }
     } catch (err) {
+        console.error(`[ReminderCron Exception] for ${user.fullname}:`, err.message);
         logger.error(`[Notification Error] for ${user.fullname}: ${err.message}`);
     }
 };
