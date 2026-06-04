@@ -79,6 +79,20 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
         const androidChannelId = notificationType === 'reminder' ? 'reminder_channel' : 'other_notification_channel';
         const apnsSound = notificationType === 'reminder' ? 'reminder.mp3' : 'otherNotification.mp3';
 
+        let clickActionValue = 'FLUTTER_NOTIFICATION_CLICK';
+        let actionValue = null;
+
+        switch (notificationType) {
+            case 'reminder':
+                clickActionValue = 'categories';
+                actionValue = 'categories';
+                break;
+            default:
+                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
+                actionValue = data.action || null;
+                break;
+        }
+
         const message = {
             token,
             notification: {
@@ -89,7 +103,8 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
             data: {
                 type: notificationType,
                 ...data,
-                click_action: 'FLUTTER_NOTIFICATION_CLICK',
+                click_action: clickActionValue,
+                ...(actionValue && { action: actionValue })
             },
             android: {
                 notification: {
@@ -141,6 +156,20 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
         const androidChannelId = notificationType === 'reminder' ? 'reminder_channel' : 'other_notification_channel';
         const apnsSound = notificationType === 'reminder' ? 'reminder.mp3' : 'otherNotification.mp3';
 
+        let clickActionValue = 'FLUTTER_NOTIFICATION_CLICK';
+        let actionValue = null;
+
+        switch (notificationType) {
+            case 'reminder':
+                clickActionValue = 'categories';
+                actionValue = 'categories';
+                break;
+            default:
+                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
+                actionValue = data.action || null;
+                break;
+        }
+
         const message = {
             topic,
             notification: {
@@ -151,7 +180,8 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
             data: {
                 type: notificationType,
                 ...data,
-                click_action: 'FLUTTER_NOTIFICATION_CLICK',
+                click_action: clickActionValue,
+                ...(actionValue && { action: actionValue })
             },
             android: {
                 notification: {
