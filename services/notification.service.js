@@ -79,31 +79,27 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
         let androidSound = 'otherNotification';
         let androidChannelId = 'other_notification_channel';
         let apnsSound = 'otherNotification.mp3';
-        let clickActionValue = 'FLUTTER_NOTIFICATION_CLICK';
-        let actionValue = null;
+        let actionValue = 'FLUTTER_NOTIFICATION_CLICK';
 
         switch (notificationType) {
             case 'reminder':
                 androidSound = 'reminder';
                 androidChannelId = 'reminder_channel';
                 apnsSound = 'reminder.mp3';
-                clickActionValue = 'categories';
                 actionValue = 'categories';
                 break;
             case 'shipping':
                 androidSound = 'otherNotification';
                 androidChannelId = 'shipping_notification_channel';
                 apnsSound = 'otherNotification.mp3';
-                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
-                actionValue = data.action || 'shipping';
+                actionValue = data.action || data.clickAction || data.click_action || 'shipping';
                 break;
             case 'other':
             default:
                 androidSound = 'otherNotification';
                 androidChannelId = 'other_notification_channel';
                 apnsSound = 'otherNotification.mp3';
-                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
-                actionValue = data.action || null;
+                actionValue = data.action || data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
                 break;
         }
 
@@ -117,8 +113,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
             data: {
                 type: notificationType,
                 ...data,
-                click_action: clickActionValue,
-                ...(actionValue && { action: actionValue })
+                action: actionValue,
             },
             android: {
                 notification: {
@@ -170,31 +165,27 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
         let androidSound = 'otherNotification';
         let androidChannelId = 'other_notification_channel';
         let apnsSound = 'otherNotification.mp3';
-        let clickActionValue = 'FLUTTER_NOTIFICATION_CLICK';
-        let actionValue = null;
+        let actionValue = 'FLUTTER_NOTIFICATION_CLICK';
 
         switch (notificationType) {
             case 'reminder':
                 androidSound = 'reminder';
                 androidChannelId = 'reminder_channel';
                 apnsSound = 'reminder.mp3';
-                clickActionValue = 'categories';
                 actionValue = 'categories';
                 break;
             case 'shipping':
                 androidSound = 'otherNotification';
                 androidChannelId = 'shipping_notification_channel';
                 apnsSound = 'otherNotification.mp3';
-                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
-                actionValue = data.action || 'shipping';
+                actionValue = data.action || data.clickAction || data.click_action || 'shipping';
                 break;
             case 'other':
             default:
                 androidSound = 'otherNotification';
                 androidChannelId = 'other_notification_channel';
                 apnsSound = 'otherNotification.mp3';
-                clickActionValue = data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
-                actionValue = data.action || null;
+                actionValue = data.action || data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
                 break;
         }
 
@@ -208,8 +199,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
             data: {
                 type: notificationType,
                 ...data,
-                click_action: clickActionValue,
-                ...(actionValue && { action: actionValue })
+                action: actionValue,
             },
             android: {
                 notification: {
