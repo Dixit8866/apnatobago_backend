@@ -33,6 +33,10 @@ const HelpSupport = sequelize.define(
             type: DataTypes.ENUM('Pending', 'Resolved', 'Closed'),
             defaultValue: 'Pending',
         },
+        image: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,
