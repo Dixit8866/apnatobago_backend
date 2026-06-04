@@ -22,6 +22,21 @@ export const initReminderCron = () => {
 
             console.log(`[ReminderCron] Running minute-check... Current Time: ${currentTime} (IST)`);
 
+            // Debug: Log all users who have order reminders enabled to see their values
+            try {
+                const debugUsers = await User.findAll({
+                    attributes: ['fullname', 'number', 'status', 'orderReminder', 'reminderTime', 'fcmtoken'],
+                    limit: 30,
+                    raw: true
+                });
+                console.log(`[ReminderCron Debug] Listing up to 30 users in DB to check their reminder values:`);
+                debugUsers.forEach(u => {
+                    console.log(`  -> Name: "${u.fullname}" | Phone: "${u.number}" | Status: "${u.status}" | orderReminder: ${u.orderReminder} | reminderTime: "${u.reminderTime}" | HasToken: ${u.fcmtoken ? 'YES' : 'NO'}`);
+                });
+            } catch (err) {
+                console.error(`[ReminderCron Debug Error] Failed to print debug users:`, err.message);
+            }
+
             // Find users with reminders enabled for this specific time
             const usersToRemind = await User.findAll({
                 where: {
