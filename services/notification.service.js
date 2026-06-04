@@ -78,7 +78,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
 
         let androidSound = 'otherNotification';
         let androidChannelId = 'other_notification_channel';
-        let apnsSound = 'otherNotification.mp3';
+        let apnsSound = 'othernotification.mp3';
         let actionValue = 'FLUTTER_NOTIFICATION_CLICK';
 
         switch (notificationType) {
@@ -91,14 +91,14 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
             case 'shipping':
                 androidSound = 'otherNotification';
                 androidChannelId = 'shipping_notification_channel';
-                apnsSound = 'otherNotification.mp3';
+                apnsSound = 'othernotification.mp3';
                 actionValue = data.action || data.clickAction || data.click_action || 'shipping';
                 break;
             case 'other':
             default:
                 androidSound = 'otherNotification';
                 androidChannelId = 'other_notification_channel';
-                apnsSound = 'otherNotification.mp3';
+                apnsSound = 'othernotification.mp3';
                 actionValue = data.action || data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
                 break;
         }
