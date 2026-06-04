@@ -21,11 +21,11 @@ export const createUser = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'User with this number already exists.');
         }
 
-        // Handle Default App Level (Basic)
+        // Handle Default App Level (Premium)
         let finalAppLevel = applevel;
         if (!finalAppLevel) {
             const basicLevel = await CustomLevel.findOne({ 
-                where: { name: { [Op.iLike]: 'Standard' } } 
+                where: { name: { [Op.iLike]: 'Premium' } } 
             });
             if (basicLevel) {
                 finalAppLevel = basicLevel.id;
