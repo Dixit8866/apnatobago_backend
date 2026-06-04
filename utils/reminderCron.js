@@ -22,19 +22,39 @@ export const initReminderCron = () => {
 
             console.log(`[ReminderCron] Running minute-check... Current Time: ${currentTime} (IST)`);
 
-            // Debug: Log all users who have order reminders enabled to see their values
+            // Debug: Check specific test user 9106681629
             try {
-                const debugUsers = await User.findAll({
+                const testUser = await User.findOne({
+                    where: { number: { [Op.like]: '%9106681629%' } },
                     attributes: ['fullname', 'number', 'status', 'orderReminder', 'reminderTime', 'fcmtoken'],
-                    limit: 30,
                     raw: true
                 });
-                console.log(`[ReminderCron Debug] Listing up to 30 users in DB to check their reminder values:`);
-                debugUsers.forEach(u => {
-                    console.log(`  -> Name: "${u.fullname}" | Phone: "${u.number}" | Status: "${u.status}" | orderReminder: ${u.orderReminder} | reminderTime: "${u.reminderTime}" | HasToken: ${u.fcmtoken ? 'YES' : 'NO'}`);
-                });
+                if (testUser) {
+                    console.log(`[ReminderCron Debug] Test User 9106681629 Info: Name: "${testUser.fullname}" | Status: "${testUser.status}" | orderReminder: ${testUser.orderReminder} | reminderTime: "${testUser.reminderTime}" | HasToken: ${testUser.fcmtoken ? 'YES' : 'NO'}`);
+                } else {
+                    console.log(`[ReminderCron Debug] Test User 9106681629 not found in DB!`);
+                }
             } catch (err) {
-                console.error(`[ReminderCron Debug Error] Failed to print debug users:`, err.message);
+                console.error(`[ReminderCron Debug Error] Test user query failed:`, err.message);
+            }
+
+            // Debug: Check if any users have the matching reminderTime regardless of status, token, or toggle
+            try {
+                const timeMatchedUsers = await User.findAll({
+                    where: { reminderTime: currentTime },
+                    attributes: ['fullname', 'number', 'status', 'orderReminder', 'reminderTime', 'fcmtoken'],
+                    raw: true
+                });
+                if (timeMatchedUsers.length > 0) {
+                    console.log(`[ReminderCron Debug] Found ${timeMatchedUsers.length} user(s) matching reminderTime: '${currentTime}', details:`);
+                    timeMatchedUsers.forEach(u => {
+                        console.log(`  -> Name: "${u.fullname}" | Phone: "${u.number}" | Status: "${u.status}" | orderReminder: ${u.orderReminder} | HasToken: ${u.fcmtoken ? 'YES' : 'NO'}`);
+                    });
+                } else {
+                    console.log(`[ReminderCron Debug] No users found with reminderTime: '${currentTime}'`);
+                }
+            } catch (err) {
+                console.error(`[ReminderCron Debug Error] Time match query failed:`, err.message);
             }
 
             // Find users with reminders enabled for this specific time
