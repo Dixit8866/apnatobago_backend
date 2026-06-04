@@ -14,12 +14,13 @@ export const initReminderCron = () => {
         try {
             const now = new Date();
             const currentTime = now.toLocaleTimeString('en-US', { 
+                timeZone: 'Asia/Kolkata',
                 hour12: false, 
                 hour: '2-digit', 
                 minute: '2-digit' 
-            }); // Returns "HH:mm"
+            }); // Returns "HH:mm" in IST (India Standard Time)
 
-            console.log(`[ReminderCron] Running minute-check... Current Time: ${currentTime}`);
+            console.log(`[ReminderCron] Running minute-check... Current Time: ${currentTime} (IST)`);
 
             // Find users with reminders enabled for this specific time
             const usersToRemind = await User.findAll({
