@@ -82,7 +82,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                 ...(imageUrl && { image: imageUrl })
             },
             data: {
-                type: 'other',
+                type: 'reminder',
                 ...data,
                 click_action: 'FLUTTER_NOTIFICATION_CLICK',
             },
@@ -139,7 +139,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                 ...(imageUrl && { image: imageUrl })
             },
             data: {
-                type: 'other',
+                type: 'reminder',
                 ...data,
                 click_action: 'FLUTTER_NOTIFICATION_CLICK',
             },
