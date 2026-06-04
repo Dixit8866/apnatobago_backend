@@ -38,6 +38,12 @@ export const getAllHelpRequests = async (req, res) => {
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
+        responseData.statusCounts = {
+            '': await HelpSupport.count(),
+            Pending: await HelpSupport.count({ where: { status: 'Pending' } }),
+            Resolved: await HelpSupport.count({ where: { status: 'Resolved' } }),
+            Closed: await HelpSupport.count({ where: { status: 'Closed' } })
+        };
         return sendSuccessResponse(res, HTTP_STATUS.OK, "All help requests fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Admin Get Help Requests Error]: ${error.message}`);
