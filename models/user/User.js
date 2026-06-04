@@ -71,10 +71,11 @@ const User = sequelize.define('User', {
     },
     orderReminder: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
+        defaultValue: true,
     },
     reminderTime: {
-        type: DataTypes.STRING, // Store as "HH:mm" like "08:00"
+        type: DataTypes.STRING, // Store as "HH:mm" like "21:00"
+        defaultValue: '21:00',
         allowNull: true,
     },
     latitude: {

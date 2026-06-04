@@ -206,6 +206,8 @@ export const registerUser = async (req, res) => {
             applevel: defaultAppLevel,
             showtabacco: false,
             creditline: 0,
+            orderReminder: true,
+            reminderTime: '21:00',
             status: 'Inactive',
             kycverification: 'pending'
         });
