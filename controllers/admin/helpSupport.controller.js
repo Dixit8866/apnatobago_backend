@@ -1,3 +1,4 @@
+import { Op } from 'sequelize';
 import { HelpSupport, User } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -11,10 +12,25 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
  */
 export const getAllHelpRequests = async (req, res) => {
     try {
+        const { search = '', status } = req.query;
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
+        const where = {};
+        if (search) {
+            where[Op.or] = [
+                { customerName: { [Op.iLike]: `%${search}%` } },
+                { mobileNumber: { [Op.iLike]: `%${search}%` } },
+                { shopName: { [Op.iLike]: `%${search}%` } },
+                { message: { [Op.iLike]: `%${search}%` } }
+            ];
+        }
+        if (status) {
+            where.status = status;
+        }
+
         const result = await HelpSupport.findAndCountAll({
+            where,
             include: [{ model: User, as: 'user', attributes: ['fullname', 'number'] }],
             limit,
             offset,
