@@ -225,70 +225,102 @@ const runManualMigrations = async () => {
             console.log('[Migration Warning] enum_inventory_transactions_type type alter failed or value already exists:', e.message);
         }
 
-        await sequelize.query('ALTER TABLE main_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
-        await sequelize.query('ALTER TABLE sub_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
-        await sequelize.query('ALTER TABLE company_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
-        
-        // Add blockcredit to users table if missing
-        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "blockcredit" BOOLEAN DEFAULT false');
+        try {
+            await sequelize.query('ALTER TABLE main_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
+            await sequelize.query('ALTER TABLE sub_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
+            await sequelize.query('ALTER TABLE company_categories ADD COLUMN IF NOT EXISTS "isTobacco" BOOLEAN DEFAULT false');
+        } catch (e) { console.log('[Migration Warning] Category tables update failed:', e.message); }
 
-        // Drop NOT NULL constraints from email and password
-        await sequelize.query('ALTER TABLE users ALTER COLUMN "email" DROP NOT NULL');
-        await sequelize.query('ALTER TABLE users ALTER COLUMN "password" DROP NOT NULL');
-        
-        // Fix deliveryBoyId in order_payments (ensure column exists and has correct constraint)
-        await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID');
-        await sequelize.query('ALTER TABLE order_payments DROP CONSTRAINT IF EXISTS "order_payments_deliveryBoyId_fkey" CASCADE');
-        await sequelize.query('ALTER TABLE order_payments ADD CONSTRAINT "order_payments_deliveryBoyId_fkey" FOREIGN KEY ("deliveryBoyId") REFERENCES delivery_boys(id) ON UPDATE CASCADE ON DELETE SET NULL');
-        
-        // Add isSubmitted and submittedAt to order_payments
-        await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "isSubmitted" BOOLEAN DEFAULT false');
-        await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "submittedAt" TIMESTAMP WITH TIME ZONE');
-        
-        // Add latitude and longitude to users table
-        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "longitude" DECIMAL(15, 10)');
-        
-        // Add deviceType and version to users table
-        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deviceType" VARCHAR(255)');
-        await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "version" VARCHAR(255)');
-        
-        // Add minQty and maxQty to product_variants
-        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "minQty" DECIMAL(10, 2)');
-        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "maxQty" DECIMAL(10, 2)');
-        
-        // Add extra to product_variants
-        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "extra" VARCHAR(255)');
+        try {
+            // Add blockcredit to users table if missing
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "blockcredit" BOOLEAN DEFAULT false');
+        } catch (e) { console.log('[Migration Warning] Users blockcredit update failed:', e.message); }
 
-        // Add position to product_variants
-        await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "position" INTEGER DEFAULT 0');
-        
-        // Add isCombo, comboProduct1Id, comboProduct2Id to products
-        await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "isCombo" BOOLEAN DEFAULT false');
-        await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "comboProduct1Id" UUID');
-        await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "comboProduct2Id" UUID');
+        try {
+            // Drop NOT NULL constraints from email and password
+            await sequelize.query('ALTER TABLE users ALTER COLUMN "email" DROP NOT NULL');
+            await sequelize.query('ALTER TABLE users ALTER COLUMN "password" DROP NOT NULL');
+        } catch (e) { console.log('[Migration Warning] Users email/password nullable constraint failed:', e.message); }
 
-        // Add createdBy to inventory_transactions
-        await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255) DEFAULT \'System\'');
+        try {
+            // Fix deliveryBoyId in order_payments (ensure column exists and has correct constraint)
+            await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID');
+            await sequelize.query('ALTER TABLE order_payments DROP CONSTRAINT IF EXISTS "order_payments_deliveryBoyId_fkey" CASCADE');
+            await sequelize.query('ALTER TABLE order_payments ADD CONSTRAINT "order_payments_deliveryBoyId_fkey" FOREIGN KEY ("deliveryBoyId") REFERENCES delivery_boys(id) ON UPDATE CASCADE ON DELETE SET NULL');
+        } catch (e) { console.log('[Migration Warning] Order payments constraint update failed:', e.message); }
 
-        // Fix existing cancelled orders having positive dueAmount
-        await sequelize.query('UPDATE orders SET "dueAmount" = 0 WHERE "orderStatus" = \'Cancelled\' AND "dueAmount" > 0');
+        try {
+            // Add isSubmitted and submittedAt to order_payments
+            await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "isSubmitted" BOOLEAN DEFAULT false');
+            await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "submittedAt" TIMESTAMP WITH TIME ZONE');
+        } catch (e) { console.log('[Migration Warning] Order payments submitted fields failed:', e.message); }
 
-        // Add mainCategoryId to banners
-        await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "mainCategoryId" UUID REFERENCES main_categories(id) ON DELETE SET NULL');
+        try {
+            // Add latitude and longitude to users table
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "longitude" DECIMAL(15, 10)');
+        } catch (e) { console.log('[Migration Warning] Users longitude column failed:', e.message); }
 
-        // Add image to help_supports
-        await sequelize.query('ALTER TABLE help_supports ADD COLUMN IF NOT EXISTS "image" VARCHAR(255)');
+        try {
+            // Add deviceType and version to users table
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deviceType" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "version" VARCHAR(255)');
+        } catch (e) { console.log('[Migration Warning] Users device info columns failed:', e.message); }
 
-        // Add timing and app settings fields to app_settings
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "supportPhoneNumber" VARCHAR(255)');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryAndroidVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryIosVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryForceUpdate" BOOLEAN DEFAULT false');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryRoundSchedules" JSONB DEFAULT \'[]\'');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryStart" VARCHAR(255) DEFAULT \'08:00\'');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryEnd" VARCHAR(255) DEFAULT \'13:00\'');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryStart" VARCHAR(255) DEFAULT \'15:00\'');
-        await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryEnd" VARCHAR(255) DEFAULT \'17:00\'');
+        try {
+            // Add minQty and maxQty to product_variants
+            await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "minQty" DECIMAL(10, 2)');
+            await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "maxQty" DECIMAL(10, 2)');
+        } catch (e) { console.log('[Migration Warning] Product variants min/max qty columns failed:', e.message); }
+
+        try {
+            // Add extra to product_variants
+            await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "extra" VARCHAR(255)');
+        } catch (e) { console.log('[Migration Warning] Product variants extra column failed:', e.message); }
+
+        try {
+            // Add position to product_variants
+            await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "position" INTEGER DEFAULT 0');
+        } catch (e) { console.log('[Migration Warning] Product variants position column failed:', e.message); }
+
+        try {
+            // Add isCombo, comboProduct1Id, comboProduct2Id to products
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "isCombo" BOOLEAN DEFAULT false');
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "comboProduct1Id" UUID');
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "comboProduct2Id" UUID');
+        } catch (e) { console.log('[Migration Warning] Products combo columns failed:', e.message); }
+
+        try {
+            // Add createdBy to inventory_transactions
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255) DEFAULT \'System\'');
+        } catch (e) { console.log('[Migration Warning] Inventory transaction createdBy column failed:', e.message); }
+
+        try {
+            // Fix existing cancelled orders having positive dueAmount
+            await sequelize.query('UPDATE orders SET "dueAmount" = 0 WHERE "orderStatus" = \'Cancelled\' AND "dueAmount" > 0');
+        } catch (e) { console.log('[Migration Warning] Order dueAmount update failed:', e.message); }
+
+        try {
+            // Add mainCategoryId to banners
+            await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "mainCategoryId" UUID REFERENCES main_categories(id) ON DELETE SET NULL');
+        } catch (e) { console.log('[Migration Warning] Banners mainCategoryId column failed:', e.message); }
+
+        try {
+            // Add image to help_supports
+            await sequelize.query('ALTER TABLE help_supports ADD COLUMN IF NOT EXISTS "image" VARCHAR(255)');
+        } catch (e) { console.log('[Migration Warning] Help supports image column failed:', e.message); }
+
+        try {
+            // Add timing and app settings fields to app_settings
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "supportPhoneNumber" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryAndroidVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryIosVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryForceUpdate" BOOLEAN DEFAULT false');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryRoundSchedules" JSONB DEFAULT \'[]\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryStart" VARCHAR(255) DEFAULT \'08:00\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryEnd" VARCHAR(255) DEFAULT \'13:00\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryStart" VARCHAR(255) DEFAULT \'15:00\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryEnd" VARCHAR(255) DEFAULT \'17:00\'');
+        } catch (e) { console.log('[Migration Warning] App settings columns failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
