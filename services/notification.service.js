@@ -90,15 +90,15 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                 notification: {
                     ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
-                    sound: 'otherNotification',
-                    channelId: 'otherNotification'
+                    sound: 'reminder',
+                    channelId: 'reminder'
                 }
             },
             apns: {
                 payload: {
                     aps: {
                         contentAvailable: true,
-                        sound: 'otherNotification.mp3'
+                        sound: 'reminder.mp3'
                     }
                 },
                 fcm_options: {
@@ -147,8 +147,8 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                 notification: {
                     ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
-                    sound: 'otherNotification',
-                    channelId: 'otherNotification'
+                    sound: 'reminder',
+                    channelId: 'reminder'
                 }
             },
             apns: {
