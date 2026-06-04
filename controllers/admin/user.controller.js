@@ -40,6 +40,8 @@ export const createUser = async (req, res, next) => {
             applevel: finalAppLevel || null,
             status: status || 'Active',
             kycverification: kycverification || 'pending',
+            orderReminder: true,
+            reminderTime: '09:00 PM'
         });
 
         // Handle Business Profile if provided
