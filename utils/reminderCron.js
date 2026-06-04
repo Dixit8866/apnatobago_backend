@@ -13,14 +13,27 @@ export const initReminderCron = () => {
     cron.schedule('* * * * *', async () => {
         try {
             const now = new Date();
-            const currentTime = now.toLocaleTimeString('en-US', { 
-                timeZone: 'Asia/Kolkata',
-                hour12: true, 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            }); // Returns "hh:mm AM/PM" in IST (India Standard Time) (e.g., "09:00 PM")
+            const kolkataTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+            const hours = kolkataTime.getHours();
+            const minutes = kolkataTime.getMinutes();
+            
+            const mm = minutes.toString().padStart(2, '0');
+            const hh24 = hours.toString().padStart(2, '0');
+            
+            const hours12 = hours % 12 || 12;
+            const hh12_pad = hours12.toString().padStart(2, '0');
+            const hh12_no_pad = hours12.toString();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            
+            const timeFormats = [
+                `${hh24}:${mm}`,                           // "16:12"
+                `${hh12_pad}:${mm} ${ampm}`,               // "04:12 PM"
+                `${hh12_no_pad}:${mm} ${ampm}`,             // "4:12 PM"
+                `${hh12_pad}:${mm} ${ampm.toLowerCase()}`,     // "04:12 pm"
+                `${hh12_no_pad}:${mm} ${ampm.toLowerCase()}`    // "4:12 pm"
+            ];
 
-            console.log(`[ReminderCron] Running minute-check... Current Time: ${currentTime} (IST)`);
+            console.log(`[ReminderCron] Running minute-check... Formats to search: ${JSON.stringify(timeFormats)} (IST)`);
 
             // Debug: Check specific test user 9106681629
             try {
@@ -41,36 +54,42 @@ export const initReminderCron = () => {
             // Debug: Check if any users have the matching reminderTime regardless of status, token, or toggle
             try {
                 const timeMatchedUsers = await User.findAll({
-                    where: { reminderTime: currentTime },
+                    where: { 
+                        reminderTime: {
+                            [Op.in]: timeFormats
+                        }
+                    },
                     attributes: ['fullname', 'number', 'status', 'orderReminder', 'reminderTime', 'fcmtoken'],
                     raw: true
                 });
                 if (timeMatchedUsers.length > 0) {
-                    console.log(`[ReminderCron Debug] Found ${timeMatchedUsers.length} user(s) matching reminderTime: '${currentTime}', details:`);
+                    console.log(`[ReminderCron Debug] Found ${timeMatchedUsers.length} user(s) matching reminderTime formats, details:`);
                     timeMatchedUsers.forEach(u => {
-                        console.log(`  -> Name: "${u.fullname}" | Phone: "${u.number}" | Status: "${u.status}" | orderReminder: ${u.orderReminder} | HasToken: ${u.fcmtoken ? 'YES' : 'NO'}`);
+                        console.log(`  -> Name: "${u.fullname}" | Phone: "${u.number}" | Status: "${u.status}" | orderReminder: ${u.orderReminder} | reminderTime: "${u.reminderTime}" | HasToken: ${u.fcmtoken ? 'YES' : 'NO'}`);
                     });
                 } else {
-                    console.log(`[ReminderCron Debug] No users found with reminderTime: '${currentTime}'`);
+                    console.log(`[ReminderCron Debug] No users found matching reminderTime formats`);
                 }
             } catch (err) {
                 console.error(`[ReminderCron Debug Error] Time match query failed:`, err.message);
             }
 
-            // Find users with reminders enabled for this specific time
+            // Find users with reminders enabled for this specific time (matching any format)
             const usersToRemind = await User.findAll({
                 where: {
                     orderReminder: true,
-                    reminderTime: currentTime,
+                    reminderTime: {
+                        [Op.in]: timeFormats
+                    },
                     status: 'Active',
                     fcmtoken: { [Op.ne]: null } // Only if they have a notification token
                 }
             });
 
-            console.log(`[ReminderCron] Query completed. Found ${usersToRemind.length} user(s) matching reminderTime: '${currentTime}'`);
+            console.log(`[ReminderCron] Query completed. Found ${usersToRemind.length} user(s) matching reminderTime formats`);
 
             if (usersToRemind.length > 0) {
-                logger.info(`[ReminderCron]: Sending reminders to ${usersToRemind.length} users at ${currentTime}`);
+                logger.info(`[ReminderCron]: Sending reminders to ${usersToRemind.length} users at ${timeFormats[1]} / ${timeFormats[0]}`);
                 
                 for (const user of usersToRemind) {
                     // Logic to send FCM notification
