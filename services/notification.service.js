@@ -91,7 +91,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                     ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
                     sound: 'reminder',
-                    channelId: 'reminder'
+                    channelId: 'reminder_channel'
                 }
             },
             apns: {
@@ -148,7 +148,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                     ...(imageUrl && { image: imageUrl }),
                     priority: 'high',
                     sound: 'reminder',
-                    channelId: 'reminder'
+                    channelId: 'reminder_channel'
                 }
             },
             apns: {
