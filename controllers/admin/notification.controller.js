@@ -12,7 +12,7 @@ import { sendToTopic, sendToDevice } from '../../services/notification.service.j
 export const sendNotification = async (req, res) => {
     try {
         const { title, body, imageUrl, type, target, clickAction } = req.body;
-        const sentBy = req.admin?.id;
+        const sentBy = req.user?.id;
 
         if (!title || !body || !type || !target) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields.");
