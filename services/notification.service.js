@@ -165,7 +165,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
         let androidSound = 'otherNotification';
         let androidChannelId = 'other_notification_channel';
         let apnsSound = 'otherNotification.mp3';
-        let actionValue = 'FLUTTER_NOTIFICATION_CLICK';
+        let actionValue = 'home';
 
         switch (notificationType) {
             case 'reminder':
@@ -185,7 +185,7 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                 androidSound = 'otherNotification';
                 androidChannelId = 'other_notification_channel';
                 apnsSound = 'otherNotification.mp3';
-                actionValue = data.action || data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
+                actionValue = data.action || data.clickAction || data.click_action || 'home';
                 break;
         }
 
