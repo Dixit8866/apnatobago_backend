@@ -3,6 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { Op } from 'sequelize';
+import { roundTotal } from '../../utils/roundHelper.js';
 
 // Helper to get available stock of a product across ALL godowns.
 // Cart availability check sums stock from all godowns so the user
@@ -275,10 +276,10 @@ export const getCart = async (req, res) => {
             items: paginatedItems,
             billDetails: {
                 totalCount: formattedItems.length,
-                itemTotal: Number(itemTotal.toFixed(2)),
+                itemTotal: roundTotal(itemTotal),
                 deliveryCharges: Number(deliveryCharges.toFixed(2)),
                 totalSavings: Number((totalMrp - itemTotal).toFixed(2)),
-                grandTotal: Number((itemTotal + deliveryCharges).toFixed(2))
+                grandTotal: roundTotal(itemTotal + deliveryCharges)
             }
         });
     } catch (error) {

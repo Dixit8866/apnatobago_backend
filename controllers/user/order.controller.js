@@ -627,6 +627,9 @@ export const getOrders = async (req, res) => {
 
             const updatedOrders = orders.map(o => {
                 const orderData = o.toJSON ? o.toJSON() : o;
+                orderData.totalAmount = roundTotal(orderData.totalAmount);
+                orderData.dueAmount = roundTotal(orderData.dueAmount);
+                orderData.paidAmount = roundTotal(orderData.paidAmount);
                 if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                     orderData.orderStatus = 'Delivered';
                 }
@@ -662,6 +665,9 @@ export const getOrders = async (req, res) => {
         if (formattedResult.items) {
             formattedResult.items = formattedResult.items.map(o => {
                 const orderData = o.toJSON ? o.toJSON() : o;
+                orderData.totalAmount = roundTotal(orderData.totalAmount);
+                orderData.dueAmount = roundTotal(orderData.dueAmount);
+                orderData.paidAmount = roundTotal(orderData.paidAmount);
                 if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                     orderData.orderStatus = 'Delivered';
                 }
@@ -757,6 +763,9 @@ export const getOrderDetails = async (req, res) => {
             });
 
             const orderData = order.toJSON ? order.toJSON() : order;
+            orderData.totalAmount = roundTotal(orderData.totalAmount);
+            orderData.dueAmount = roundTotal(orderData.dueAmount);
+            orderData.paidAmount = roundTotal(orderData.paidAmount);
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
@@ -813,6 +822,9 @@ export const getOrderDetails = async (req, res) => {
             }
 
             const orderData = order.toJSON ? order.toJSON() : order;
+            orderData.totalAmount = roundTotal(orderData.totalAmount);
+            orderData.dueAmount = roundTotal(orderData.dueAmount);
+            orderData.paidAmount = roundTotal(orderData.paidAmount);
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
@@ -912,6 +924,9 @@ export const getOrderDetailsV2 = async (req, res) => {
             });
 
             const orderData = order.toJSON ? order.toJSON() : order;
+            orderData.totalAmount = roundTotal(orderData.totalAmount);
+            orderData.dueAmount = roundTotal(orderData.dueAmount);
+            orderData.paidAmount = roundTotal(orderData.paidAmount);
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
@@ -967,6 +982,9 @@ export const getOrderDetailsV2 = async (req, res) => {
         }
 
         const orderData = order.toJSON ? order.toJSON() : order;
+        orderData.totalAmount = roundTotal(orderData.totalAmount);
+        orderData.dueAmount = roundTotal(orderData.dueAmount);
+        orderData.paidAmount = roundTotal(orderData.paidAmount);
         if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
             orderData.orderStatus = 'Delivered';
         }
