@@ -5,6 +5,7 @@ import logger from '../../logger/apiLogger.js';
 import sequelize from '../../config/db.js';
 import { Op } from 'sequelize';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { roundTotal } from '../../utils/roundHelper.js';
 
 /**
  * Generate a unique human-readable Order ID for Direct Sales
@@ -90,7 +91,7 @@ export const createCustomSale = async (req, res) => {
         }
 
         const deliveryCharge = parseFloat(rawDeliveryCharge || 0);
-        const grandTotalAmount = totalAmount + deliveryCharge;
+        const grandTotalAmount = roundTotal(totalAmount + deliveryCharge);
         const paidAmount = parseFloat(rawPaidAmount || 0);
         const dueAmount = Math.max(0, grandTotalAmount - paidAmount);
         

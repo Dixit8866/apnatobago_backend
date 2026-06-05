@@ -31,6 +31,7 @@ import wishlistRoutes from './wishlist.routes.js';
 import orderRoutes from './order.routes.js';
 import businessProfileRoutes from './businessProfile.routes.js';
 import helpSupportRoutes from './helpSupport.routes.js';
+import notificationRoutes from './notification.routes.js';
 
 const router = express.Router();
 
@@ -73,5 +74,6 @@ router.use('/orders', orderRoutes);
 // Business Profile
 router.use('/business-profile', businessProfileRoutes);
 router.use('/help-support', helpSupportRoutes);
+router.use('/notifications', notificationRoutes);
 
 export default router;

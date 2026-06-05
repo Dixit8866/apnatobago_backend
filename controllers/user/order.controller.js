@@ -1,6 +1,7 @@
-import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn, Notification } from '../../models/index.js';
 import { emitAdminNotification } from '../../socket.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
+import { roundTotal } from '../../utils/roundHelper.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import sequelize from '../../config/db.js';
@@ -333,7 +334,7 @@ export const createOrder = async (req, res) => {
             logger.warn(`[Order Total Discrepancy]: Frontend: ${frontendTotalAmount}, Backend: ${backendTotal} for User: ${userId}`);
         }
 
-        const finalTotal = backendTotal;
+        const finalTotal = roundTotal(backendTotal);
 
         // 4. Handle Payment and Credit Line
         let paymentStatus = 'Pending';
@@ -540,6 +541,14 @@ export const createOrder = async (req, res) => {
                 const userBody = `Hey ${userData.fullname}, your order #${newOrder.orderId} of ₹${newOrder.totalAmount} has been placed successfully!`;
                 // Use type: 'order' so that it plays the custom orderDetails notification sound/channel
                 await sendToDevice(userData.fcmtoken, userTitle, userBody, null, { type: 'order', id: String(newOrder.id), orderId: String(newOrder.id) });
+                await Notification.create({
+                    title: userTitle,
+                    body: userBody,
+                    type: 'ORDER',
+                    target: String(newOrder.userId),
+                    status: 'SENT',
+                    clickAction: String(newOrder.id)
+                });
             }
         } catch (pushErr) {
             console.error('[User Push Notification Error]:', pushErr);
@@ -1052,7 +1061,7 @@ export const cancelOrder = async (req, res) => {
             const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
             let newSubtotal = 0;
             for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
-            order.totalAmount = newSubtotal + (Number(order.deliveryCharge) || 0);
+            order.totalAmount = roundTotal(newSubtotal + (Number(order.deliveryCharge) || 0));
             order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
             await order.save();
         } else {

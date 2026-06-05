@@ -27,7 +27,7 @@ const seedAdmin = async () => {
             await Admin.create({
                 name: 'Super Admin',
                 email: 'apnatobacco@gmail.com',
-                password: 'apnatobacco123', // Will be hashed by model hook
+                password: 'apnatobacco123', 
                 role: 'superadmin',
                 status: 'Active'
             });

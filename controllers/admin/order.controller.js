@@ -1,11 +1,12 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML } from '../../utils/invoiceGenerator.js';
 import { sendToDevice } from '../../services/notification.service.js';
+import { roundTotal } from '../../utils/roundHelper.js';
 // ... (rest of imports)
 
 const adjustOrderPayments = (order) => {
@@ -474,7 +475,7 @@ export const updateOrderStatus = async (req, res) => {
                     const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
                     let newSubtotal = 0;
                     for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
-                    order.totalAmount = newSubtotal + (Number(order.deliveryCharge) || 0);
+                    order.totalAmount = roundTotal(newSubtotal + (Number(order.deliveryCharge) || 0));
                     order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
                     await order.save();
                 } else {
@@ -547,6 +548,14 @@ export const updateOrderStatus = async (req, res) => {
                     const title = 'Order Shipped!';
                     const body = `Hey ${user.fullname}, your order #${order.orderId} has been shipped!`;
                     await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                    await Notification.create({
+                        title,
+                        body,
+                        type: 'ORDER',
+                        target: String(order.userId),
+                        status: 'SENT',
+                        clickAction: String(order.id)
+                    });
                 }
             } catch (pushErr) {
                 console.error('[Shipping Push Notification Error]:', pushErr);
@@ -632,7 +641,7 @@ export const bulkUpdateOrderStatus = async (req, res) => {
                     let newSubtotal = 0;
                     for (const it of remaining) newSubtotal += Number(it.price) * Number(it.quantity);
                     const orderRecord = await Order.findByPk(cancelOrder.id);
-                    orderRecord.totalAmount = newSubtotal + (Number(orderRecord.deliveryCharge) || 0);
+                    orderRecord.totalAmount = roundTotal(newSubtotal + (Number(orderRecord.deliveryCharge) || 0));
                     orderRecord.dueAmount = Math.max(0, orderRecord.dueAmount - totalReturn);
                     await orderRecord.save();
                 } else {
@@ -670,6 +679,14 @@ export const bulkUpdateOrderStatus = async (req, res) => {
                         const title = 'Order Shipped!';
                         const body = `Hey ${order.user.fullname}, your order #${order.orderId} has been shipped!`;
                         await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                        await Notification.create({
+                            title,
+                            body,
+                            type: 'ORDER',
+                            target: String(order.userId),
+                            status: 'SENT',
+                            clickAction: String(order.id)
+                        });
                     }
                 }
             } catch (pushErr) {
@@ -912,7 +929,7 @@ export const updateOrderItem = async (req, res) => {
         }
 
         const deliveryCharge = parseFloat(order.deliveryCharge || 0);
-        const newTotalAmount = calculatedSubtotal + deliveryCharge;
+        const newTotalAmount = roundTotal(calculatedSubtotal + deliveryCharge);
         const paidAmount = parseFloat(order.paidAmount || 0);
 
         order.totalAmount = newTotalAmount;

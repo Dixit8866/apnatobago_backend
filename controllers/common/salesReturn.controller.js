@@ -17,6 +17,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { roundTotal } from '../../utils/roundHelper.js';
 
 /**
  * @desc    Process a Sales Return for one or more items in an order (Submitted by Delivery Boy, status set to 'Pending')
@@ -168,7 +169,7 @@ export const createSalesReturn = async (req, res) => {
         }
 
         const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
-        const newTotalAmount = newSubtotal + deliveryCharge;
+        const newTotalAmount = roundTotal(newSubtotal + deliveryCharge);
 
         // Update Order total and outstanding dues IMMEDIATELY
         order.totalAmount = newTotalAmount;

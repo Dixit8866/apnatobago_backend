@@ -1,10 +1,11 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn } from '../../models/index.js';
+import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { sendToDevice } from '../../services/notification.service.js';
+import { roundTotal } from '../../utils/roundHelper.js';
 
 const sendDeliveredNotification = async (orderId) => {
     try {
@@ -15,6 +16,14 @@ const sendDeliveredNotification = async (orderId) => {
             const title = 'Order Delivered!';
             const body = `Hey ${order.user.fullname}, your order #${order.orderId} of ₹${order.totalAmount} has been delivered successfully!`;
             await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+            await Notification.create({
+                title,
+                body,
+                type: 'ORDER',
+                target: String(order.userId),
+                status: 'SENT',
+                clickAction: String(order.id)
+            });
         }
     } catch (pushErr) {
         console.error('[Delivered Push Notification Error]:', pushErr);
@@ -313,7 +322,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
                     const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
                     let newSubtotal = 0;
                     for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
-                    order.totalAmount = newSubtotal + (Number(order.deliveryCharge) || 0);
+                    order.totalAmount = roundTotal(newSubtotal + (Number(order.deliveryCharge) || 0));
                     order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
                     await order.save();
                 } else {
@@ -395,7 +404,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
                     const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
                     let newSubtotal = 0;
                     for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
-                    order.totalAmount = newSubtotal + (Number(order.deliveryCharge) || 0);
+                    order.totalAmount = roundTotal(newSubtotal + (Number(order.deliveryCharge) || 0));
                     order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
                     await order.save();
                 } else {
