@@ -4,6 +4,23 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { sendToDevice } from '../../services/notification.service.js';
+
+const sendDeliveredNotification = async (orderId) => {
+    try {
+        const order = await Order.findByPk(orderId, {
+            include: [{ model: User, as: 'user' }]
+        });
+        if (order && order.user && order.user.fcmtoken) {
+            const title = 'Order Delivered!';
+            const body = `Hey ${order.user.fullname}, your order #${order.orderId} of ₹${order.totalAmount} has been delivered successfully!`;
+            await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+        }
+    } catch (pushErr) {
+        console.error('[Delivered Push Notification Error]:', pushErr);
+        logger.error(`[Delivered Push Notification Error]: ${pushErr.message}`);
+    }
+};
 
 /**
  * @desc    Get assigned orders for the logged-in delivery boy
@@ -333,6 +350,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
             } else if (status === 'Completed') {
                 order.orderStatus = 'Delivered';
                 await order.save();
+                await sendDeliveredNotification(order.id);
             }
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", { order });
         }
@@ -406,6 +424,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
             }
         } else if (status === 'Completed') {
             await Order.update({ orderStatus: 'Delivered' }, { where: { id: assignment.orderId } });
+            await sendDeliveredNotification(assignment.orderId);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Assignment status updated successfully.", assignment);
@@ -734,6 +753,10 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+
+        // Trigger Delivered Push Notification
+        await sendDeliveredNotification(assignment.orderId);
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order delivered and payments auto-adjusted successfully.");
     } catch (error) {
         if (t) await t.rollback();
@@ -999,6 +1022,12 @@ export const settleSingleOrderPayment = async (req, res) => {
         }
 
         await t.commit();
+
+        // Trigger Delivered Push Notification for each settled order
+        for (const order of orders) {
+            await sendDeliveredNotification(order.id);
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders settled successfully.", {
             settledOrders: orders.map(o => ({
                 id: o.id,

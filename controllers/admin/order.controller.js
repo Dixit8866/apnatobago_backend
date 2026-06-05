@@ -5,6 +5,7 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML } from '../../utils/invoiceGenerator.js';
+import { sendToDevice } from '../../services/notification.service.js';
 // ... (rest of imports)
 
 const adjustOrderPayments = (order) => {
@@ -538,6 +539,21 @@ export const updateOrderStatus = async (req, res) => {
 
         await order.save();
 
+        // Trigger Shipping Push Notification if status changed to Shipping
+        if (orderStatus === 'Shipping' && prevStatus !== 'Shipping') {
+            try {
+                const user = await User.findByPk(order.userId);
+                if (user && user.fcmtoken) {
+                    const title = 'Order Shipped!';
+                    const body = `Hey ${user.fullname}, your order #${order.orderId} has been shipped!`;
+                    await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                }
+            } catch (pushErr) {
+                console.error('[Shipping Push Notification Error]:', pushErr);
+                logger.error(`[Shipping Push Notification Error]: ${pushErr.message}`);
+            }
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", order);
     } catch (error) {
         logger.error(`[Admin Update Order Status Error]: ${error.message}`);
@@ -639,6 +655,26 @@ export const bulkUpdateOrderStatus = async (req, res) => {
                         }
                     }
                 }
+            }
+        }
+
+        // Trigger Shipping Push Notifications for bulk update if status is Shipping
+        if (orderStatus === 'Shipping') {
+            try {
+                const updatedOrders = await Order.findAll({
+                    where: { id: orderIds },
+                    include: [{ model: User, as: 'user' }]
+                });
+                for (const order of updatedOrders) {
+                    if (order.user && order.user.fcmtoken) {
+                        const title = 'Order Shipped!';
+                        const body = `Hey ${order.user.fullname}, your order #${order.orderId} has been shipped!`;
+                        await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                    }
+                }
+            } catch (pushErr) {
+                console.error('[Bulk Shipping Push Notification Error]:', pushErr);
+                logger.error(`[Bulk Shipping Push Notification Error]: ${pushErr.message}`);
             }
         }
 

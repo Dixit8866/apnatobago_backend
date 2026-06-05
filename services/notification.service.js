@@ -18,7 +18,7 @@ try {
     // 1. Try loading from Full JSON Environment Variable (Recommended for Production/VPS)
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
         serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    } 
+    }
     // 2. Try loading from local JSON file (Easiest for Local Dev)
     else if (existsSync(serviceAccountPath)) {
         serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
@@ -93,6 +93,12 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                 androidChannelId = 'shipping_notification_channel';
                 apnsSound = 'othernotification.mp3';
                 actionValue = data.action || data.clickAction || data.click_action || 'shipping';
+                break;
+            case 'order':
+                androidSound = 'othernotification';
+                androidChannelId = 'orderdetails_notification_channel';
+                apnsSound = 'othernotification.mp3';
+                actionValue = 'orderdetails';
                 break;
             case 'other':
             default:

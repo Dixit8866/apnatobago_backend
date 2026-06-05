@@ -538,8 +538,8 @@ export const createOrder = async (req, res) => {
             if (userData.fcmtoken) {
                 const userTitle = 'Your Order Successful!';
                 const userBody = `Hey ${userData.fullname}, your order #${newOrder.orderId} of ₹${newOrder.totalAmount} has been placed successfully!`;
-                // Use type: 'other' so that it plays the default otherNotification sound
-                await sendToDevice(userData.fcmtoken, userTitle, userBody, null, { type: 'other', orderId: newOrder.id });
+                // Use type: 'order' so that it plays the custom orderDetails notification sound/channel
+                await sendToDevice(userData.fcmtoken, userTitle, userBody, null, { type: 'order', id: String(newOrder.id), orderId: String(newOrder.id) });
             }
         } catch (pushErr) {
             console.error('[User Push Notification Error]:', pushErr);
