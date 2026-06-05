@@ -76,7 +76,7 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
 
         const notificationType = data.type || 'reminder';
 
-        let androidSound = 'otherNotification';
+        let androidSound = 'othernotification';
         let androidChannelId = 'other_notification_channel';
         let apnsSound = 'othernotification.mp3';
         let actionValue = 'FLUTTER_NOTIFICATION_CLICK';
@@ -89,14 +89,14 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                 actionValue = 'categories';
                 break;
             case 'shipping':
-                androidSound = 'otherNotification';
+                androidSound = 'othernotification';
                 androidChannelId = 'shipping_notification_channel';
                 apnsSound = 'othernotification.mp3';
                 actionValue = data.action || data.clickAction || data.click_action || 'shipping';
                 break;
             case 'other':
             default:
-                androidSound = 'otherNotification';
+                androidSound = 'othernotification';
                 androidChannelId = 'other_notification_channel';
                 apnsSound = 'othernotification.mp3';
                 actionValue = data.action || data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
@@ -175,16 +175,16 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
                 actionValue = 'categories';
                 break;
             case 'shipping':
-                androidSound = 'otherNotification';
+                androidSound = 'othernotification';
                 androidChannelId = 'shipping_notification_channel';
-                apnsSound = 'otherNotification.mp3';
+                apnsSound = 'othernotification.mp3';
                 actionValue = data.action || data.clickAction || data.click_action || 'shipping';
                 break;
             case 'other':
             default:
-                androidSound = 'otherNotification';
+                androidSound = 'othernotification';
                 androidChannelId = 'other_notification_channel';
-                apnsSound = 'otherNotification.mp3';
+                apnsSound = 'othernotification.mp3';
                 actionValue = data.action || data.clickAction || data.click_action || 'home';
                 break;
         }
