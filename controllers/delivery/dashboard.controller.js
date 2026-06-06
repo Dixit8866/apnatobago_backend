@@ -1,5 +1,7 @@
 import { Order, OrderAssignment, OrderPayment } from '../../models/index.js';
-import { Op } from 'sequelize';
+import { Op as SeqOp } from 'sequelize';
+// Op already imported above via SeqOp alias; keep this for compatibility
+const Op = SeqOp;
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -42,39 +44,73 @@ export const getDeliveryDashboardStats = async (req, res) => {
         // Define the date range for TODAY aligned to Indian Standard Time (IST) 00:00:00 to 23:59:59.999
         const { todayStart, todayEnd } = getTodayRangeIST();
 
-        // 1. Total Assigned Orders Today (only count active pending/assigned orders)
+        // 1. Total Active (Pending/Assigned) Orders - ALL time, no date restriction
+        //    (delivery boy needs to see ALL pending orders regardless of date)
         const assignedOrdersCount = await OrderAssignment.count({
             where: {
                 deliveryBoyId,
                 status: {
                     [Op.in]: ['Assigned', 'Pending']
-                },
-                assignedAt: {
-                    [Op.between]: [todayStart, todayEnd]
                 }
-            }
+            },
+            include: [{
+                model: Order,
+                as: 'order',
+                required: true,
+                where: {
+                    orderStatus: {
+                        [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel']
+                    }
+                }
+            }]
         });
 
-        // 2. Completed Orders Today
+        // 2. Completed Orders TODAY only (IST)
+        //    Count assignments that are Completed OR whose order is Delivered/Payment Collect/Payment Verify today
         const completedOrdersCount = await OrderAssignment.count({
             where: {
                 deliveryBoyId,
-                status: 'Completed',
-                updatedAt: {
-                    [Op.between]: [todayStart, todayEnd]
-                }
-            }
+                [Op.or]: [
+                    {
+                        status: 'Completed',
+                        updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                    },
+                    {
+                        '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
+                        '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
+                    }
+                ]
+            },
+            include: [{
+                model: Order,
+                as: 'order',
+                required: true
+            }],
+            subQuery: false
         });
 
-        // 3. Cancelled Orders Today
+        // 3. Cancelled Orders TODAY only (IST)
+        //    Count assignments that are Cancelled OR whose order is any cancel variant today
         const cancelledOrdersCount = await OrderAssignment.count({
             where: {
                 deliveryBoyId,
-                status: 'Cancelled',
-                updatedAt: {
-                    [Op.between]: [todayStart, todayEnd]
-                }
-            }
+                [Op.or]: [
+                    {
+                        status: 'Cancelled',
+                        updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                    },
+                    {
+                        '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+                        '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
+                    }
+                ]
+            },
+            include: [{
+                model: Order,
+                as: 'order',
+                required: true
+            }],
+            subQuery: false
         });
 
         // 4. Fetch all payment transactions received by this delivery boy today

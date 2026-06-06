@@ -46,14 +46,16 @@ export const getMyAssignedOrders = async (req, res) => {
         const whereClause = { deliveryBoyId };
         const orderIncludeWhere = {};
 
+        const { todayStart, todayEnd } = getTodayRangeIST();
+
         if (status) {
             if (status === 'Cancelled') {
-                const { todayStart, todayEnd } = getTodayRangeIST();
+                // Strictly today's cancelled only (assignment cancelled OR order cancelled)
                 whereClause[Op.and] = [
                     {
                         [Op.or]: [
                             { status: 'Cancelled' },
-                            { '$order.orderStatus$': 'Cancelled' }
+                            { '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } }
                         ]
                     },
                     {
@@ -64,31 +66,64 @@ export const getMyAssignedOrders = async (req, res) => {
                     }
                 ];
             } else if (status === 'Completed') {
-                const { todayStart, todayEnd } = getTodayRangeIST();
-                whereClause.status = 'Completed';
-                whereClause.updatedAt = { [Op.between]: [todayStart, todayEnd] };
+                // Strictly today's completed only (assignment completed OR order delivered)
+                whereClause[Op.and] = [
+                    {
+                        [Op.or]: [
+                            { status: 'Completed' },
+                            { '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }
+                        ]
+                    },
+                    {
+                        [Op.or]: [
+                            { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
+                            { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
+                        ]
+                    }
+                ];
             } else if (status === 'Assigned' || status === 'Pending') {
+                // ALL time - no date restriction for pending/assigned
                 whereClause.status = status;
-                orderIncludeWhere.orderStatus = { [Op.ne]: 'Cancelled' };
+                orderIncludeWhere.orderStatus = {
+                    [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel']
+                };
             } else {
                 whereClause.status = status;
             }
         } else {
-            const { todayStart, todayEnd } = getTodayRangeIST();
+            // Default: show ALL pending/assigned (any date) + TODAY's completed + TODAY's cancelled
             whereClause[Op.or] = [
                 {
-                    status: { [Op.in]: ['Pending', 'Assigned'] }
+                    // All active pending/assigned orders (any date)
+                    status: { [Op.in]: ['Pending', 'Assigned'] },
+                    '$order.orderStatus$': {
+                        [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel']
+                    }
                 },
                 {
-                    status: 'Completed',
-                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                    // Today's completed (assignment completed OR order delivered today)
+                    [Op.and]: [
+                        {
+                            [Op.or]: [
+                                { status: 'Completed' },
+                                { '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }
+                            ]
+                        },
+                        {
+                            [Op.or]: [
+                                { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
+                                { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
+                            ]
+                        }
+                    ]
                 },
                 {
+                    // Today's cancelled (assignment cancelled OR order cancelled today)
                     [Op.and]: [
                         {
                             [Op.or]: [
                                 { status: 'Cancelled' },
-                                { '$order.orderStatus$': 'Cancelled' }
+                                { '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } }
                             ]
                         },
                         {
@@ -124,7 +159,8 @@ export const getMyAssignedOrders = async (req, res) => {
             ],
             limit,
             offset,
-            order: [['position', 'ASC'], ['assignedAt', 'DESC']],
+            // Pending/Assigned: oldest order first (ASC). Completed/Cancelled: latest first (DESC)
+            order: [['position', 'ASC'], ['assignedAt', 'ASC']],
             subQuery: false
         });
 
