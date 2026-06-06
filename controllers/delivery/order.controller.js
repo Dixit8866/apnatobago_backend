@@ -6,6 +6,7 @@ import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
+import { getTodayRangeIST } from './dashboard.controller.js';
 
 const sendDeliveredNotification = async (orderId) => {
     try {
@@ -47,16 +48,58 @@ export const getMyAssignedOrders = async (req, res) => {
 
         if (status) {
             if (status === 'Cancelled') {
-                whereClause[Op.or] = [
-                    { status: 'Cancelled' },
-                    { '$order.orderStatus$': 'Cancelled' }
+                const { todayStart, todayEnd } = getTodayRangeIST();
+                whereClause[Op.and] = [
+                    {
+                        [Op.or]: [
+                            { status: 'Cancelled' },
+                            { '$order.orderStatus$': 'Cancelled' }
+                        ]
+                    },
+                    {
+                        [Op.or]: [
+                            { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
+                            { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
+                        ]
+                    }
                 ];
+            } else if (status === 'Completed') {
+                const { todayStart, todayEnd } = getTodayRangeIST();
+                whereClause.status = 'Completed';
+                whereClause.updatedAt = { [Op.between]: [todayStart, todayEnd] };
             } else if (status === 'Assigned' || status === 'Pending') {
                 whereClause.status = status;
                 orderIncludeWhere.orderStatus = { [Op.ne]: 'Cancelled' };
             } else {
                 whereClause.status = status;
             }
+        } else {
+            const { todayStart, todayEnd } = getTodayRangeIST();
+            whereClause[Op.or] = [
+                {
+                    status: { [Op.in]: ['Pending', 'Assigned'] }
+                },
+                {
+                    status: 'Completed',
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                },
+                {
+                    [Op.and]: [
+                        {
+                            [Op.or]: [
+                                { status: 'Cancelled' },
+                                { '$order.orderStatus$': 'Cancelled' }
+                            ]
+                        },
+                        {
+                            [Op.or]: [
+                                { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
+                                { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
+                            ]
+                        }
+                    ]
+                }
+            ];
         }
 
         if (search) {
