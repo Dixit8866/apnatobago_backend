@@ -878,7 +878,7 @@ export const downloadInvoice = async (req, res) => {
 export const updateOrderItem = async (req, res) => {
     try {
         const { id, itemId } = req.params;
-        const { quantity, price, sellUnit } = req.body;
+        const { quantity, price, sellUnit, variantId } = req.body;
 
         const order = await Order.findByPk(id);
         if (!order) {
@@ -897,17 +897,48 @@ export const updateOrderItem = async (req, res) => {
         const newQuantity = parseFloat(quantity || 0);
         const newSellUnit = sellUnit || oldSellUnit;
 
-        const variant = await ProductVariant.findByPk(orderItem.variantId);
-        const bUPP = variant?.baseUnitsPerPack || orderItem.variantInfo?.baseUnitsPerPack || 1;
+        let variant = null;
+        if (variantId && variantId !== orderItem.variantId) {
+            variant = await ProductVariant.findByPk(variantId, {
+                include: [
+                    { model: Product, as: 'product' },
+                    { model: Volume, as: 'volumeRef' },
+                    { model: Volume, as: 'baseUnitRef' },
+                    { model: Volume, as: 'innerUnitRef' }
+                ]
+            });
+            if (!variant) {
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found.");
+            }
+        } else {
+            variant = await ProductVariant.findByPk(orderItem.variantId);
+        }
+
+        const oldBUPP = parseFloat(orderItem.variantInfo?.baseUnitsPerPack || 1);
+        const newBUPP = variant ? parseFloat(variant.baseUnitsPerPack || 1) : oldBUPP;
 
         // Calculate old and new base units
-        const oldBaseUnits = oldSellUnit === 'Inner' ? oldQuantity : oldQuantity * bUPP;
-        const newBaseUnits = newSellUnit === 'Inner' ? newQuantity : newQuantity * bUPP;
+        const oldBaseUnits = oldSellUnit === 'Inner' ? oldQuantity : oldQuantity * oldBUPP;
+        const newBaseUnits = newSellUnit === 'Inner' ? newQuantity : newQuantity * newBUPP;
         const baseUnitsDiff = newBaseUnits - oldBaseUnits;
 
         orderItem.quantity = newQuantity;
         orderItem.price = parseFloat(price || 0);
         orderItem.sellUnit = newSellUnit;
+
+        if (variant && variant.id !== orderItem.variantId) {
+            orderItem.variantId = variant.id;
+            orderItem.productId = variant.productId;
+            orderItem.variantInfo = {
+                productName: variant.product?.name || '',
+                volume: variant.volumeRef?.name || '',
+                baseUnitLabel: variant.baseUnitRef?.name || 'Pack',
+                innerUnitLabel: variant.innerUnitRef?.name || 'Pcs',
+                baseUnitsPerPack: newBUPP,
+                image: variant.image || variant.product?.thumbnail || ''
+            };
+        }
+
         await orderItem.save();
 
         // Adjust stock if base units changed
