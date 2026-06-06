@@ -46,8 +46,13 @@ export const getMyAssignedOrders = async (req, res) => {
         const whereClause = { deliveryBoyId };
         const orderIncludeWhere = {};
 
+        let normalizedStatus = status;
         if (status) {
-            if (status === 'Cancelled') {
+            normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+        }
+
+        if (normalizedStatus) {
+            if (normalizedStatus === 'Cancelled') {
                 const { todayStart, todayEnd } = getTodayRangeIST();
                 whereClause[Op.and] = [
                     {
@@ -63,15 +68,15 @@ export const getMyAssignedOrders = async (req, res) => {
                         ]
                     }
                 ];
-            } else if (status === 'Completed') {
+            } else if (normalizedStatus === 'Completed') {
                 const { todayStart, todayEnd } = getTodayRangeIST();
                 whereClause.status = 'Completed';
                 whereClause.updatedAt = { [Op.between]: [todayStart, todayEnd] };
-            } else if (status === 'Assigned' || status === 'Pending') {
-                whereClause.status = status;
+            } else if (normalizedStatus === 'Assigned' || normalizedStatus === 'Pending') {
+                whereClause.status = normalizedStatus;
                 orderIncludeWhere.orderStatus = { [Op.ne]: 'Cancelled' };
             } else {
-                whereClause.status = status;
+                whereClause.status = normalizedStatus;
             }
         } else {
             const { todayStart, todayEnd } = getTodayRangeIST();
@@ -124,7 +129,7 @@ export const getMyAssignedOrders = async (req, res) => {
             ],
             limit,
             offset,
-            order: [['position', 'ASC'], ['assignedAt', 'ASC']],
+            order: [['position', 'ASC'], [{ model: Order, as: 'order' }, 'createdAt', 'ASC']],
             subQuery: false
         });
 
