@@ -91,75 +91,38 @@ export const getDeliveryDashboardStats = async (req, res) => {
         });
         console.log(`[DASHBOARD DEBUG] assignedOrdersCount (all active) : ${assignedOrdersCount}`);
 
-        // 2. DEBUG: Find exact rows matched as "Completed today"
-        const IST_MS = 5.5 * 60 * 60 * 1000;
-        const toISTStr = (d) => d ? new Date(new Date(d).getTime() + IST_MS).toISOString().replace('T',' ').slice(0,19)+' IST' : 'NULL';
+        // 2. Completed Orders TODAY: filter by ORDER's updatedAt (NOT assignment.updatedAt)
+        //    assignment.updatedAt is unreliable - gets bulk-reset by unrelated DB operations
+        const completedOrdersCount = await OrderAssignment.count({
+            where: { deliveryBoyId },
+            include: [{
+                model: Order,
+                as: 'order',
+                required: true,
+                where: {
+                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                }
+            }]
+        });
+        console.log(`[DASHBOARD DEBUG] completedOrdersCount (by order.updatedAt today) : ${completedOrdersCount}`);
 
-        const completedRows = await OrderAssignment.findAll({
-            where: {
-                deliveryBoyId,
-                [Op.or]: [
-                    {
-                        status: 'Completed',
-                        updatedAt: { [Op.between]: [todayStart, todayEnd] }
-                    },
-                    {
-                        '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
-                        '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
-                    }
-                ]
-            },
-            include: [{ model: Order, as: 'order', required: true, attributes: ['id', 'orderId', 'orderStatus', 'updatedAt'] }],
-            attributes: ['id', 'status', 'updatedAt', 'assignedAt'],
-            subQuery: false
+        // 3. Cancelled Orders TODAY: filter by ORDER's updatedAt (NOT assignment.updatedAt)
+        const cancelledOrdersCount = await OrderAssignment.count({
+            where: { deliveryBoyId },
+            include: [{
+                model: Order,
+                as: 'order',
+                required: true,
+                where: {
+                    orderStatus: { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                }
+            }]
         });
-        const completedOrdersCount = completedRows.length;
-        console.log(`[DASHBOARD DEBUG] completedOrdersCount : ${completedOrdersCount}`);
-        completedRows.forEach((row, i) => {
-            console.log(
-                `[DASHBOARD DEBUG COMPLETED][${i+1}]` +
-                ` orderId=${row.order?.orderId || row.order?.id}` +
-                ` | assignment.status=${row.status}` +
-                ` | assignment.updatedAt=${toISTStr(row.updatedAt)}` +
-                ` | order.orderStatus=${row.order?.orderStatus}` +
-                ` | order.updatedAt=${toISTStr(row.order?.updatedAt)}` +
-                ` | assignedAt=${toISTStr(row.assignedAt)}`
-            );
-        });
-
-        // 3. DEBUG: Find exact rows matched as "Cancelled today"
-        const cancelledRows = await OrderAssignment.findAll({
-            where: {
-                deliveryBoyId,
-                [Op.or]: [
-                    {
-                        status: 'Cancelled',
-                        updatedAt: { [Op.between]: [todayStart, todayEnd] }
-                    },
-                    {
-                        '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
-                        '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
-                    }
-                ]
-            },
-            include: [{ model: Order, as: 'order', required: true, attributes: ['id', 'orderId', 'orderStatus', 'updatedAt'] }],
-            attributes: ['id', 'status', 'updatedAt', 'assignedAt'],
-            subQuery: false
-        });
-        const cancelledOrdersCount = cancelledRows.length;
-        console.log(`[DASHBOARD DEBUG] cancelledOrdersCount : ${cancelledOrdersCount}`);
-        cancelledRows.forEach((row, i) => {
-            console.log(
-                `[DASHBOARD DEBUG CANCELLED][${i+1}]` +
-                ` orderId=${row.order?.orderId || row.order?.id}` +
-                ` | assignment.status=${row.status}` +
-                ` | assignment.updatedAt=${toISTStr(row.updatedAt)}` +
-                ` | order.orderStatus=${row.order?.orderStatus}` +
-                ` | order.updatedAt=${toISTStr(row.order?.updatedAt)}` +
-                ` | assignedAt=${toISTStr(row.assignedAt)}`
-            );
-        });
+        console.log(`[DASHBOARD DEBUG] cancelledOrdersCount (by order.updatedAt today) : ${cancelledOrdersCount}`);
         console.log(`[DASHBOARD DEBUG] ========================================\n`);
+
 
         // 4. Fetch all payment transactions received by this delivery boy today
         const todayPayments = await OrderPayment.findAll({
