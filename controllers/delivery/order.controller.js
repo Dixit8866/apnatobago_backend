@@ -61,35 +61,33 @@ export const getMyAssignedOrders = async (req, res) => {
 
         if (status) {
             if (status === 'Cancelled') {
-                // Strictly today's cancelled only (assignment cancelled OR order cancelled)
-                whereClause[Op.and] = [
+                // Strictly today's cancelled only
+                // Each OR branch has its OWN paired status + date check (no cross-combinations)
+                whereClause[Op.or] = [
                     {
-                        [Op.or]: [
-                            { status: 'Cancelled' },
-                            { '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } }
-                        ]
+                        // Branch 1: delivery boy / system marked assignment as Cancelled today
+                        status: 'Cancelled',
+                        updatedAt: { [Op.between]: [todayStart, todayEnd] }
                     },
                     {
-                        [Op.or]: [
-                            { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
-                            { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
-                        ]
+                        // Branch 2: admin/user/system cancelled the order today
+                        '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+                        '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
                     }
                 ];
             } else if (status === 'Completed') {
-                // Strictly today's completed only (assignment completed OR order delivered)
-                whereClause[Op.and] = [
+                // Strictly today's completed only
+                // Each OR branch has its OWN paired status + date check (no cross-combinations)
+                whereClause[Op.or] = [
                     {
-                        [Op.or]: [
-                            { status: 'Completed' },
-                            { '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }
-                        ]
+                        // Branch 1: delivery boy marked as Completed today
+                        status: 'Completed',
+                        updatedAt: { [Op.between]: [todayStart, todayEnd] }
                     },
                     {
-                        [Op.or]: [
-                            { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
-                            { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
-                        ]
+                        // Branch 2: admin/system marked order as Delivered/Payment today
+                        '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
+                        '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
                     }
                 ];
             } else if (status === 'Assigned' || status === 'Pending') {
@@ -105,45 +103,31 @@ export const getMyAssignedOrders = async (req, res) => {
             // Default: show ALL pending/assigned (any date) + TODAY's completed + TODAY's cancelled
             whereClause[Op.or] = [
                 {
-                    // All active pending/assigned orders (any date)
+                    // Branch 1: All active pending/assigned orders (any date, no date filter)
                     status: { [Op.in]: ['Pending', 'Assigned'] },
                     '$order.orderStatus$': {
                         [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel']
                     }
                 },
                 {
-                    // Today's completed (assignment completed OR order delivered today)
-                    [Op.and]: [
-                        {
-                            [Op.or]: [
-                                { status: 'Completed' },
-                                { '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }
-                            ]
-                        },
-                        {
-                            [Op.or]: [
-                                { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
-                                { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
-                            ]
-                        }
-                    ]
+                    // Branch 2a: delivery boy marked as Completed today
+                    status: 'Completed',
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
                 },
                 {
-                    // Today's cancelled (assignment cancelled OR order cancelled today)
-                    [Op.and]: [
-                        {
-                            [Op.or]: [
-                                { status: 'Cancelled' },
-                                { '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } }
-                            ]
-                        },
-                        {
-                            [Op.or]: [
-                                { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
-                                { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
-                            ]
-                        }
-                    ]
+                    // Branch 2b: admin/system marked order as Delivered/Payment today
+                    '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
+                    '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
+                },
+                {
+                    // Branch 3a: assignment cancelled today
+                    status: 'Cancelled',
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
+                },
+                {
+                    // Branch 3b: order cancelled by admin/user/system today
+                    '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+                    '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
                 }
             ];
         }
