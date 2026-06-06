@@ -210,6 +210,21 @@ export const generateOrderInvoice = async (order) => {
             doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text('GRAND TOTAL:', doc.page.width - 180, currentTotalY + 2);
             doc.fillColor('#0d9488').fontSize(12).font('Helvetica-Bold').text(`₹${Number(order.totalAmount).toFixed(2)}`, doc.page.width - 85, currentTotalY, { width: 60, align: 'right' });
 
+            // Calculate cartoon/carton count (volume ID: 83c46539-acaa-45a0-bf29-b4acaa315f08)
+            let cartonCount = 0;
+            items.forEach(it => {
+                const volId = it.variant?.volumeId || it.variantInfo?.volumeId;
+                if (volId === '83c46539-acaa-45a0-bf29-b4acaa315f08') {
+                    cartonCount += Number(it.quantity || 0);
+                }
+            });
+
+            if (cartonCount > 0) {
+                currentTotalY += 16;
+                doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text('CARTOON:', doc.page.width - 180, currentTotalY + 2);
+                doc.fillColor('#000000').fontSize(10).font('Helvetica-Bold').text(`${cartonCount}`, doc.page.width - 85, currentTotalY, { width: 60, align: 'right' });
+            }
+
             // ── Footer ────────────────────────────────────────────────────────
             const footerY = doc.page.height - 100;
             doc.lineWidth(0.3).strokeColor('#cbd5e1').moveTo(25, footerY).lineTo(doc.page.width - 25, footerY).stroke();
