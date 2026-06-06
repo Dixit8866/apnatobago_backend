@@ -22,6 +22,19 @@ export const getTodayRangeIST = () => {
     const now = new Date();
     const todayStart = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours ago
     const todayEnd = now;
+
+    // ── DEBUG: Print IST-readable timestamps ──────────────────────────────────
+    const toIST = (d) => new Date(d.getTime() + (5.5 * 60 * 60 * 1000))
+        .toISOString().replace('T', ' ').slice(0, 19) + ' IST';
+    console.log('[DEBUG getTodayRangeIST] ─────────────────────────────────────');
+    console.log('[DEBUG getTodayRangeIST] Server UTC now :', now.toISOString());
+    console.log('[DEBUG getTodayRangeIST] todayStart IST :', toIST(todayStart));
+    console.log('[DEBUG getTodayRangeIST] todayEnd   IST :', toIST(todayEnd));
+    console.log('[DEBUG getTodayRangeIST] todayStart UTC :', todayStart.toISOString());
+    console.log('[DEBUG getTodayRangeIST] todayEnd   UTC :', todayEnd.toISOString());
+    console.log('[DEBUG getTodayRangeIST] ─────────────────────────────────────');
+    // ─────────────────────────────────────────────────────────────────────────
+
     return { todayStart, todayEnd };
 };
 
@@ -38,8 +51,10 @@ export const getDeliveryDashboardStats = async (req, res) => {
         const riderProfileImage = req.user.profileImage;
 
         logger.info(`[Delivery Dashboard]: Fetching dashboard statistics for rider ${riderName} (${deliveryBoyId})`);
+        console.log(`\n[DASHBOARD DEBUG] ========================================`);
+        console.log(`[DASHBOARD DEBUG] Rider: ${riderName} | ID: ${deliveryBoyId}`);
 
-        // Define the date range for TODAY aligned to Indian Standard Time (IST) 00:00:00 to 23:59:59.999
+        // Define the rolling 24-hour range
         const { todayStart, todayEnd } = getTodayRangeIST();
 
         // 1. Total Active (Pending/Assigned) Orders - ALL time, no date restriction
@@ -62,6 +77,7 @@ export const getDeliveryDashboardStats = async (req, res) => {
                 }
             }]
         });
+        console.log(`[DASHBOARD DEBUG] assignedOrdersCount (all active) : ${assignedOrdersCount}`);
 
         // 2. Completed Orders TODAY only (IST)
         //    Count assignments that are Completed OR whose order is Delivered/Payment Collect/Payment Verify today
@@ -86,6 +102,7 @@ export const getDeliveryDashboardStats = async (req, res) => {
             }],
             subQuery: false
         });
+        console.log(`[DASHBOARD DEBUG] completedOrdersCount (last 24h)  : ${completedOrdersCount}`);
 
         // 3. Cancelled Orders TODAY only (IST)
         //    Count assignments that are Cancelled OR whose order is any cancel variant today
@@ -110,6 +127,8 @@ export const getDeliveryDashboardStats = async (req, res) => {
             }],
             subQuery: false
         });
+        console.log(`[DASHBOARD DEBUG] cancelledOrdersCount (last 24h)  : ${cancelledOrdersCount}`);
+        console.log(`[DASHBOARD DEBUG] ========================================\n`);
 
         // 4. Fetch all payment transactions received by this delivery boy today
         const todayPayments = await OrderPayment.findAll({
