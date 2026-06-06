@@ -160,8 +160,8 @@ export const getMyAssignedOrders = async (req, res) => {
                     where: { orderId: orderIds },
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { 
-                            model: ProductVariant, 
+                        {
+                            model: ProductVariant,
                             as: 'variant',
                             include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
                         }
@@ -225,13 +225,13 @@ export const getAssignmentDetails = async (req, res) => {
                     include: [
                         { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'] },
                         { model: OrderPayment, as: 'payments' },
-                        { 
-                            model: OrderItem, 
+                        {
+                            model: OrderItem,
                             as: 'items',
                             include: [
                                 { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                                { 
-                                    model: ProductVariant, 
+                                {
+                                    model: ProductVariant,
                                     as: 'variant',
                                     include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
                                 }
@@ -267,7 +267,7 @@ export const getAssignmentDetails = async (req, res) => {
         }
 
         const data = assignment.toJSON();
-        
+
         // Dynamically adjust CREDIT payments based on real (CASH/ONLINE) repayments
         if (data.order && data.order.payments) {
             const payments = data.order.payments || [];
@@ -398,8 +398,8 @@ export const updateMyAssignmentStatus = async (req, res) => {
                             const variant = await ProductVariant.findByPk(item.variantId);
                             const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
                             const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                            const baseUnitsToRestore = item.sellUnit === 'Inner' 
-                                ? Number(item.quantity) 
+                            const baseUnitsToRestore = item.sellUnit === 'Inner'
+                                ? Number(item.quantity)
                                 : Number(item.quantity) * sellingVolume * bUPP;
 
                             logger.info(`[Delivery Cancel Restore (no-assignment)]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
@@ -480,8 +480,8 @@ export const updateMyAssignmentStatus = async (req, res) => {
                             const variant = await ProductVariant.findByPk(item.variantId);
                             const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
                             const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                            const baseUnitsToRestore = item.sellUnit === 'Inner' 
-                                ? Number(item.quantity) 
+                            const baseUnitsToRestore = item.sellUnit === 'Inner'
+                                ? Number(item.quantity)
                                 : Number(item.quantity) * sellingVolume * bUPP;
 
                             logger.info(`[Delivery Cancel Restore (assignment)]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
@@ -575,12 +575,12 @@ export const completeOrderAndSettlePayment = async (req, res) => {
     const t = await OrderAssignment.sequelize.transaction();
     try {
         const { assignmentId } = req.params;
-        const { 
-            cashAmount = 0, 
-            onlineAmount = 0, 
-            creditAmount = 0, 
-            onlineTransactionId, 
-            notes 
+        const {
+            cashAmount = 0,
+            onlineAmount = 0,
+            creditAmount = 0,
+            onlineTransactionId,
+            notes
         } = req.body;
         const deliveryBoyId = req.user.id;
 
@@ -653,7 +653,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         let onlineAppliedToCurrent = false;
         if (remainingOnline > 0 && onlineTransactionId && assignment.order.razorpayPaymentId === onlineTransactionId) {
             logger.info(`[Complete Order Settle]: Online payment ${onlineTransactionId} already reflected. Checking for existing payment entry...`);
-            
+
             // Check if the payment entry was already recorded by verifyRazorpayPayment
             const existingPayment = await OrderPayment.findOne({
                 where: {
@@ -693,13 +693,13 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let orderNotes = [];
             let paymentMethodsUsed = [];
-            
+
             // If this is the current order and online was already applied, include it in methods and notes
             if (order.id === assignment.orderId && onlineAppliedToCurrent) {
                 paymentMethodsUsed.push('ONLINE');
                 orderNotes.push(`Paid ${onlineAmount} via Online (Already Verified)`);
             }
-            
+
             let rzpId = order.razorpayPaymentId;
 
             // Try Cash
@@ -710,7 +710,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 order.paidAmount = parseFloat(order.paidAmount) + deduction;
                 orderNotes.push(`Paid ${deduction} via Cash`);
                 paymentMethodsUsed.push('CASH');
-                
+
                 logger.info(`[Complete Order Settle]: Creating CASH payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
                 await OrderPayment.create({
                     orderId: order.id,
@@ -737,7 +737,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     orderNotes.push(`Paid ${deduction} via Online`);
                 }
                 paymentMethodsUsed.push('ONLINE');
-                
+
                 logger.info(`[Complete Order Settle]: Creating ONLINE payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
                 await OrderPayment.create({
                     orderId: order.id,
@@ -761,7 +761,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 // and is still considered a pending due.
                 orderNotes.push(`Paid ${deduction} via Credit`);
                 paymentMethodsUsed.push('CREDIT');
-                
+
                 logger.info(`[Complete Order Settle]: Creating CREDIT payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
                 await OrderPayment.create({
                     orderId: order.id,
@@ -770,7 +770,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     paymentMethod: 'CREDIT',
                     notes: 'Auto-adjusted via User Credit'
                 }, { transaction: t });
-                
+
                 // Deduct from User's creditline and block their credit
                 if (user) {
                     user.creditline = parseFloat(user.creditline) - deduction;
@@ -780,7 +780,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             // Update order record
             order.dueAmount = due;
-            
+
             let newPaymentStatus = 'Pending';
             if (due <= 1e-7) {
                 newPaymentStatus = 'Paid';
@@ -818,13 +818,13 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
         // Ensure current order status is updated to Payment Collect so it lands in the Payment Collect tab
         await Order.update(
-            { orderStatus: 'Payment Collect' }, 
+            { orderStatus: 'Payment Collect' },
             { where: { id: assignment.orderId }, transaction: t }
         );
 
-        await assignment.update({ 
-            status: 'Completed', 
-            notes: notes || assignment.notes 
+        await assignment.update({
+            status: 'Completed',
+            notes: notes || assignment.notes
         }, { transaction: t });
 
         await t.commit();
@@ -836,7 +836,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Complete Order Settle Error]: ${error.message}`);
-        
+
         // Return debug info in the error response for troubleshooting
         return res.status(500).json({
             success: false,
@@ -887,13 +887,13 @@ export const getUserCreditDetails = async (req, res) => {
 export const settleSingleOrderPayment = async (req, res) => {
     const t = await OrderAssignment.sequelize.transaction();
     try {
-        const { 
-            orderId, 
-            cashAmount = 0, 
-            onlineAmount = 0, 
-            creditAmount = 0, 
-            onlineTransactionId, 
-            notes 
+        const {
+            orderId,
+            cashAmount = 0,
+            onlineAmount = 0,
+            creditAmount = 0,
+            onlineTransactionId,
+            notes
         } = req.body;
         const deliveryBoyId = req.user.id;
 
@@ -1152,7 +1152,7 @@ export const restoreUserCreditFromPayment = async (orderId, paymentAmount, user,
                     await creditPayment.update({ amount: newAmount }, { transaction });
                 }
                 remainingRealPayment -= reduction;
-                
+
                 // Restore user's creditline by the same reduction amount!
                 user.creditline = parseFloat(user.creditline) + reduction;
                 if (parseFloat(user.creditline) > 0) {

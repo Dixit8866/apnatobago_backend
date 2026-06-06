@@ -11,7 +11,7 @@ import { roundTotal } from '../../utils/roundHelper.js';
 
 const adjustOrderPayments = (order) => {
     if (!order) return order;
-    
+
     const rowData = order.toJSON ? order.toJSON() : order;
     if (!rowData.payments || rowData.payments.length === 0) return rowData;
 
@@ -31,7 +31,7 @@ const adjustOrderPayments = (order) => {
     const outstandingCredit = Math.max(0, totalCredit - realPaidToCredit);
 
     let remainingCreditToDistribute = outstandingCredit;
-    
+
     const adjustedPayments = payments.map(payment => {
         if (payment.paymentMethod === 'CREDIT') {
             const currentAmount = parseFloat(payment.amount || 0);
@@ -132,7 +132,7 @@ export const getAllOrders = async (req, res) => {
             const now = new Date();
             // Offset to IST (+5.5 hours)
             const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-            
+
             const startOfIstToday = new Date(istTime);
             startOfIstToday.setUTCHours(0, 0, 0, 0);
             const startOfTodayUTC = new Date(startOfIstToday.getTime() - (5.5 * 60 * 60 * 1000));
@@ -234,9 +234,9 @@ export const getAllOrders = async (req, res) => {
                 where: { orderId: orderIds },
                 include: [
                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                    { 
-                        model: ProductVariant, 
-                        as: 'variant', 
+                    {
+                        model: ProductVariant,
+                        as: 'variant',
                         attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
                         include: [
                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
@@ -331,8 +331,8 @@ export const getAllOrders = async (req, res) => {
         const paymentVerifyCountWhere = { ...countWhere, orderStatus: 'Payment Verify' };
         const cancelledCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } };
 
-        const pendingDueCountWhere = { 
-            ...countWhere, 
+        const pendingDueCountWhere = {
+            ...countWhere,
             paymentStatus: { [Op.ne]: 'Paid' },
             orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
         };
@@ -360,7 +360,7 @@ export const getAllOrders = async (req, res) => {
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
-        
+
         // Attach counts to response
         responseData.statusCounts = {
             '': responseData.totalRecords,
@@ -507,7 +507,7 @@ export const updateOrderStatus = async (req, res) => {
         if (newPaidAmount !== undefined) {
             const total = parseFloat(order.totalAmount);
             const paid = parseFloat(newPaidAmount);
-            
+
             order.paidAmount = paid;
             order.dueAmount = Math.max(0, total - paid);
 
@@ -524,7 +524,7 @@ export const updateOrderStatus = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid payment status.");
             }
             order.paymentStatus = paymentStatus;
-            
+
             if (paymentStatus === 'Paid') {
                 order.paidAmount = order.totalAmount;
                 order.dueAmount = 0;
@@ -770,9 +770,9 @@ export const getOrderDetails = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { 
-                            model: ProductVariant, 
-                            as: 'variant', 
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
                             attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
@@ -797,9 +797,9 @@ export const getOrderDetails = async (req, res) => {
                     as: 'returns',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        { 
-                            model: ProductVariant, 
-                            as: 'variant', 
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
                             attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
@@ -911,7 +911,14 @@ export const updateOrderItem = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found.");
             }
         } else {
-            variant = await ProductVariant.findByPk(orderItem.variantId);
+            variant = await ProductVariant.findByPk(orderItem.variantId, {
+                include: [
+                    { model: Product, as: 'product' },
+                    { model: Volume, as: 'volumeRef' },
+                    { model: Volume, as: 'baseUnitRef' },
+                    { model: Volume, as: 'innerUnitRef' }
+                ]
+            });
         }
 
         const oldBUPP = parseFloat(orderItem.variantInfo?.baseUnitsPerPack || 1);
@@ -926,16 +933,24 @@ export const updateOrderItem = async (req, res) => {
         orderItem.price = parseFloat(price || 0);
         orderItem.sellUnit = newSellUnit;
 
-        if (variant && variant.id !== orderItem.variantId) {
-            orderItem.variantId = variant.id;
-            orderItem.productId = variant.productId;
+        if (variant) {
+            if (variant.id !== orderItem.variantId) {
+                orderItem.variantId = variant.id;
+                orderItem.productId = variant.productId;
+            }
             orderItem.variantInfo = {
                 productName: variant.product?.name || '',
-                volume: variant.volumeRef?.name || '',
-                baseUnitLabel: variant.baseUnitRef?.name || 'Pack',
-                innerUnitLabel: variant.innerUnitRef?.name || 'Pcs',
-                baseUnitsPerPack: newBUPP,
-                image: variant.image || variant.product?.thumbnail || ''
+                volume: variant.volume,
+                extra: variant.extra || '',
+                extraName: variant.extra || '',
+                image: variant.image || variant.product?.thumbnail || '',
+                innerUnitLabel: variant.innerUnitRef?.name
+                    ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel)
+                    : variant.innerUnitLabel,
+                baseUnitLabel: variant.baseUnitRef?.name
+                    ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
+                    : variant.baseUnitLabel,
+                sellingVolume: variant.sellingVolume
             };
         }
 
@@ -1005,7 +1020,9 @@ export const addOrderItem = async (req, res) => {
         const variant = await ProductVariant.findByPk(variantId, {
             include: [
                 { model: Product, as: 'product' },
-                { model: Volume, as: 'volumeRef' }
+                { model: Volume, as: 'volumeRef' },
+                { model: Volume, as: 'baseUnitRef' },
+                { model: Volume, as: 'innerUnitRef' }
             ]
         });
         if (!variant) {
@@ -1019,11 +1036,17 @@ export const addOrderItem = async (req, res) => {
         // Build variantInfo snapshot for the order item
         const variantInfo = {
             productName: variant.product?.name || '',
-            volume: variant.volumeRef?.name || '',
-            baseUnitLabel: variant.baseUnitRef?.name || 'Pack',
-            innerUnitLabel: variant.innerUnitRef?.name || 'Pcs',
-            baseUnitsPerPack: bUPP,
-            image: variant.image || variant.product?.thumbnail || ''
+            volume: variant.volume,
+            extra: variant.extra || '',
+            extraName: variant.extra || '',
+            image: variant.image || variant.product?.thumbnail || '',
+            innerUnitLabel: variant.innerUnitRef?.name
+                ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel)
+                : variant.innerUnitLabel,
+            baseUnitLabel: variant.baseUnitRef?.name
+                ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
+                : variant.baseUnitLabel,
+            sellingVolume: variant.sellingVolume
         };
 
         // Create the new order item
