@@ -46,19 +46,14 @@ export const getMyAssignedOrders = async (req, res) => {
         const whereClause = { deliveryBoyId };
         const orderIncludeWhere = {};
 
-        let normalizedStatus = status;
         if (status) {
-            normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-        }
-
-        if (normalizedStatus) {
-            if (normalizedStatus === 'Cancelled') {
+            if (status === 'Cancelled') {
                 const { todayStart, todayEnd } = getTodayRangeIST();
                 whereClause[Op.and] = [
                     {
                         [Op.or]: [
                             { status: 'Cancelled' },
-                            { '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } }
+                            { '$order.orderStatus$': 'Cancelled' }
                         ]
                     },
                     {
@@ -68,57 +63,32 @@ export const getMyAssignedOrders = async (req, res) => {
                         ]
                     }
                 ];
-            } else if (normalizedStatus === 'Completed') {
+            } else if (status === 'Completed') {
                 const { todayStart, todayEnd } = getTodayRangeIST();
-                whereClause[Op.and] = [
-                    {
-                        [Op.or]: [
-                            { status: 'Completed' },
-                            { '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }
-                        ]
-                    },
-                    {
-                        [Op.or]: [
-                            { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
-                            { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
-                        ]
-                    }
-                ];
-            } else if (normalizedStatus === 'Assigned' || normalizedStatus === 'Pending') {
-                whereClause.status = normalizedStatus;
-                orderIncludeWhere.orderStatus = { [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
+                whereClause.status = 'Completed';
+                whereClause.updatedAt = { [Op.between]: [todayStart, todayEnd] };
+            } else if (status === 'Assigned' || status === 'Pending') {
+                whereClause.status = status;
+                orderIncludeWhere.orderStatus = { [Op.ne]: 'Cancelled' };
             } else {
-                whereClause.status = normalizedStatus;
+                whereClause.status = status;
             }
         } else {
             const { todayStart, todayEnd } = getTodayRangeIST();
             whereClause[Op.or] = [
                 {
-                    status: { [Op.in]: ['Pending', 'Assigned'] },
-                    '$order.orderStatus$': { [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                    status: { [Op.in]: ['Pending', 'Assigned'] }
                 },
                 {
-                    [Op.and]: [
-                        {
-                            [Op.or]: [
-                                { status: 'Completed' },
-                                { '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } }
-                            ]
-                        },
-                        {
-                            [Op.or]: [
-                                { updatedAt: { [Op.between]: [todayStart, todayEnd] } },
-                                { '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] } }
-                            ]
-                        }
-                    ]
+                    status: 'Completed',
+                    updatedAt: { [Op.between]: [todayStart, todayEnd] }
                 },
                 {
                     [Op.and]: [
                         {
                             [Op.or]: [
                                 { status: 'Cancelled' },
-                                { '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } }
+                                { '$order.orderStatus$': 'Cancelled' }
                             ]
                         },
                         {
@@ -154,7 +124,7 @@ export const getMyAssignedOrders = async (req, res) => {
             ],
             limit,
             offset,
-            order: [['position', 'ASC'], ['order', 'createdAt', 'ASC']],
+            order: [['position', 'ASC'], ['assignedAt', 'DESC']],
             subQuery: false
         });
 
