@@ -7,23 +7,21 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 
 /**
- * Helper to get the start and end of the current day in Indian Standard Time (IST),
- * returned as UTC Date objects for database querying.
+ * Helper to get a rolling 24-hour window:
+ *   todayStart = exactly 24 hours ago from NOW (in UTC stored in DB)
+ *   todayEnd   = right now
+ * 
+ * This ensures Completed/Cancelled orders from the past 24 hours always
+ * show up regardless of IST midnight boundaries.
+ * 
+ * Example: If it is Saturday 10:22 AM IST, this returns:
+ *   todayStart = Friday 10:22 AM IST (24 hrs ago)
+ *   todayEnd   = Saturday 10:22 AM IST (now)
  */
 export const getTodayRangeIST = () => {
     const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-    
-    const year = istTime.getUTCFullYear();
-    const month = istTime.getUTCMonth();
-    const date = istTime.getUTCDate();
-    
-    const istStart = new Date(Date.UTC(year, month, date, 0, 0, 0, 0));
-    const todayStart = new Date(istStart.getTime() - (5.5 * 60 * 60 * 1000));
-    
-    const istEnd = new Date(Date.UTC(year, month, date, 23, 59, 59, 999));
-    const todayEnd = new Date(istEnd.getTime() - (5.5 * 60 * 60 * 1000));
-    
+    const todayStart = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours ago
+    const todayEnd = now;
     return { todayStart, todayEnd };
 };
 
