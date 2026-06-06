@@ -210,11 +210,23 @@ export const generateOrderInvoice = async (order) => {
             doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text('GRAND TOTAL:', doc.page.width - 180, currentTotalY + 2);
             doc.fillColor('#0d9488').fontSize(12).font('Helvetica-Bold').text(`₹${Number(order.totalAmount).toFixed(2)}`, doc.page.width - 85, currentTotalY, { width: 60, align: 'right' });
 
-            // Calculate cartoon/carton count (volume ID: 83c46539-acaa-45a0-bf29-b4acaa315f08)
+            // Calculate cartoon/carton count robustly
             let cartonCount = 0;
             items.forEach(it => {
                 const volId = it.variant?.volumeId || it.variantInfo?.volumeId;
-                if (volId === '83c46539-acaa-45a0-bf29-b4acaa315f08') {
+                const vol = it.variant?.volume || it.variantInfo?.volume || '';
+                let volStr = '';
+                if (vol) {
+                    volStr = typeof vol === 'object' ? (vol.en || vol.gu || vol.HN || '') : String(vol);
+                }
+                const isCartoon = (
+                    volId === '83c46539-acaa-45a0-bf29-b4acaa315f08' || 
+                    volId === '5cc1c1a1-3789-4823-9e25-227b3f101c5f' || 
+                    volStr.toLowerCase().includes('cartoon') || 
+                    volStr.includes('કાર્ટૂન') || 
+                    volStr.includes('કાર્ટુન')
+                );
+                if (isCartoon) {
                     cartonCount += Number(it.quantity || 0);
                 }
             });
