@@ -29,6 +29,26 @@ const generateUniqueOrderId = async () => {
     return `${nextId}`;
 };
 
+const normalizeOrderItem = (item) => {
+    const itemData = item.toJSON ? item.toJSON() : item;
+    if (itemData.variant) {
+        itemData.variant.extraName = itemData.variant.extra || '';
+        itemData.variant.extra = itemData.variant.extra || '';
+    }
+    if (itemData.variantInfo) {
+        if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
+            itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
+        }
+        if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
+        if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
+    }
+    return itemData;
+};
+
+const formatOrderItems = (items) => {
+    return (items || []).map(normalizeOrderItem);
+};
+
 /**
  * @desc    Create a new order (Checkout)
  * @route   POST /api/user/orders
@@ -821,25 +841,7 @@ export const getOrderDetails = async (req, res) => {
     }
 };
 
-const normalizeOrderItem = (item) => {
-    const itemData = item.toJSON ? item.toJSON() : item;
-    if (itemData.variant) {
-        itemData.variant.extraName = itemData.variant.extra || '';
-        itemData.variant.extra = itemData.variant.extra || '';
-    }
-    if (itemData.variantInfo) {
-        if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
-            itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
-        }
-        if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
-        if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
-    }
-    return itemData;
-};
 
-const formatOrderItems = (items) => {
-    return (items || []).map(normalizeOrderItem);
-};
 
 export const getOrderDetailsV2 = async (req, res) => {
     try {
