@@ -634,13 +634,7 @@ export const getOrders = async (req, res) => {
                     orderData.orderStatus = 'Delivered';
                 }
                 if (orderData.items) {
-                    orderData.items = orderData.items.map(item => {
-                        if (item.variant) {
-                            item.variant.extraName = item.variant.extra || '';
-                            item.variant.extra = item.variant.extra || '';
-                        }
-                        return item;
-                    });
+                    orderData.items = orderData.items.map(normalizeOrderItem);
                 }
                 return orderData;
             });
@@ -672,13 +666,7 @@ export const getOrders = async (req, res) => {
                     orderData.orderStatus = 'Delivered';
                 }
                 if (orderData.items) {
-                    orderData.items = orderData.items.map(item => {
-                        if (item.variant) {
-                            item.variant.extraName = item.variant.extra || '';
-                            item.variant.extra = item.variant.extra || '';
-                        }
-                        return item;
-                    });
+                    orderData.items = orderData.items.map(normalizeOrderItem);
                 }
                 return orderData;
             });
@@ -771,14 +759,7 @@ export const getOrderDetails = async (req, res) => {
             }
 
             // Format paginated items
-            const formattedItems = itemsResult.rows.map(item => {
-                const itemData = item.toJSON ? item.toJSON() : item;
-                if (itemData.variant) {
-                    itemData.variant.extraName = itemData.variant.extra || '';
-                    itemData.variant.extra = itemData.variant.extra || '';
-                }
-                return itemData;
-            });
+            const formattedItems = itemsResult.rows.map(normalizeOrderItem);
 
             // Add paginated items to order data
             orderData.items = formattedItems;
@@ -829,13 +810,7 @@ export const getOrderDetails = async (req, res) => {
                 orderData.orderStatus = 'Delivered';
             }
             if (orderData.items) {
-                orderData.items = orderData.items.map(item => {
-                    if (item.variant) {
-                        item.variant.extraName = item.variant.extra || '';
-                        item.variant.extra = item.variant.extra || '';
-                    }
-                    return item;
-                });
+                orderData.items = orderData.items.map(normalizeOrderItem);
             }
         }
 
@@ -851,6 +826,13 @@ const normalizeOrderItem = (item) => {
     if (itemData.variant) {
         itemData.variant.extraName = itemData.variant.extra || '';
         itemData.variant.extra = itemData.variant.extra || '';
+    }
+    if (itemData.variantInfo) {
+        if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
+            itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
+        }
+        if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
+        if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
     }
     return itemData;
 };

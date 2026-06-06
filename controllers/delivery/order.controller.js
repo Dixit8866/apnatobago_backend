@@ -178,7 +178,19 @@ export const getMyAssignedOrders = async (req, res) => {
                 // Attach items to the order models
                 result.rows.forEach(item => {
                     if (item.order) {
-                        item.order.setDataValue('items', itemsMap[item.order.id] || []);
+                        const rawItems = itemsMap[item.order.id] || [];
+                        const formattedItems = rawItems.map(it => {
+                            const itemData = it.toJSON ? it.toJSON() : it;
+                            if (itemData.variantInfo) {
+                                if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
+                                    itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
+                                }
+                                if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
+                                if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
+                            }
+                            return itemData;
+                        });
+                        item.order.setDataValue('items', formattedItems);
                     }
                 });
             }
@@ -267,6 +279,19 @@ export const getAssignmentDetails = async (req, res) => {
         }
 
         const data = assignment.toJSON();
+
+        // Sanitize variantInfo in items
+        if (data.order && data.order.items) {
+            data.order.items.forEach(itemData => {
+                if (itemData.variantInfo) {
+                    if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
+                        itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
+                    }
+                    if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
+                    if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
+                }
+            });
+        }
 
         // Dynamically adjust CREDIT payments based on real (CASH/ONLINE) repayments
         if (data.order && data.order.payments) {
