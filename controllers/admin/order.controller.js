@@ -952,3 +952,157 @@ export const updateOrderItem = async (req, res) => {
     }
 };
 
+/**
+ * @desc    Add a new item to an existing order
+ * @route   POST /api/admin/orders/:id/items
+ * @access  Private (Admin)
+ */
+export const addOrderItem = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { variantId, quantity, price, sellUnit } = req.body;
+
+        if (!variantId || !quantity || !price) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "variantId, quantity and price are required.");
+        }
+
+        const order = await Order.findByPk(id);
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const variant = await ProductVariant.findByPk(variantId, {
+            include: [
+                { model: Product, as: 'product' },
+                { model: Volume, as: 'volumeRef' }
+            ]
+        });
+        if (!variant) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found.");
+        }
+
+        const qty = parseFloat(quantity);
+        const unitSell = sellUnit || 'Base';
+        const bUPP = parseFloat(variant.baseUnitsPerPack || 1);
+
+        // Build variantInfo snapshot for the order item
+        const variantInfo = {
+            productName: variant.product?.name || '',
+            volume: variant.volumeRef?.name || '',
+            baseUnitLabel: variant.baseUnitRef?.name || 'Pack',
+            innerUnitLabel: variant.innerUnitRef?.name || 'Pcs',
+            baseUnitsPerPack: bUPP,
+            image: variant.image || variant.product?.thumbnail || ''
+        };
+
+        // Create the new order item
+        const newItem = await OrderItem.create({
+            orderId: order.id,
+            productId: variant.productId,
+            variantId: variant.id,
+            quantity: qty,
+            price: parseFloat(price),
+            sellUnit: unitSell,
+            variantInfo
+        });
+
+        // Deduct from stock
+        const baseUnitsToDeduct = unitSell === 'Inner' ? qty : qty * bUPP;
+        const stock = await InventoryStock.findOne({
+            where: { productId: variant.productId },
+            order: [['createdAt', 'DESC']]
+        });
+        if (stock) {
+            await stock.update({ totalBaseUnits: Math.max(0, stock.totalBaseUnits - baseUnitsToDeduct) });
+        }
+
+        // Recalculate order totals
+        const allItems = await OrderItem.findAll({ where: { orderId: order.id } });
+        let calculatedSubtotal = 0;
+        for (const item of allItems) {
+            calculatedSubtotal += parseFloat(item.price || 0) * parseFloat(item.quantity || 0);
+        }
+
+        const deliveryCharge = parseFloat(order.deliveryCharge || 0);
+        const newTotalAmount = roundTotal(calculatedSubtotal + deliveryCharge);
+        const paidAmount = parseFloat(order.paidAmount || 0);
+
+        order.totalAmount = newTotalAmount;
+        order.dueAmount = Math.max(0, newTotalAmount - paidAmount);
+        if (paidAmount >= newTotalAmount) order.paymentStatus = 'Paid';
+        else if (paidAmount > 0) order.paymentStatus = 'Partial';
+        else order.paymentStatus = 'Pending';
+
+        await order.save();
+
+        logger.info(`[Admin Add Order Item]: Added variant ${variantId} to order ${id}`);
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Item added to order successfully.", { item: newItem, order });
+    } catch (error) {
+        logger.error(`[Admin Add Order Item Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Delete an item from an existing order (qty set to 0)
+ * @route   DELETE /api/admin/orders/:id/items/:itemId
+ * @access  Private (Admin)
+ */
+export const deleteOrderItem = async (req, res) => {
+    try {
+        const { id, itemId } = req.params;
+
+        const order = await Order.findByPk(id);
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const orderItem = await OrderItem.findOne({ where: { id: itemId, orderId: order.id } });
+        if (!orderItem) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order item not found.");
+        }
+
+        const qty = parseFloat(orderItem.quantity || 0);
+        const unitSell = orderItem.sellUnit || 'Base';
+        const variant = await ProductVariant.findByPk(orderItem.variantId);
+        const bUPP = parseFloat(variant?.baseUnitsPerPack || orderItem.variantInfo?.baseUnitsPerPack || 1);
+
+        // Restore stock
+        const baseUnitsToRestore = unitSell === 'Inner' ? qty : qty * bUPP;
+        const stock = await InventoryStock.findOne({
+            where: { productId: orderItem.productId },
+            order: [['createdAt', 'DESC']]
+        });
+        if (stock) {
+            await stock.update({ totalBaseUnits: stock.totalBaseUnits + baseUnitsToRestore });
+        }
+
+        await orderItem.destroy();
+
+        // Recalculate order totals
+        const allItems = await OrderItem.findAll({ where: { orderId: order.id } });
+        let calculatedSubtotal = 0;
+        for (const item of allItems) {
+            calculatedSubtotal += parseFloat(item.price || 0) * parseFloat(item.quantity || 0);
+        }
+
+        const deliveryCharge = parseFloat(order.deliveryCharge || 0);
+        const newTotalAmount = roundTotal(calculatedSubtotal + deliveryCharge);
+        const paidAmount = parseFloat(order.paidAmount || 0);
+
+        order.totalAmount = newTotalAmount;
+        order.dueAmount = Math.max(0, newTotalAmount - paidAmount);
+        if (paidAmount >= newTotalAmount) order.paymentStatus = 'Paid';
+        else if (paidAmount > 0) order.paymentStatus = 'Partial';
+        else order.paymentStatus = 'Pending';
+
+        await order.save();
+
+        logger.info(`[Admin Delete Order Item]: Removed item ${itemId} from order ${id}`);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Item removed from order successfully.", order);
+    } catch (error) {
+        logger.error(`[Admin Delete Order Item Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+

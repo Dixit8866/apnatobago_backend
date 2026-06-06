@@ -7,7 +7,9 @@ import {
     downloadDeliveryLabel,
     bulkUpdateOrderStatus,
     bulkVerifyPayments,
-    updateOrderItem
+    updateOrderItem,
+    addOrderItem,
+    deleteOrderItem
 } from '../../controllers/admin/order.controller.js';
 import { getSalesReturns, approveSalesReturn } from '../../controllers/common/salesReturn.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
@@ -27,5 +29,7 @@ router.put('/bulk-status', bulkUpdateOrderStatus);
 router.put('/bulk-verify-payments', bulkVerifyPayments);
 router.put('/:id/status', updateOrderStatus);
 router.put('/:id/items/:itemId', updateOrderItem);
+router.post('/:id/items', addOrderItem);
+router.delete('/:id/items/:itemId', deleteOrderItem);
 
 export default router;
