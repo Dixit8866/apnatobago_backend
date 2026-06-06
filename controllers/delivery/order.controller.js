@@ -129,7 +129,7 @@ export const getMyAssignedOrders = async (req, res) => {
             ],
             limit,
             offset,
-            order: [['position', 'ASC'], [{ model: Order, as: 'order' }, 'createdAt', 'ASC']],
+            order: [['position', 'ASC'], ['order', 'createdAt', 'ASC']],
             subQuery: false
         });
 
