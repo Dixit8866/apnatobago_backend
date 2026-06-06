@@ -106,7 +106,7 @@ export const createOrder = async (req, res) => {
             if (variant.product?.isCombo) {
                 // Find matching or default variant for Combo Product 1
                 let combo1Variant = await ProductVariant.findOne({
-                    where: { 
+                    where: {
                         productId: variant.product.comboProduct1Id,
                         ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                     },
@@ -118,7 +118,7 @@ export const createOrder = async (req, res) => {
 
                 // Find matching or default variant for Combo Product 2
                 let combo2Variant = await ProductVariant.findOne({
-                    where: { 
+                    where: {
                         productId: variant.product.comboProduct2Id,
                         ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                     },
@@ -404,7 +404,7 @@ export const createOrder = async (req, res) => {
 
                     for (const cp of comboProducts) {
                         const compVariant = await ProductVariant.findOne({
-                            where: { 
+                            where: {
                                 productId: cp.id,
                                 ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                             },
@@ -1004,7 +1004,7 @@ export const cancelOrder = async (req, res) => {
             whereClause.orderId = id;
         }
 
-        const order = await Order.findOne({ 
+        const order = await Order.findOne({
             where: whereClause,
             include: [{ model: OrderItem, as: 'items' }]
         });
@@ -1079,7 +1079,7 @@ export const cancelOrder = async (req, res) => {
                         ];
                         for (const cpId of comboProducts) {
                             const compVariant = await ProductVariant.findOne({
-                                where: { 
+                                where: {
                                     productId: cpId,
                                     ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                                 }
@@ -1108,8 +1108,8 @@ export const cancelOrder = async (req, res) => {
                     } else {
                         const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
                         const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
-                            ? Number(item.quantity) 
+                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
+                            ? Number(item.quantity)
                             : Number(item.quantity) * sellingVolume * bUPP);
 
                         logger.info(`[Cancel Order Restore]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore} base units`);
