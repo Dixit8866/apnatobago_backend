@@ -7,29 +7,40 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 
 /**
- * Helper to get a rolling 24-hour window:
- *   todayStart = exactly 24 hours ago from NOW (in UTC stored in DB)
- *   todayEnd   = right now
- * 
- * This ensures Completed/Cancelled orders from the past 24 hours always
- * show up regardless of IST midnight boundaries.
- * 
- * Example: If it is Saturday 10:22 AM IST, this returns:
- *   todayStart = Friday 10:22 AM IST (24 hrs ago)
- *   todayEnd   = Saturday 10:22 AM IST (now)
+ * Returns today's full calendar day range in IST (Indian Standard Time UTC+5:30),
+ * as UTC Date objects for database querying.
+ *
+ * "Today" = the current calendar date in IST, from 00:00:00.000 IST to 23:59:59.999 IST.
+ *
+ * Example: If server time is 2026-06-06T05:00:00Z (Saturday 10:30 IST), returns:
+ *   todayStart = 2026-06-05T18:30:00.000Z  (Saturday 00:00:00 IST)
+ *   todayEnd   = 2026-06-06T18:29:59.999Z  (Saturday 23:59:59 IST)
  */
 export const getTodayRangeIST = () => {
     const now = new Date();
-    const todayStart = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours ago
-    const todayEnd = now;
 
-    // ── DEBUG: Print IST-readable timestamps ──────────────────────────────────
-    const toIST = (d) => new Date(d.getTime() + (5.5 * 60 * 60 * 1000))
-        .toISOString().replace('T', ' ').slice(0, 19) + ' IST';
+    // Shift to IST to figure out the current IST calendar date
+    const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+
+    const year  = istNow.getUTCFullYear();
+    const month = istNow.getUTCMonth();
+    const date  = istNow.getUTCDate();
+
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 19800000 ms
+
+    // IST midnight → UTC
+    const todayStart = new Date(Date.UTC(year, month, date, 0,  0,  0,   0) - IST_OFFSET_MS);
+    // IST 23:59:59.999 → UTC
+    const todayEnd   = new Date(Date.UTC(year, month, date, 23, 59, 59, 999) - IST_OFFSET_MS);
+
+    // ── DEBUG ────────────────────────────────────────────────────────────────
+    const toIST = (d) => new Date(d.getTime() + IST_OFFSET_MS)
+        .toISOString().replace('T', ' ').slice(0, 23) + ' IST';
     console.log('[DEBUG getTodayRangeIST] ─────────────────────────────────────');
     console.log('[DEBUG getTodayRangeIST] Server UTC now :', now.toISOString());
-    console.log('[DEBUG getTodayRangeIST] todayStart IST :', toIST(todayStart));
-    console.log('[DEBUG getTodayRangeIST] todayEnd   IST :', toIST(todayEnd));
+    console.log('[DEBUG getTodayRangeIST] IST now        :', toIST(now));
+    console.log('[DEBUG getTodayRangeIST] todayStart IST :', toIST(todayStart), '← today 00:00:00');
+    console.log('[DEBUG getTodayRangeIST] todayEnd   IST :', toIST(todayEnd),   '← today 23:59:59');
     console.log('[DEBUG getTodayRangeIST] todayStart UTC :', todayStart.toISOString());
     console.log('[DEBUG getTodayRangeIST] todayEnd   UTC :', todayEnd.toISOString());
     console.log('[DEBUG getTodayRangeIST] ─────────────────────────────────────');
@@ -37,6 +48,7 @@ export const getTodayRangeIST = () => {
 
     return { todayStart, todayEnd };
 };
+
 
 /**
  * @desc    Get dashboard statistics and summaries for the logged-in delivery boy
