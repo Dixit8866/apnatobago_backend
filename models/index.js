@@ -294,12 +294,6 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Product variants position column failed:', e.message); }
 
         try {
-            // Ensure position column exists in order_assignments and has no NULL values
-            await sequelize.query('ALTER TABLE order_assignments ADD COLUMN IF NOT EXISTS "position" INTEGER DEFAULT 0');
-            await sequelize.query('UPDATE order_assignments SET "position" = 0 WHERE "position" IS NULL');
-        } catch (e) { console.log('[Migration Warning] Order assignments position column migration failed:', e.message); }
-
-        try {
             // Add isCombo, comboProduct1Id, comboProduct2Id to products
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "isCombo" BOOLEAN DEFAULT false');
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "comboProduct1Id" UUID');
