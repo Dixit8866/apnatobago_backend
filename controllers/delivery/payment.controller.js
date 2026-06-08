@@ -6,6 +6,7 @@ import logger from '../../logger/apiLogger.js';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { Op } from 'sequelize';
+import { getPaginationOptions } from '../../helpers/query.helper.js';
 
 /**
  * @desc    Initialize Razorpay Order for single or multiple existing orders (Payment Collection)
@@ -270,7 +271,32 @@ export const getCollectedPayments = async (req, res) => {
 
         logger.info(`[Delivery Payments]: Fetching collected payments for rider ${req.user.name} (${deliveryBoyId})`);
 
-        // Fetch all payments collected today by this delivery boy
+        // 1. Fetch ALL payments collected today to calculate overall totals (unpaginated)
+        const allPayments = await OrderPayment.findAll({
+            where: {
+                deliveryBoyId,
+                createdAt: {
+                    [Op.between]: [todayStart, todayEnd]
+                }
+            }
+        });
+
+        let cashTotal = 0;
+        let onlineTotal = 0;
+        let creditTotal = 0;
+
+        allPayments.forEach(payment => {
+            const amount = parseFloat(payment.amount || 0);
+            const method = payment.paymentMethod?.toUpperCase();
+            if (method === 'CASH') cashTotal += amount;
+            else if (method === 'ONLINE') onlineTotal += amount;
+            else if (method === 'CREDIT') creditTotal += amount;
+        });
+
+        // 2. Fetch paginated payments for list details
+        const pagination = getPaginationOptions(req.query);
+        const { limit, offset } = pagination;
+
         const payments = await OrderPayment.findAll({
             where: {
                 deliveryBoyId,
@@ -296,12 +322,9 @@ export const getCollectedPayments = async (req, res) => {
                     ]
                 }
             ],
+            ...(req.query.paginate !== 'false' ? { limit, offset } : {}),
             order: [['createdAt', 'DESC']]
         });
-
-        let cashTotal = 0;
-        let onlineTotal = 0;
-        let creditTotal = 0;
 
         const shopwiseMasterMap = {};
 
@@ -325,13 +348,10 @@ export const getCollectedPayments = async (req, res) => {
             }
 
             if (method === 'CASH') {
-                cashTotal += amount;
                 shopwiseMasterMap[shopName].cash += amount;
             } else if (method === 'ONLINE') {
-                onlineTotal += amount;
                 shopwiseMasterMap[shopName].online += amount;
             } else if (method === 'CREDIT') {
-                creditTotal += amount;
                 shopwiseMasterMap[shopName].credit += amount;
             }
             shopwiseMasterMap[shopName].total += amount;
@@ -417,9 +437,42 @@ export const getSubmittedPayments = async (req, res) => {
 
         logger.info(`[Delivery Payments]: Fetching submitted payments for rider ${req.user.name} (${deliveryBoyId})`);
 
-        // Fetch all payments submitted today by this delivery boy
-        // Note: isSubmitted must be true, and the verification/submission happened today.
-        // We look at submittedAt OR createdAt for today depending on when it was verified.
+        // 1. Fetch ALL payments submitted today to calculate overall totals (unpaginated)
+        const allPayments = await OrderPayment.findAll({
+            where: {
+                deliveryBoyId,
+                isSubmitted: true,
+                [Op.or]: [
+                    {
+                        submittedAt: {
+                            [Op.between]: [todayStart, todayEnd]
+                        }
+                    },
+                    {
+                        createdAt: {
+                            [Op.between]: [todayStart, todayEnd]
+                        }
+                    }
+                ]
+            }
+        });
+
+        let cashTotal = 0;
+        let onlineTotal = 0;
+        let creditTotal = 0;
+
+        allPayments.forEach(payment => {
+            const amount = parseFloat(payment.amount || 0);
+            const method = payment.paymentMethod?.toUpperCase();
+            if (method === 'CASH') cashTotal += amount;
+            else if (method === 'ONLINE') onlineTotal += amount;
+            else if (method === 'CREDIT') creditTotal += amount;
+        });
+
+        // 2. Fetch paginated payments for list details
+        const pagination = getPaginationOptions(req.query);
+        const { limit, offset } = pagination;
+
         const payments = await OrderPayment.findAll({
             where: {
                 deliveryBoyId,
@@ -455,12 +508,9 @@ export const getSubmittedPayments = async (req, res) => {
                     ]
                 }
             ],
+            ...(req.query.paginate !== 'false' ? { limit, offset } : {}),
             order: [['updatedAt', 'DESC']]
         });
-
-        let cashTotal = 0;
-        let onlineTotal = 0;
-        let creditTotal = 0;
 
         const shopwiseMasterMap = {};
 
@@ -484,13 +534,10 @@ export const getSubmittedPayments = async (req, res) => {
             }
 
             if (method === 'CASH') {
-                cashTotal += amount;
                 shopwiseMasterMap[shopName].cash += amount;
             } else if (method === 'ONLINE') {
-                onlineTotal += amount;
                 shopwiseMasterMap[shopName].online += amount;
             } else if (method === 'CREDIT') {
-                creditTotal += amount;
                 shopwiseMasterMap[shopName].credit += amount;
             }
             shopwiseMasterMap[shopName].total += amount;
