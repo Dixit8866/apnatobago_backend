@@ -81,10 +81,10 @@ const normalizeOrderItem = (item) => {
     if (itemData.variant) {
         itemData.variant.extraName = itemData.variant.extra || '';
         itemData.variant.extra = itemData.variant.extra || '';
-        itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
+        // itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
     }
     if (itemData.variantInfo) {
-        itemData.variantInfo.volume = ensureVolumeObject(itemData.variantInfo.volume);
+        // itemData.variantInfo.volume = ensureVolumeObject(itemData.variantInfo.volume);
         if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
         if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
     }
@@ -869,8 +869,6 @@ export const getOrderDetails = async (req, res) => {
         const userId = req.user.id;
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
 
-        console.log(`[Debug getOrderDetails API] id: ${id}, userId: ${userId}, query: ${JSON.stringify(req.query)}`);
-
         // Build the include array for OrderItem
         const orderItemInclude = [
             { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
@@ -920,7 +918,6 @@ export const getOrderDetails = async (req, res) => {
             });
 
             if (!order) {
-                console.log(`[Debug getOrderDetails API] Order not found for ID: ${id}`);
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
@@ -983,25 +980,14 @@ export const getOrderDetails = async (req, res) => {
             });
 
             if (!order) {
-                console.log(`[Debug getOrderDetails API] Order not found for ID: ${id}`);
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
             orderData = normalizeOrder(order);
         }
 
-        console.log(`[Debug getOrderDetails API] Success. Sample Data:`, {
-            id: orderData.id,
-            orderId: orderData.orderId,
-            returns: orderData.returns,
-            user: orderData.user,
-            firstItemVolume: orderData.items?.[0]?.variantInfo?.volume,
-            firstItemVariantVolume: orderData.items?.[0]?.variant?.volume
-        });
-
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", orderData);
     } catch (error) {
-        console.error(`[Debug getOrderDetails API] Error:`, error);
         logger.error(`[Get Order Details Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
