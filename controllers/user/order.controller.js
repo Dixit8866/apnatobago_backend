@@ -391,6 +391,9 @@ export const createOrder = async (req, res) => {
                 deliveryRoundIdVal = matchedRound.id;
                 deliveryRoundTimingVal = `${matchedRound.name} (${matchedRound.start} - ${matchedRound.end})`;
             }
+        } else if (deliveryMode === 'Express') {
+            deliveryRoundIdVal = 'express';
+            deliveryRoundTimingVal = 'Express Delivery';
         }
 
         // 5. Create the Order
