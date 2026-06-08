@@ -686,6 +686,13 @@ export const getOrders = async (req, res) => {
                 return orderData;
             });
 
+            if (updatedOrders && updatedOrders.length > 0) {
+                const firstOrder = updatedOrders[0];
+                if (firstOrder.items && firstOrder.items.length > 0) {
+                    console.log(`[Debug getOrders] (Non-paginated) First Order ID: ${firstOrder.id}, First Item variantInfo:`, JSON.stringify(firstOrder.items[0].variantInfo, null, 2));
+                }
+            }
+
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
         }
 
@@ -717,6 +724,13 @@ export const getOrders = async (req, res) => {
                 }
                 return orderData;
             });
+        }
+
+        if (formattedResult && formattedResult.items && formattedResult.items.length > 0) {
+            const firstOrder = formattedResult.items[0];
+            if (firstOrder.items && firstOrder.items.length > 0) {
+                console.log(`[Debug getOrders] (Paginated) First Order ID: ${firstOrder.id}, First Item variantInfo:`, JSON.stringify(firstOrder.items[0].variantInfo, null, 2));
+            }
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", formattedResult);
