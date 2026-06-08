@@ -33,7 +33,7 @@ const ensureVolumeObject = (vol) => {
     if (!vol) {
         return { en: '', gu: '', hn: '' };
     }
-    
+
     // If it's already an object, clean and return it
     if (typeof vol === 'object') {
         return {
@@ -42,7 +42,7 @@ const ensureVolumeObject = (vol) => {
             hn: String(vol.hn || vol.en || vol.gu || '')
         };
     }
-    
+
     // If it's a string, check if it's JSON stringified
     if (typeof vol === 'string') {
         const trimmed = vol.trim();
@@ -66,7 +66,7 @@ const ensureVolumeObject = (vol) => {
             hn: trimmed
         };
     }
-    
+
     // For numbers/etc.
     const strVal = String(vol);
     return {
@@ -81,7 +81,7 @@ const normalizeOrderItem = (item) => {
     if (itemData.variant) {
         itemData.variant.extraName = itemData.variant.extra || '';
         itemData.variant.extra = itemData.variant.extra || '';
-        // itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
+        itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
     }
     if (itemData.variantInfo) {
         // itemData.variantInfo.volume = ensureVolumeObject(itemData.variantInfo.volume);
@@ -98,7 +98,7 @@ const formatOrderItems = (items) => {
 const normalizeOrder = (order) => {
     if (!order) return null;
     const orderData = order.toJSON ? order.toJSON() : order;
-    
+
     // 1. Clean items
     if (orderData.items) {
         orderData.items = orderData.items.map(normalizeOrderItem);
