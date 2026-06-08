@@ -1003,13 +1003,15 @@ export const getOrderDetails = async (req, res) => {
     } catch (error) {
         console.error(`[Debug getOrderDetails API] Error:`, error);
         logger.error(`[Get Order Details Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATexport const getOrderDetailsV2 = async (req, res) => {
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+export const getOrderDetailsV2 = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user.id;
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
-
-        console.log(`[Debug getOrderDetailsV2 API] id: ${id}, userId: ${userId}, query: ${JSON.stringify(req.query)}`);
 
         const orderItemInclude = [
             { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
@@ -1059,7 +1061,6 @@ export const getOrderDetails = async (req, res) => {
             });
 
             if (!order) {
-                console.log(`[Debug getOrderDetailsV2 API] Order not found for ID: ${id}`);
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
@@ -1087,15 +1088,6 @@ export const getOrderDetails = async (req, res) => {
                 orderDetails.orderDetails.items = items;
                 orderDetails.orderDetails.itemsPagination = itemsPagination;
             }
-
-            console.log(`[Debug getOrderDetailsV2 API] Success (Paginated). Sample Data:`, {
-                id: orderData.id,
-                orderId: orderData.orderId,
-                returns: orderData.returns,
-                user: orderData.user,
-                firstItemVolume: items?.[0]?.variantInfo?.volume,
-                firstItemVariantVolume: items?.[0]?.variant?.volume
-            });
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
                 ...orderData,
@@ -1134,7 +1126,6 @@ export const getOrderDetails = async (req, res) => {
         });
 
         if (!order) {
-            console.log(`[Debug getOrderDetailsV2 API] Order not found for ID: ${id}`);
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
@@ -1146,26 +1137,14 @@ export const getOrderDetails = async (req, res) => {
             orderDetails.orderDetails.items = items;
         }
 
-        console.log(`[Debug getOrderDetailsV2 API] Success (Non-paginated). Sample Data:`, {
-            id: orderData.id,
-            orderId: orderData.orderId,
-            returns: orderData.returns,
-            user: orderData.user,
-            firstItemVolume: items?.[0]?.variantInfo?.volume,
-            firstItemVariantVolume: items?.[0]?.variant?.volume
-        });
-
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
             ...orderData,
             orderDetails,
             items
         });
     } catch (error) {
-        console.error(`[Debug getOrderDetailsV2 API] Error:`, error);
         logger.error(`[Get Order Details Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
-    }
-};ATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
 
