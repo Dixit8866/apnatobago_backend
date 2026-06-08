@@ -36,8 +36,18 @@ const normalizeOrderItem = (item) => {
         itemData.variant.extra = itemData.variant.extra || '';
     }
     if (itemData.variantInfo) {
-        if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
-            itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
+        let vol = itemData.variantInfo.volume;
+        if (typeof vol === 'string' || typeof vol === 'number') {
+            const strVal = String(vol);
+            itemData.variantInfo.volume = { en: strVal, gu: strVal, hn: strVal };
+        } else if (typeof vol === 'object' && vol !== null) {
+            itemData.variantInfo.volume = {
+                en: vol.en || vol.gu || vol.hn || '',
+                gu: vol.gu || vol.en || vol.hn || '',
+                hn: vol.hn || vol.en || vol.gu || ''
+            };
+        } else {
+            itemData.variantInfo.volume = { en: '', gu: '', hn: '' };
         }
         if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
         if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
