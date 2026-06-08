@@ -99,6 +99,14 @@ const Order = sequelize.define(
             type: DataTypes.DECIMAL(10, 2),
             defaultValue: 0,
         },
+        deliveryRoundId: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        deliveryRoundTiming: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,

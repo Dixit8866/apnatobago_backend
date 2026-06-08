@@ -321,8 +321,8 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Help supports image column failed:', e.message); }
 
         try {
-            // Add timing and app settings fields to app_settings
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "supportPhoneNumber" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "showExpressDelivery" BOOLEAN DEFAULT false');
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryAndroidVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryIosVersion" VARCHAR(255) DEFAULT \'1.0.0\'');
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "deliveryForceUpdate" BOOLEAN DEFAULT false');
@@ -332,6 +332,11 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryStart" VARCHAR(255) DEFAULT \'15:00\'');
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryEnd" VARCHAR(255) DEFAULT \'17:00\'');
         } catch (e) { console.log('[Migration Warning] App settings columns failed:', e.message); }
+
+        try {
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "deliveryRoundId" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "deliveryRoundTiming" VARCHAR(255)');
+        } catch (e) { console.log('[Migration Warning] Orders delivery timing columns failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {

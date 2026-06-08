@@ -16,6 +16,7 @@ export const getAppSettings = async (req, res) => {
             return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", {
                 deliveryOnRoundCharge: 0,
                 expressDeliveryCharge: 0,
+                showExpressDelivery: false,
                 freeDeliveryThreshold: 0,
                 supportPhoneNumber: '',
                 androidVersion: '1.0.0',
@@ -34,6 +35,13 @@ export const getAppSettings = async (req, res) => {
 
         const settingsData = settings.toJSON();
         delete settingsData.razorpaySecretKey;
+
+        if (Array.isArray(settingsData.deliveryRoundSchedules)) {
+            settingsData.deliveryRoundSchedules = settingsData.deliveryRoundSchedules.map((round, index) => ({
+                id: round.id || `round_${index + 1}_${Math.random().toString(36).substring(2, 9)}`,
+                ...round
+            }));
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", settingsData);
     } catch (error) {

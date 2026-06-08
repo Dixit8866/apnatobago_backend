@@ -61,6 +61,7 @@ export const createOrder = async (req, res) => {
             items,
             paymentMethod,
             deliveryMode,
+            deliveryRoundId,
             totalAmount: frontendTotalAmount // Total sent from frontend for validation
         } = req.body;
 
@@ -381,6 +382,17 @@ export const createOrder = async (req, res) => {
             paymentStatus = 'Pending';
         }
 
+        // Find delivery round timing details if delivery mode is Round
+        let deliveryRoundIdVal = null;
+        let deliveryRoundTimingVal = null;
+        if (deliveryMode === 'Round' && deliveryRoundId && settings) {
+            const matchedRound = (settings.deliveryRoundSchedules || []).find(r => r.id === deliveryRoundId);
+            if (matchedRound) {
+                deliveryRoundIdVal = matchedRound.id;
+                deliveryRoundTimingVal = `${matchedRound.name} (${matchedRound.start} - ${matchedRound.end})`;
+            }
+        }
+
         // 5. Create the Order
         const newOrder = await Order.create({
             orderId: await generateUniqueOrderId(),
@@ -392,7 +404,9 @@ export const createOrder = async (req, res) => {
             paymentStatus,
             orderStatus: 'Pending',
             deliveryMode,
-            deliveryCharge
+            deliveryCharge,
+            deliveryRoundId: deliveryRoundIdVal,
+            deliveryRoundTiming: deliveryRoundTimingVal
         }, { transaction: t });
 
         // 6. Create Order Items

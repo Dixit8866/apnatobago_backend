@@ -15,6 +15,10 @@ const AppSettings = sequelize.define('AppSettings', {
         type: DataTypes.DECIMAL(10, 2),
         defaultValue: 0,
     },
+    showExpressDelivery: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
     freeDeliveryThreshold: {
         type: DataTypes.DECIMAL(10, 2),
         defaultValue: 10000,
