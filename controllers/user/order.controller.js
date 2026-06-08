@@ -84,7 +84,7 @@ const normalizeOrderItem = (item) => {
         itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
     }
     if (itemData.variantInfo) {
-        // itemData.variantInfo.volume = ensureVolumeObject(itemData.variantInfo.volume);
+        delete itemData.variantInfo.volume;
         if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
         if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
     }
