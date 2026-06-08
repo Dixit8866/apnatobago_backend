@@ -86,11 +86,16 @@ export const getMyAssignedOrders = async (req, res) => {
                 orderIncludeWhere.updatedAt = { [Op.between]: [todayStart, todayEnd] };
 
             } else if (status === 'Assigned' || status === 'Pending') {
-                // ALL time - no date restriction for pending/assigned
+                // If a date is selected, filter by order.createdAt on that day
+                // If no date, show ALL pending/assigned (any date) - existing behaviour
                 whereClause.status = status;
                 orderIncludeWhere.orderStatus = {
                     [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel']
                 };
+                if (date) {
+                    // Apply the selected date to order's createdAt
+                    orderIncludeWhere.createdAt = { [Op.between]: [todayStart, todayEnd] };
+                }
             } else {
                 whereClause.status = status;
             }
