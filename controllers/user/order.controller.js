@@ -29,26 +29,62 @@ const generateUniqueOrderId = async () => {
     return `${nextId}`;
 };
 
+const ensureVolumeObject = (vol) => {
+    if (!vol) {
+        return { en: '', gu: '', hn: '' };
+    }
+    
+    // If it's already an object, clean and return it
+    if (typeof vol === 'object') {
+        return {
+            en: String(vol.en || vol.gu || vol.hn || ''),
+            gu: String(vol.gu || vol.en || vol.hn || ''),
+            hn: String(vol.hn || vol.en || vol.gu || '')
+        };
+    }
+    
+    // If it's a string, check if it's JSON stringified
+    if (typeof vol === 'string') {
+        const trimmed = vol.trim();
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (parsed && typeof parsed === 'object') {
+                    return {
+                        en: String(parsed.en || parsed.gu || parsed.hn || ''),
+                        gu: String(parsed.gu || parsed.en || parsed.hn || ''),
+                        hn: String(parsed.hn || parsed.en || parsed.gu || '')
+                    };
+                }
+            } catch (e) {
+                // Not valid JSON, fall through
+            }
+        }
+        return {
+            en: trimmed,
+            gu: trimmed,
+            hn: trimmed
+        };
+    }
+    
+    // For numbers/etc.
+    const strVal = String(vol);
+    return {
+        en: strVal,
+        gu: strVal,
+        hn: strVal
+    };
+};
+
 const normalizeOrderItem = (item) => {
     const itemData = item.toJSON ? item.toJSON() : item;
     if (itemData.variant) {
         itemData.variant.extraName = itemData.variant.extra || '';
         itemData.variant.extra = itemData.variant.extra || '';
+        itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
     }
     if (itemData.variantInfo) {
-        let vol = itemData.variantInfo.volume;
-        if (typeof vol === 'string' || typeof vol === 'number') {
-            const strVal = String(vol);
-            itemData.variantInfo.volume = { en: strVal, gu: strVal, hn: strVal };
-        } else if (typeof vol === 'object' && vol !== null) {
-            itemData.variantInfo.volume = {
-                en: vol.en || vol.gu || vol.hn || '',
-                gu: vol.gu || vol.en || vol.hn || '',
-                hn: vol.hn || vol.en || vol.gu || ''
-            };
-        } else {
-            itemData.variantInfo.volume = { en: '', gu: '', hn: '' };
-        }
+        itemData.variantInfo.volume = ensureVolumeObject(itemData.variantInfo.volume);
         if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
         if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
     }
@@ -72,7 +108,12 @@ const normalizeOrder = (order) => {
 
     // 2. Clean returns: Ensure returns is always an array [] (not null or [null])
     if (orderData.returns) {
-        orderData.returns = orderData.returns.filter(r => r !== null && r !== undefined && r.id);
+        orderData.returns = orderData.returns.filter(r => r !== null && r !== undefined && r.id).map(r => {
+            if (r.variant) {
+                r.variant.volume = ensureVolumeObject(r.variant.volume);
+            }
+            return r;
+        });
     } else {
         orderData.returns = [];
     }
