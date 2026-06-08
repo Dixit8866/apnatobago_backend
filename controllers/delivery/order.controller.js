@@ -235,6 +235,10 @@ export const getMyAssignedOrders = async (req, res) => {
                 if (data.order && data.order.orderStatus === 'Cancelled') {
                     data.status = 'Cancelled';
                 }
+                if (data.order && data.order.user) {
+                    data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
+                    data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
+                }
                 return data;
             });
         }
@@ -321,6 +325,11 @@ export const getAssignmentDetails = async (req, res) => {
         }
 
         const data = assignment.toJSON();
+
+        if (data.order && data.order.user) {
+            data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
+            data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
+        }
 
         // Sanitize variantInfo in items
         if (data.order && data.order.items) {
