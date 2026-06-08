@@ -59,6 +59,65 @@ const formatOrderItems = (items) => {
     return (items || []).map(normalizeOrderItem);
 };
 
+const normalizeOrder = (order) => {
+    if (!order) return null;
+    const orderData = order.toJSON ? order.toJSON() : order;
+    
+    // 1. Clean items
+    if (orderData.items) {
+        orderData.items = orderData.items.map(normalizeOrderItem);
+    } else {
+        orderData.items = [];
+    }
+
+    // 2. Clean returns: Ensure returns is always an array [] (not null or [null])
+    if (orderData.returns) {
+        orderData.returns = orderData.returns.filter(r => r !== null && r !== undefined && r.id);
+    } else {
+        orderData.returns = [];
+    }
+
+    // 3. Clean user object: Ensure it is always an object, not null or undefined
+    if (!orderData.user) {
+        orderData.user = {
+            id: orderData.userId || '',
+            fullname: orderData.customerName || 'Guest',
+            number: orderData.customerNumber || '',
+            email: '',
+            city: '',
+            postcode: ''
+        };
+    } else {
+        orderData.user.id = orderData.user.id || orderData.userId || '';
+        orderData.user.fullname = orderData.user.fullname || orderData.customerName || 'Guest';
+        orderData.user.number = orderData.user.number || orderData.customerNumber || '';
+        orderData.user.email = orderData.user.email || '';
+        orderData.user.city = orderData.user.city || '';
+        orderData.user.postcode = orderData.user.postcode || '';
+    }
+
+    // 4. Amount Keys Consistency
+    const discountVal = parseFloat(orderData.discountAmount || orderData.savedAmount || orderData.totalDiscount || 0);
+    orderData.savedAmount = discountVal;
+    orderData.discountAmount = discountVal;
+    orderData.totalDiscount = discountVal;
+
+    orderData.totalAmount = roundTotal(orderData.totalAmount);
+    orderData.dueAmount = roundTotal(orderData.dueAmount);
+    orderData.paidAmount = roundTotal(orderData.paidAmount);
+
+    if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+        orderData.orderStatus = 'Delivered';
+    }
+
+    // 5. Standard response structure compatibility:
+    // Create a copy of orderData (excluding circular reference) for orderDetails
+    const detailsCopy = { ...orderData };
+    orderData.orderDetails = detailsCopy;
+
+    return orderData;
+};
+
 /**
  * @desc    Create a new order (Checkout)
  * @route   POST /api/user/orders
@@ -602,7 +661,31 @@ export const createOrder = async (req, res) => {
             logger.error(`[User Push Notification Error]: ${pushErr.message}`);
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Order placed successfully.", newOrder);
+        // Fetch the created order with full details and user so we can normalize it!
+        const createdOrder = await Order.findByPk(newOrder.id, {
+            include: [
+                { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'image', 'extra'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        const normalized = normalizeOrder(createdOrder || newOrder);
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Order placed successfully.", normalized);
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Create Order Error]: ${error.message}`);
@@ -626,6 +709,7 @@ export const getOrders = async (req, res) => {
         }
 
         const include = [
+            { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
             {
                 model: OrderItem,
                 as: 'items',
@@ -672,19 +756,7 @@ export const getOrders = async (req, res) => {
                 order: orderOptions
             });
 
-            const updatedOrders = orders.map(o => {
-                const orderData = o.toJSON ? o.toJSON() : o;
-                orderData.totalAmount = roundTotal(orderData.totalAmount);
-                orderData.dueAmount = roundTotal(orderData.dueAmount);
-                orderData.paidAmount = roundTotal(orderData.paidAmount);
-                if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-                    orderData.orderStatus = 'Delivered';
-                }
-                if (orderData.items) {
-                    orderData.items = orderData.items.map(normalizeOrderItem);
-                }
-                return orderData;
-            });
+            const updatedOrders = orders.map(normalizeOrder);
 
             if (updatedOrders && updatedOrders.length > 0) {
                 const firstOrder = updatedOrders[0];
@@ -711,19 +783,7 @@ export const getOrders = async (req, res) => {
         const formattedResult = formatPaginatedResponse(result, page, limit);
 
         if (formattedResult.items) {
-            formattedResult.items = formattedResult.items.map(o => {
-                const orderData = o.toJSON ? o.toJSON() : o;
-                orderData.totalAmount = roundTotal(orderData.totalAmount);
-                orderData.dueAmount = roundTotal(orderData.dueAmount);
-                orderData.paidAmount = roundTotal(orderData.paidAmount);
-                if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-                    orderData.orderStatus = 'Delivered';
-                }
-                if (orderData.items) {
-                    orderData.items = orderData.items.map(normalizeOrderItem);
-                }
-                return orderData;
-            });
+            formattedResult.items = formattedResult.items.map(normalizeOrder);
         }
 
         if (formattedResult && formattedResult.items && formattedResult.items.length > 0) {
@@ -769,6 +829,7 @@ export const getOrderDetails = async (req, res) => {
         const shouldPaginateItems = (queryPage || queryLimit) && paginate !== 'false';
 
         let order;
+        let orderData;
         if (shouldPaginateItems) {
             // Get order with paginated items
             const pagination = getPaginationOptions(req.query);
@@ -778,6 +839,7 @@ export const getOrderDetails = async (req, res) => {
             order = await Order.findOne({
                 where: { id, userId },
                 include: [
+                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                     {
                         model: SalesReturn,
                         as: 'returns',
@@ -811,13 +873,7 @@ export const getOrderDetails = async (req, res) => {
                 distinct: true
             });
 
-            const orderData = order.toJSON ? order.toJSON() : order;
-            orderData.totalAmount = roundTotal(orderData.totalAmount);
-            orderData.dueAmount = roundTotal(orderData.dueAmount);
-            orderData.paidAmount = roundTotal(orderData.paidAmount);
-            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-                orderData.orderStatus = 'Delivered';
-            }
+            orderData = normalizeOrder(order);
 
             // Format paginated items
             const formattedItems = itemsResult.rows.map(normalizeOrderItem);
@@ -830,11 +886,17 @@ export const getOrderDetails = async (req, res) => {
                 limit,
                 totalPages: Math.ceil(itemsResult.count / limit)
             };
+
+            if (orderData.orderDetails) {
+                orderData.orderDetails.items = formattedItems;
+                orderData.orderDetails.itemsPagination = orderData.itemsPagination;
+            }
         } else {
             // Get order with all items (backward compatibility)
             order = await Order.findOne({
                 where: { id, userId },
                 include: [
+                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                     {
                         model: OrderItem,
                         as: 'items',
@@ -863,16 +925,7 @@ export const getOrderDetails = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
-            const orderData = order.toJSON ? order.toJSON() : order;
-            orderData.totalAmount = roundTotal(orderData.totalAmount);
-            orderData.dueAmount = roundTotal(orderData.dueAmount);
-            orderData.paidAmount = roundTotal(orderData.paidAmount);
-            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-                orderData.orderStatus = 'Delivered';
-            }
-            if (orderData.items) {
-                orderData.items = orderData.items.map(normalizeOrderItem);
-            }
+            orderData = normalizeOrder(order);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", orderData);
@@ -881,8 +934,6 @@ export const getOrderDetails = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
-
-
 
 export const getOrderDetailsV2 = async (req, res) => {
     try {
@@ -908,6 +959,7 @@ export const getOrderDetailsV2 = async (req, res) => {
         let order;
         let items = [];
         let itemsPagination = null;
+        let orderData;
 
         if (shouldPaginateItems) {
             const pagination = getPaginationOptions(req.query);
@@ -916,6 +968,7 @@ export const getOrderDetailsV2 = async (req, res) => {
             order = await Order.findOne({
                 where: { id, userId },
                 include: [
+                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                     {
                         model: SalesReturn,
                         as: 'returns',
@@ -948,13 +1001,7 @@ export const getOrderDetailsV2 = async (req, res) => {
                 distinct: true
             });
 
-            const orderData = order.toJSON ? order.toJSON() : order;
-            orderData.totalAmount = roundTotal(orderData.totalAmount);
-            orderData.dueAmount = roundTotal(orderData.dueAmount);
-            orderData.paidAmount = roundTotal(orderData.paidAmount);
-            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-                orderData.orderStatus = 'Delivered';
-            }
+            orderData = normalizeOrder(order);
 
             items = formatOrderItems(itemsResult.rows);
             itemsPagination = {
@@ -964,11 +1011,14 @@ export const getOrderDetailsV2 = async (req, res) => {
                 totalPages: Math.ceil(itemsResult.count / limit)
             };
 
-            const orderDetails = { ...orderData };
-            delete orderDetails.items;
-            delete orderDetails.itemsPagination;
+            const orderDetails = { ...orderData, items, itemsPagination };
+            if (orderDetails.orderDetails) {
+                orderDetails.orderDetails.items = items;
+                orderDetails.orderDetails.itemsPagination = itemsPagination;
+            }
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
+                ...orderData,
                 orderDetails,
                 items,
                 itemsPagination
@@ -978,6 +1028,7 @@ export const getOrderDetailsV2 = async (req, res) => {
         order = await Order.findOne({
             where: { id, userId },
             include: [
+                { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                 {
                     model: OrderItem,
                     as: 'items',
@@ -1006,20 +1057,16 @@ export const getOrderDetailsV2 = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        const orderData = order.toJSON ? order.toJSON() : order;
-        orderData.totalAmount = roundTotal(orderData.totalAmount);
-        orderData.dueAmount = roundTotal(orderData.dueAmount);
-        orderData.paidAmount = roundTotal(orderData.paidAmount);
-        if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-            orderData.orderStatus = 'Delivered';
-        }
-
+        orderData = normalizeOrder(order);
         items = formatOrderItems(orderData.items || []);
 
         const orderDetails = { ...orderData };
-        delete orderDetails.items;
+        if (orderDetails.orderDetails) {
+            orderDetails.orderDetails.items = items;
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
+            ...orderData,
             orderDetails,
             items
         });
