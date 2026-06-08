@@ -84,7 +84,7 @@ const normalizeOrderItem = (item) => {
         itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
     }
     if (itemData.variantInfo) {
-        delete itemData.variantInfo.volume;
+        // itemData.variantInfo.volume = ensureVolumeObject(itemData.variantInfo.volume);
         if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
         if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
     }
@@ -739,12 +739,130 @@ export const createOrder = async (req, res) => {
  * @route   GET /api/user/orders
  * @access  Private
  */
+// export const getOrders = async (req, res) => {
+//     try {
+//         const userId = req.user.id;
+//         const { id, paginate, page: queryPage, limit: queryLimit } = req.query;
+
+//         console.log(`[Debug getOrders API] userId: ${userId}, query: ${JSON.stringify(req.query)}`);
+
+//         const where = { userId };
+//         if (id) {
+//             where.id = id;
+//         }
+
+//         const include = [
+//             { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
+//             {
+//                 model: OrderItem,
+//                 as: 'items',
+//                 include: [
+//                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+//                     {
+//                         model: ProductVariant,
+//                         as: 'variant',
+//                         attributes: ['id', 'volume', 'image', 'extra'],
+//                         include: [
+//                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+//                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+//                         ]
+//                     }
+//                 ]
+//             },
+//             {
+//                 model: SalesReturn,
+//                 as: 'returns',
+//                 include: [
+//                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+//                     {
+//                         model: ProductVariant,
+//                         as: 'variant',
+//                         attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+//                         include: [
+//                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+//                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+//                         ]
+//                     }
+//                 ]
+//             }
+//         ];
+
+//         const orderOptions = [['createdAt', 'DESC']];
+
+//         // Backward compatibility: if page & limit are not provided (old app), return all data
+//         const shouldPaginate = (queryPage || queryLimit) && paginate !== 'false';
+
+//         if (!shouldPaginate) {
+//             const orders = await Order.findAll({
+//                 where,
+//                 include,
+//                 order: orderOptions
+//             });
+
+//             console.log(`[Debug getOrders API] Non-paginated path. Found ${orders.length} orders.`);
+
+//             const updatedOrders = orders.map(normalizeOrder);
+
+//             if (updatedOrders && updatedOrders.length > 0) {
+//                 const firstOrder = updatedOrders[0];
+//                 console.log(`[Debug getOrders API] (Non-paginated) Sample Order Details:`, {
+//                     id: firstOrder.id,
+//                     orderId: firstOrder.orderId,
+//                     returns: firstOrder.returns,
+//                     user: firstOrder.user,
+//                     firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
+//                     firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
+//                 });
+//             }
+
+//             return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
+//         }
+
+//         const pagination = getPaginationOptions(req.query);
+//         const { limit, offset, page } = pagination;
+
+//         const result = await Order.findAndCountAll({
+//             where,
+//             include,
+//             limit,
+//             offset,
+//             order: orderOptions,
+//             distinct: true
+//         });
+
+//         console.log(`[Debug getOrders API] Paginated path. Total count: ${result.count}`);
+
+//         const formattedResult = formatPaginatedResponse(result, page, limit);
+
+//         if (formattedResult.items) {
+//             formattedResult.items = formattedResult.items.map(normalizeOrder);
+//         }
+
+//         if (formattedResult && formattedResult.items && formattedResult.items.length > 0) {
+//             const firstOrder = formattedResult.items[0];
+//             console.log(`[Debug getOrders API] (Paginated) Sample Order Details:`, {
+//                 id: firstOrder.id,
+//                 orderId: firstOrder.orderId,
+//                 returns: firstOrder.returns,
+//                 user: firstOrder.user,
+//                 firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
+//                 firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
+//             });
+//         }
+
+//         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", formattedResult);
+//     } catch (error) {
+//         console.error(`[Debug getOrders API] Error:`, error);
+//         logger.error(`[Get Orders Error]: ${error.message}`);
+//         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+//     }
+// };
+
+
 export const getOrders = async (req, res) => {
     try {
         const userId = req.user.id;
         const { id, paginate, page: queryPage, limit: queryLimit } = req.query;
-
-        console.log(`[Debug getOrders API] userId: ${userId}, query: ${JSON.stringify(req.query)}`);
 
         const where = { userId };
         if (id) {
@@ -752,7 +870,6 @@ export const getOrders = async (req, res) => {
         }
 
         const include = [
-            { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
             {
                 model: OrderItem,
                 as: 'items',
@@ -799,21 +916,25 @@ export const getOrders = async (req, res) => {
                 order: orderOptions
             });
 
-            console.log(`[Debug getOrders API] Non-paginated path. Found ${orders.length} orders.`);
-
-            const updatedOrders = orders.map(normalizeOrder);
-
-            if (updatedOrders && updatedOrders.length > 0) {
-                const firstOrder = updatedOrders[0];
-                console.log(`[Debug getOrders API] (Non-paginated) Sample Order Details:`, {
-                    id: firstOrder.id,
-                    orderId: firstOrder.orderId,
-                    returns: firstOrder.returns,
-                    user: firstOrder.user,
-                    firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
-                    firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
-                });
-            }
+            const updatedOrders = orders.map(o => {
+                const orderData = o.toJSON ? o.toJSON() : o;
+                orderData.totalAmount = roundTotal(orderData.totalAmount);
+                orderData.dueAmount = roundTotal(orderData.dueAmount);
+                orderData.paidAmount = roundTotal(orderData.paidAmount);
+                if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                    orderData.orderStatus = 'Delivered';
+                }
+                if (orderData.items) {
+                    orderData.items = orderData.items.map(item => {
+                        if (item.variant) {
+                            item.variant.extraName = item.variant.extra || '';
+                            item.variant.extra = item.variant.extra || '';
+                        }
+                        return item;
+                    });
+                }
+                return orderData;
+            });
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
         }
@@ -830,29 +951,32 @@ export const getOrders = async (req, res) => {
             distinct: true
         });
 
-        console.log(`[Debug getOrders API] Paginated path. Total count: ${result.count}`);
-
         const formattedResult = formatPaginatedResponse(result, page, limit);
 
         if (formattedResult.items) {
-            formattedResult.items = formattedResult.items.map(normalizeOrder);
-        }
-
-        if (formattedResult && formattedResult.items && formattedResult.items.length > 0) {
-            const firstOrder = formattedResult.items[0];
-            console.log(`[Debug getOrders API] (Paginated) Sample Order Details:`, {
-                id: firstOrder.id,
-                orderId: firstOrder.orderId,
-                returns: firstOrder.returns,
-                user: firstOrder.user,
-                firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
-                firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
+            formattedResult.items = formattedResult.items.map(o => {
+                const orderData = o.toJSON ? o.toJSON() : o;
+                orderData.totalAmount = roundTotal(orderData.totalAmount);
+                orderData.dueAmount = roundTotal(orderData.dueAmount);
+                orderData.paidAmount = roundTotal(orderData.paidAmount);
+                if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                    orderData.orderStatus = 'Delivered';
+                }
+                if (orderData.items) {
+                    orderData.items = orderData.items.map(item => {
+                        if (item.variant) {
+                            item.variant.extraName = item.variant.extra || '';
+                            item.variant.extra = item.variant.extra || '';
+                        }
+                        return item;
+                    });
+                }
+                return orderData;
             });
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", formattedResult);
     } catch (error) {
-        console.error(`[Debug getOrders API] Error:`, error);
         logger.error(`[Get Orders Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
