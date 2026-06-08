@@ -744,6 +744,8 @@ export const getOrders = async (req, res) => {
         const userId = req.user.id;
         const { id, paginate, page: queryPage, limit: queryLimit } = req.query;
 
+        console.log(`[Debug getOrders API] userId: ${userId}, query: ${JSON.stringify(req.query)}`);
+
         const where = { userId };
         if (id) {
             where.id = id;
@@ -797,13 +799,20 @@ export const getOrders = async (req, res) => {
                 order: orderOptions
             });
 
+            console.log(`[Debug getOrders API] Non-paginated path. Found ${orders.length} orders.`);
+
             const updatedOrders = orders.map(normalizeOrder);
 
             if (updatedOrders && updatedOrders.length > 0) {
                 const firstOrder = updatedOrders[0];
-                if (firstOrder.items && firstOrder.items.length > 0) {
-                    console.log(`[Debug getOrders] (Non-paginated) First Order ID: ${firstOrder.id}, First Item variantInfo:`, JSON.stringify(firstOrder.items[0].variantInfo, null, 2));
-                }
+                console.log(`[Debug getOrders API] (Non-paginated) Sample Order Details:`, {
+                    id: firstOrder.id,
+                    orderId: firstOrder.orderId,
+                    returns: firstOrder.returns,
+                    user: firstOrder.user,
+                    firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
+                    firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
+                });
             }
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
@@ -821,6 +830,8 @@ export const getOrders = async (req, res) => {
             distinct: true
         });
 
+        console.log(`[Debug getOrders API] Paginated path. Total count: ${result.count}`);
+
         const formattedResult = formatPaginatedResponse(result, page, limit);
 
         if (formattedResult.items) {
@@ -829,13 +840,19 @@ export const getOrders = async (req, res) => {
 
         if (formattedResult && formattedResult.items && formattedResult.items.length > 0) {
             const firstOrder = formattedResult.items[0];
-            if (firstOrder.items && firstOrder.items.length > 0) {
-                console.log(`[Debug getOrders] (Paginated) First Order ID: ${firstOrder.id}, First Item variantInfo:`, JSON.stringify(firstOrder.items[0].variantInfo, null, 2));
-            }
+            console.log(`[Debug getOrders API] (Paginated) Sample Order Details:`, {
+                id: firstOrder.id,
+                orderId: firstOrder.orderId,
+                returns: firstOrder.returns,
+                user: firstOrder.user,
+                firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
+                firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
+            });
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", formattedResult);
     } catch (error) {
+        console.error(`[Debug getOrders API] Error:`, error);
         logger.error(`[Get Orders Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
@@ -851,6 +868,8 @@ export const getOrderDetails = async (req, res) => {
         const { id } = req.params;
         const userId = req.user.id;
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
+
+        console.log(`[Debug getOrderDetails API] id: ${id}, userId: ${userId}, query: ${JSON.stringify(req.query)}`);
 
         // Build the include array for OrderItem
         const orderItemInclude = [
@@ -901,6 +920,7 @@ export const getOrderDetails = async (req, res) => {
             });
 
             if (!order) {
+                console.log(`[Debug getOrderDetails API] Order not found for ID: ${id}`);
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
@@ -963,24 +983,33 @@ export const getOrderDetails = async (req, res) => {
             });
 
             if (!order) {
+                console.log(`[Debug getOrderDetails API] Order not found for ID: ${id}`);
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
             orderData = normalizeOrder(order);
         }
 
+        console.log(`[Debug getOrderDetails API] Success. Sample Data:`, {
+            id: orderData.id,
+            orderId: orderData.orderId,
+            returns: orderData.returns,
+            user: orderData.user,
+            firstItemVolume: orderData.items?.[0]?.variantInfo?.volume,
+            firstItemVariantVolume: orderData.items?.[0]?.variant?.volume
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", orderData);
     } catch (error) {
+        console.error(`[Debug getOrderDetails API] Error:`, error);
         logger.error(`[Get Order Details Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
-    }
-};
-
-export const getOrderDetailsV2 = async (req, res) => {
+        return sendErrorResponse(res, HTTP_STATexport const getOrderDetailsV2 = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user.id;
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
+
+        console.log(`[Debug getOrderDetailsV2 API] id: ${id}, userId: ${userId}, query: ${JSON.stringify(req.query)}`);
 
         const orderItemInclude = [
             { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
@@ -1030,6 +1059,7 @@ export const getOrderDetailsV2 = async (req, res) => {
             });
 
             if (!order) {
+                console.log(`[Debug getOrderDetailsV2 API] Order not found for ID: ${id}`);
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
@@ -1057,6 +1087,15 @@ export const getOrderDetailsV2 = async (req, res) => {
                 orderDetails.orderDetails.items = items;
                 orderDetails.orderDetails.itemsPagination = itemsPagination;
             }
+
+            console.log(`[Debug getOrderDetailsV2 API] Success (Paginated). Sample Data:`, {
+                id: orderData.id,
+                orderId: orderData.orderId,
+                returns: orderData.returns,
+                user: orderData.user,
+                firstItemVolume: items?.[0]?.variantInfo?.volume,
+                firstItemVariantVolume: items?.[0]?.variant?.volume
+            });
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
                 ...orderData,
@@ -1095,6 +1134,7 @@ export const getOrderDetailsV2 = async (req, res) => {
         });
 
         if (!order) {
+            console.log(`[Debug getOrderDetailsV2 API] Order not found for ID: ${id}`);
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
@@ -1106,14 +1146,26 @@ export const getOrderDetailsV2 = async (req, res) => {
             orderDetails.orderDetails.items = items;
         }
 
+        console.log(`[Debug getOrderDetailsV2 API] Success (Non-paginated). Sample Data:`, {
+            id: orderData.id,
+            orderId: orderData.orderId,
+            returns: orderData.returns,
+            user: orderData.user,
+            firstItemVolume: items?.[0]?.variantInfo?.volume,
+            firstItemVariantVolume: items?.[0]?.variant?.volume
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
             ...orderData,
             orderDetails,
             items
         });
     } catch (error) {
+        console.error(`[Debug getOrderDetailsV2 API] Error:`, error);
         logger.error(`[Get Order Details Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};ATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
 
