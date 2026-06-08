@@ -40,13 +40,26 @@ const sendDeliveredNotification = async (orderId) => {
 export const getMyAssignedOrders = async (req, res) => {
     try {
         const deliveryBoyId = req.user.id;
-        const { status, search } = req.query; // 'Pending', 'Assigned', 'Cancelled', 'Completed'
-        logger.info(`[Get My Assigned Orders]: Fetching orders for delivery boy ${deliveryBoyId}, status: ${status || 'Any'}`);
+        const { status, search, date } = req.query; // 'Pending', 'Assigned', 'Cancelled', 'Completed'
+        logger.info(`[Get My Assigned Orders]: Fetching orders for delivery boy ${deliveryBoyId}, status: ${status || 'Any'}, date: ${date || 'Today'}`);
 
         const whereClause = { deliveryBoyId };
         const orderIncludeWhere = {};
 
-        const { todayStart, todayEnd } = getTodayRangeIST();
+        let todayStart, todayEnd;
+        if (date) {
+            const selectDate = new Date(date);
+            const year = selectDate.getFullYear();
+            const month = selectDate.getMonth();
+            const day = selectDate.getDate();
+            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+            todayStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0) - IST_OFFSET_MS);
+            todayEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999) - IST_OFFSET_MS);
+        } else {
+            const todayRange = getTodayRangeIST();
+            todayStart = todayRange.todayStart;
+            todayEnd = todayRange.todayEnd;
+        }
 
         // ── DEBUG ─────────────────────────────────────────────────────────────
         const toIST = (d) => new Date(d.getTime() + (5.5 * 60 * 60 * 1000))
@@ -136,8 +149,7 @@ export const getMyAssignedOrders = async (req, res) => {
                     ]
                 }
             ],
-            limit,
-            offset,
+            ...(req.query.paginate !== 'false' ? { limit, offset } : {}),
             // Pending/Assigned: oldest order first (ASC). Completed/Cancelled: latest first (DESC)
             order: [['position', 'ASC'], ['assignedAt', 'ASC']],
             subQuery: false
@@ -207,10 +219,18 @@ export const getMyAssignedOrders = async (req, res) => {
             }
         }
 
-        const responseData = formatPaginatedResponse(result, page, limit);
+        let responseData;
+        if (req.query.paginate !== 'false') {
+            responseData = formatPaginatedResponse(result, page, limit);
+        } else {
+            responseData = {
+                totalRecords: result.count,
+                data: result.rows
+            };
+        }
 
-        if (responseData.orders) {
-            responseData.orders = responseData.orders.map(item => {
+        if (responseData.data) {
+            responseData.data = responseData.data.map(item => {
                 const data = item.toJSON ? item.toJSON() : item;
                 if (data.order && data.order.orderStatus === 'Cancelled') {
                     data.status = 'Cancelled';
