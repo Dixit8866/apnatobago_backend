@@ -295,7 +295,7 @@ export const getCollectedPayments = async (req, res) => {
 
         // 2. Fetch paginated payments for list details
         const pagination = getPaginationOptions(req.query);
-        const { limit, offset } = pagination;
+        const { limit, offset, page } = pagination;
 
         const payments = await OrderPayment.findAll({
             where: {
@@ -406,7 +406,7 @@ export const getCollectedPayments = async (req, res) => {
             }
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Collected payments fetched successfully.", {
+        const responseData = {
             totals: {
                 cash: parseFloat(cashTotal.toFixed(2)),
                 online: parseFloat(onlineTotal.toFixed(2)),
@@ -418,7 +418,15 @@ export const getCollectedPayments = async (req, res) => {
                 CREDIT: creditList
             },
             combined: combinedList
-        });
+        };
+
+        if (req.query.paginate !== 'false') {
+            responseData.totalRecords = allPayments.length;
+            responseData.totalPages = Math.ceil(allPayments.length / limit);
+            responseData.currentPage = page;
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Collected payments fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Delivery Collected Payments Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -471,7 +479,7 @@ export const getSubmittedPayments = async (req, res) => {
 
         // 2. Fetch paginated payments for list details
         const pagination = getPaginationOptions(req.query);
-        const { limit, offset } = pagination;
+        const { limit, offset, page } = pagination;
 
         const payments = await OrderPayment.findAll({
             where: {
@@ -592,7 +600,7 @@ export const getSubmittedPayments = async (req, res) => {
             }
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Submitted payments fetched successfully.", {
+        const responseData = {
             totals: {
                 cash: parseFloat(cashTotal.toFixed(2)),
                 online: parseFloat(onlineTotal.toFixed(2)),
@@ -604,7 +612,15 @@ export const getSubmittedPayments = async (req, res) => {
                 CREDIT: creditList
             },
             combined: combinedList
-        });
+        };
+
+        if (req.query.paginate !== 'false') {
+            responseData.totalRecords = allPayments.length;
+            responseData.totalPages = Math.ceil(allPayments.length / limit);
+            responseData.currentPage = page;
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Submitted payments fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Delivery Submitted Payments Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
