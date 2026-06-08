@@ -1,4 +1,4 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification } from '../../models/index.js';
+import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -121,7 +121,18 @@ export const getMyAssignedOrders = async (req, res) => {
                     as: 'order',
                     where: Object.keys(orderIncludeWhere).length > 0 ? orderIncludeWhere : null,
                     include: [
-                        { model: User, as: 'user', attributes: ['fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'] }
+                        {
+                            model: User,
+                            as: 'user',
+                            attributes: ['fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'],
+                            include: [
+                                {
+                                    model: BusinessProfile,
+                                    as: 'businessProfile',
+                                    attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                                }
+                            ]
+                        }
                     ]
                 }
             ],
@@ -235,7 +246,18 @@ export const getAssignmentDetails = async (req, res) => {
                     model: Order,
                     as: 'order',
                     include: [
-                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'] },
+                        {
+                            model: User,
+                            as: 'user',
+                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'],
+                            include: [
+                                {
+                                    model: BusinessProfile,
+                                    as: 'businessProfile',
+                                    attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                                }
+                            ]
+                        },
                         { model: OrderPayment, as: 'payments' },
                         {
                             model: OrderItem,
