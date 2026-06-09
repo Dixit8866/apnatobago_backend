@@ -233,7 +233,12 @@ export const getAllOrders = async (req, res) => {
             const items = await OrderItem.findAll({
                 where: { orderId: orderIds },
                 include: [
-                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    {
+                        model: Product,
+                        as: 'product',
+                        attributes: ['id', 'name', 'thumbnail'],
+                        include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
+                    },
                     {
                         model: ProductVariant,
                         as: 'variant',
@@ -257,7 +262,12 @@ export const getAllOrders = async (req, res) => {
             const returns = await SalesReturn.findAll({
                 where: { orderId: orderIds },
                 include: [
-                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    {
+                        model: Product,
+                        as: 'product',
+                        attributes: ['id', 'name', 'thumbnail'],
+                        include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
+                    },
                     { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'] }
                 ]
             });
@@ -769,7 +779,12 @@ export const getOrderDetails = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        {
+                            model: Product,
+                            as: 'product',
+                            attributes: ['id', 'name', 'thumbnail'],
+                            include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
+                        },
                         {
                             model: ProductVariant,
                             as: 'variant',
@@ -840,7 +855,11 @@ export const downloadInvoice = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product' },
+                        {
+                            model: Product,
+                            as: 'product',
+                            include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
+                        },
                         { model: ProductVariant, as: 'variant' }
                     ]
                 },
@@ -848,7 +867,11 @@ export const downloadInvoice = async (req, res) => {
                     model: SalesReturn,
                     as: 'returns',
                     include: [
-                        { model: Product, as: 'product' },
+                        {
+                            model: Product,
+                            as: 'product',
+                            include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
+                        },
                         { model: ProductVariant, as: 'variant' }
                     ]
                 }
