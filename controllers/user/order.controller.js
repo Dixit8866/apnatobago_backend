@@ -29,136 +29,6 @@ const generateUniqueOrderId = async () => {
     return `${nextId}`;
 };
 
-const ensureVolumeObject = (vol) => {
-    if (!vol) {
-        return { en: '', gu: '', hn: '' };
-    }
-
-    // If it's already an object, clean and return it
-    if (typeof vol === 'object') {
-        return {
-            en: String(vol.en || vol.gu || vol.hn || ''),
-            gu: String(vol.gu || vol.en || vol.hn || ''),
-            hn: String(vol.hn || vol.en || vol.gu || '')
-        };
-    }
-
-    // If it's a string, check if it's JSON stringified
-    if (typeof vol === 'string') {
-        const trimmed = vol.trim();
-        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-            try {
-                const parsed = JSON.parse(trimmed);
-                if (parsed && typeof parsed === 'object') {
-                    return {
-                        en: String(parsed.en || parsed.gu || parsed.hn || ''),
-                        gu: String(parsed.gu || parsed.en || parsed.hn || ''),
-                        hn: String(parsed.hn || parsed.en || parsed.gu || '')
-                    };
-                }
-            } catch (e) {
-                // Not valid JSON, fall through
-            }
-        }
-        return {
-            en: trimmed,
-            gu: trimmed,
-            hn: trimmed
-        };
-    }
-
-    // For numbers/etc.
-    const strVal = String(vol);
-    return {
-        en: strVal,
-        gu: strVal,
-        hn: strVal
-    };
-};
-
-const normalizeOrderItem = (item) => {
-    const itemData = item.toJSON ? item.toJSON() : item;
-    if (itemData.variant) {
-        itemData.variant.extraName = itemData.variant.extra || '';
-        itemData.variant.extra = itemData.variant.extra || '';
-        itemData.variant.volume = ensureVolumeObject(itemData.variant.volume);
-    }
-    if (itemData.variantInfo) {
-        // itemData.variantInfo.volume = ensureVolumeObject(itemData.variantInfo.volume);
-        if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
-        if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
-    }
-    return itemData;
-};
-
-const formatOrderItems = (items) => {
-    return (items || []).map(normalizeOrderItem);
-};
-
-const normalizeOrder = (order) => {
-    if (!order) return null;
-    const orderData = order.toJSON ? order.toJSON() : order;
-
-    // 1. Clean items
-    if (orderData.items) {
-        orderData.items = orderData.items.map(normalizeOrderItem);
-    } else {
-        orderData.items = [];
-    }
-
-    // 2. Clean returns: Ensure returns is always an array [] (not null or [null])
-    if (orderData.returns) {
-        orderData.returns = orderData.returns.filter(r => r !== null && r !== undefined && r.id).map(r => {
-            if (r.variant) {
-                r.variant.volume = ensureVolumeObject(r.variant.volume);
-            }
-            return r;
-        });
-    } else {
-        orderData.returns = [];
-    }
-
-    // 3. Clean user object: Ensure it is always an object, not null or undefined
-    if (!orderData.user) {
-        orderData.user = {
-            id: orderData.userId || '',
-            fullname: orderData.customerName || 'Guest',
-            number: orderData.customerNumber || '',
-            email: '',
-            city: '',
-            postcode: ''
-        };
-    } else {
-        orderData.user.id = orderData.user.id || orderData.userId || '';
-        orderData.user.fullname = orderData.user.fullname || orderData.customerName || 'Guest';
-        orderData.user.number = orderData.user.number || orderData.customerNumber || '';
-        orderData.user.email = orderData.user.email || '';
-        orderData.user.city = orderData.user.city || '';
-        orderData.user.postcode = orderData.user.postcode || '';
-    }
-
-    // 4. Amount Keys Consistency
-    const discountVal = parseFloat(orderData.discountAmount || orderData.savedAmount || orderData.totalDiscount || 0);
-    orderData.savedAmount = discountVal;
-    orderData.discountAmount = discountVal;
-    orderData.totalDiscount = discountVal;
-
-    orderData.totalAmount = roundTotal(orderData.totalAmount);
-    orderData.dueAmount = roundTotal(orderData.dueAmount);
-    orderData.paidAmount = roundTotal(orderData.paidAmount);
-
-    if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
-        orderData.orderStatus = 'Delivered';
-    }
-
-    // 5. Standard response structure compatibility:
-    // Create a copy of orderData (excluding circular reference) for orderDetails
-    const detailsCopy = { ...orderData };
-    orderData.orderDetails = detailsCopy;
-
-    return orderData;
-};
-
 /**
  * @desc    Create a new order (Checkout)
  * @route   POST /api/user/orders
@@ -171,7 +41,6 @@ export const createOrder = async (req, res) => {
             items,
             paymentMethod,
             deliveryMode,
-            deliveryRoundId,
             totalAmount: frontendTotalAmount // Total sent from frontend for validation
         } = req.body;
 
@@ -237,7 +106,7 @@ export const createOrder = async (req, res) => {
             if (variant.product?.isCombo) {
                 // Find matching or default variant for Combo Product 1
                 let combo1Variant = await ProductVariant.findOne({
-                    where: {
+                    where: { 
                         productId: variant.product.comboProduct1Id,
                         ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                     },
@@ -249,7 +118,7 @@ export const createOrder = async (req, res) => {
 
                 // Find matching or default variant for Combo Product 2
                 let combo2Variant = await ProductVariant.findOne({
-                    where: {
+                    where: { 
                         productId: variant.product.comboProduct2Id,
                         ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                     },
@@ -492,20 +361,6 @@ export const createOrder = async (req, res) => {
             paymentStatus = 'Pending';
         }
 
-        // Find delivery round timing details if delivery mode is Round
-        let deliveryRoundIdVal = null;
-        let deliveryRoundTimingVal = null;
-        if (deliveryMode === 'Round' && deliveryRoundId && settings) {
-            const matchedRound = (settings.deliveryRoundSchedules || []).find(r => r.id === deliveryRoundId);
-            if (matchedRound) {
-                deliveryRoundIdVal = matchedRound.id;
-                deliveryRoundTimingVal = `${matchedRound.name} (${matchedRound.start} - ${matchedRound.end})`;
-            }
-        } else if (deliveryMode === 'Express') {
-            deliveryRoundIdVal = 'express';
-            deliveryRoundTimingVal = 'Express Delivery';
-        }
-
         // 5. Create the Order
         const newOrder = await Order.create({
             orderId: await generateUniqueOrderId(),
@@ -517,9 +372,7 @@ export const createOrder = async (req, res) => {
             paymentStatus,
             orderStatus: 'Pending',
             deliveryMode,
-            deliveryCharge,
-            deliveryRoundId: deliveryRoundIdVal,
-            deliveryRoundTiming: deliveryRoundTimingVal
+            deliveryCharge
         }, { transaction: t });
 
         // 6. Create Order Items
@@ -551,7 +404,7 @@ export const createOrder = async (req, res) => {
 
                     for (const cp of comboProducts) {
                         const compVariant = await ProductVariant.findOne({
-                            where: {
+                            where: { 
                                 productId: cp.id,
                                 ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                             },
@@ -702,31 +555,7 @@ export const createOrder = async (req, res) => {
             logger.error(`[User Push Notification Error]: ${pushErr.message}`);
         }
 
-        // Fetch the created order with full details and user so we can normalize it!
-        const createdOrder = await Order.findByPk(newOrder.id, {
-            include: [
-                { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
-                {
-                    model: OrderItem,
-                    as: 'items',
-                    include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        {
-                            model: ProductVariant,
-                            as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'extra'],
-                            include: [
-                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        });
-
-        const normalized = normalizeOrder(createdOrder || newOrder);
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Order placed successfully.", normalized);
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Order placed successfully.", newOrder);
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Create Order Error]: ${error.message}`);
@@ -739,126 +568,6 @@ export const createOrder = async (req, res) => {
  * @route   GET /api/user/orders
  * @access  Private
  */
-// export const getOrders = async (req, res) => {
-//     try {
-//         const userId = req.user.id;
-//         const { id, paginate, page: queryPage, limit: queryLimit } = req.query;
-
-//         console.log(`[Debug getOrders API] userId: ${userId}, query: ${JSON.stringify(req.query)}`);
-
-//         const where = { userId };
-//         if (id) {
-//             where.id = id;
-//         }
-
-//         const include = [
-//             { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
-//             {
-//                 model: OrderItem,
-//                 as: 'items',
-//                 include: [
-//                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-//                     {
-//                         model: ProductVariant,
-//                         as: 'variant',
-//                         attributes: ['id', 'volume', 'image', 'extra'],
-//                         include: [
-//                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-//                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
-//                         ]
-//                     }
-//                 ]
-//             },
-//             {
-//                 model: SalesReturn,
-//                 as: 'returns',
-//                 include: [
-//                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-//                     {
-//                         model: ProductVariant,
-//                         as: 'variant',
-//                         attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
-//                         include: [
-//                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-//                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
-//                         ]
-//                     }
-//                 ]
-//             }
-//         ];
-
-//         const orderOptions = [['createdAt', 'DESC']];
-
-//         // Backward compatibility: if page & limit are not provided (old app), return all data
-//         const shouldPaginate = (queryPage || queryLimit) && paginate !== 'false';
-
-//         if (!shouldPaginate) {
-//             const orders = await Order.findAll({
-//                 where,
-//                 include,
-//                 order: orderOptions
-//             });
-
-//             console.log(`[Debug getOrders API] Non-paginated path. Found ${orders.length} orders.`);
-
-//             const updatedOrders = orders.map(normalizeOrder);
-
-//             if (updatedOrders && updatedOrders.length > 0) {
-//                 const firstOrder = updatedOrders[0];
-//                 console.log(`[Debug getOrders API] (Non-paginated) Sample Order Details:`, {
-//                     id: firstOrder.id,
-//                     orderId: firstOrder.orderId,
-//                     returns: firstOrder.returns,
-//                     user: firstOrder.user,
-//                     firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
-//                     firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
-//                 });
-//             }
-
-//             return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
-//         }
-
-//         const pagination = getPaginationOptions(req.query);
-//         const { limit, offset, page } = pagination;
-
-//         const result = await Order.findAndCountAll({
-//             where,
-//             include,
-//             limit,
-//             offset,
-//             order: orderOptions,
-//             distinct: true
-//         });
-
-//         console.log(`[Debug getOrders API] Paginated path. Total count: ${result.count}`);
-
-//         const formattedResult = formatPaginatedResponse(result, page, limit);
-
-//         if (formattedResult.items) {
-//             formattedResult.items = formattedResult.items.map(normalizeOrder);
-//         }
-
-//         if (formattedResult && formattedResult.items && formattedResult.items.length > 0) {
-//             const firstOrder = formattedResult.items[0];
-//             console.log(`[Debug getOrders API] (Paginated) Sample Order Details:`, {
-//                 id: firstOrder.id,
-//                 orderId: firstOrder.orderId,
-//                 returns: firstOrder.returns,
-//                 user: firstOrder.user,
-//                 firstItemVolume: firstOrder.items?.[0]?.variantInfo?.volume,
-//                 firstItemVariantVolume: firstOrder.items?.[0]?.variant?.volume
-//             });
-//         }
-
-//         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", formattedResult);
-//     } catch (error) {
-//         console.error(`[Debug getOrders API] Error:`, error);
-//         logger.error(`[Get Orders Error]: ${error.message}`);
-//         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
-//     }
-// };
-
-
 export const getOrders = async (req, res) => {
     try {
         const userId = req.user.id;
@@ -1011,7 +720,6 @@ export const getOrderDetails = async (req, res) => {
         const shouldPaginateItems = (queryPage || queryLimit) && paginate !== 'false';
 
         let order;
-        let orderData;
         if (shouldPaginateItems) {
             // Get order with paginated items
             const pagination = getPaginationOptions(req.query);
@@ -1021,7 +729,6 @@ export const getOrderDetails = async (req, res) => {
             order = await Order.findOne({
                 where: { id, userId },
                 include: [
-                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                     {
                         model: SalesReturn,
                         as: 'returns',
@@ -1055,10 +762,23 @@ export const getOrderDetails = async (req, res) => {
                 distinct: true
             });
 
-            orderData = normalizeOrder(order);
+            const orderData = order.toJSON ? order.toJSON() : order;
+            orderData.totalAmount = roundTotal(orderData.totalAmount);
+            orderData.dueAmount = roundTotal(orderData.dueAmount);
+            orderData.paidAmount = roundTotal(orderData.paidAmount);
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                orderData.orderStatus = 'Delivered';
+            }
 
             // Format paginated items
-            const formattedItems = itemsResult.rows.map(normalizeOrderItem);
+            const formattedItems = itemsResult.rows.map(item => {
+                const itemData = item.toJSON ? item.toJSON() : item;
+                if (itemData.variant) {
+                    itemData.variant.extraName = itemData.variant.extra || '';
+                    itemData.variant.extra = itemData.variant.extra || '';
+                }
+                return itemData;
+            });
 
             // Add paginated items to order data
             orderData.items = formattedItems;
@@ -1068,17 +788,11 @@ export const getOrderDetails = async (req, res) => {
                 limit,
                 totalPages: Math.ceil(itemsResult.count / limit)
             };
-
-            if (orderData.orderDetails) {
-                orderData.orderDetails.items = formattedItems;
-                orderData.orderDetails.itemsPagination = orderData.itemsPagination;
-            }
         } else {
             // Get order with all items (backward compatibility)
             order = await Order.findOne({
                 where: { id, userId },
                 include: [
-                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                     {
                         model: OrderItem,
                         as: 'items',
@@ -1107,7 +821,22 @@ export const getOrderDetails = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
-            orderData = normalizeOrder(order);
+            const orderData = order.toJSON ? order.toJSON() : order;
+            orderData.totalAmount = roundTotal(orderData.totalAmount);
+            orderData.dueAmount = roundTotal(orderData.dueAmount);
+            orderData.paidAmount = roundTotal(orderData.paidAmount);
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                orderData.orderStatus = 'Delivered';
+            }
+            if (orderData.items) {
+                orderData.items = orderData.items.map(item => {
+                    if (item.variant) {
+                        item.variant.extraName = item.variant.extra || '';
+                        item.variant.extra = item.variant.extra || '';
+                    }
+                    return item;
+                });
+            }
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", orderData);
@@ -1115,6 +844,19 @@ export const getOrderDetails = async (req, res) => {
         logger.error(`[Get Order Details Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
+};
+
+const normalizeOrderItem = (item) => {
+    const itemData = item.toJSON ? item.toJSON() : item;
+    if (itemData.variant) {
+        itemData.variant.extraName = itemData.variant.extra || '';
+        itemData.variant.extra = itemData.variant.extra || '';
+    }
+    return itemData;
+};
+
+const formatOrderItems = (items) => {
+    return (items || []).map(normalizeOrderItem);
 };
 
 export const getOrderDetailsV2 = async (req, res) => {
@@ -1141,7 +883,6 @@ export const getOrderDetailsV2 = async (req, res) => {
         let order;
         let items = [];
         let itemsPagination = null;
-        let orderData;
 
         if (shouldPaginateItems) {
             const pagination = getPaginationOptions(req.query);
@@ -1150,7 +891,6 @@ export const getOrderDetailsV2 = async (req, res) => {
             order = await Order.findOne({
                 where: { id, userId },
                 include: [
-                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                     {
                         model: SalesReturn,
                         as: 'returns',
@@ -1183,7 +923,13 @@ export const getOrderDetailsV2 = async (req, res) => {
                 distinct: true
             });
 
-            orderData = normalizeOrder(order);
+            const orderData = order.toJSON ? order.toJSON() : order;
+            orderData.totalAmount = roundTotal(orderData.totalAmount);
+            orderData.dueAmount = roundTotal(orderData.dueAmount);
+            orderData.paidAmount = roundTotal(orderData.paidAmount);
+            if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+                orderData.orderStatus = 'Delivered';
+            }
 
             items = formatOrderItems(itemsResult.rows);
             itemsPagination = {
@@ -1193,14 +939,11 @@ export const getOrderDetailsV2 = async (req, res) => {
                 totalPages: Math.ceil(itemsResult.count / limit)
             };
 
-            const orderDetails = { ...orderData, items, itemsPagination };
-            if (orderDetails.orderDetails) {
-                orderDetails.orderDetails.items = items;
-                orderDetails.orderDetails.itemsPagination = itemsPagination;
-            }
+            const orderDetails = { ...orderData };
+            delete orderDetails.items;
+            delete orderDetails.itemsPagination;
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
-                ...orderData,
                 orderDetails,
                 items,
                 itemsPagination
@@ -1210,7 +953,6 @@ export const getOrderDetailsV2 = async (req, res) => {
         order = await Order.findOne({
             where: { id, userId },
             include: [
-                { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'email', 'city', 'postcode'] },
                 {
                     model: OrderItem,
                     as: 'items',
@@ -1239,16 +981,20 @@ export const getOrderDetailsV2 = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        orderData = normalizeOrder(order);
+        const orderData = order.toJSON ? order.toJSON() : order;
+        orderData.totalAmount = roundTotal(orderData.totalAmount);
+        orderData.dueAmount = roundTotal(orderData.dueAmount);
+        orderData.paidAmount = roundTotal(orderData.paidAmount);
+        if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
+            orderData.orderStatus = 'Delivered';
+        }
+
         items = formatOrderItems(orderData.items || []);
 
         const orderDetails = { ...orderData };
-        if (orderDetails.orderDetails) {
-            orderDetails.orderDetails.items = items;
-        }
+        delete orderDetails.items;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", {
-            ...orderData,
             orderDetails,
             items
         });
@@ -1276,7 +1022,7 @@ export const cancelOrder = async (req, res) => {
             whereClause.orderId = id;
         }
 
-        const order = await Order.findOne({
+        const order = await Order.findOne({ 
             where: whereClause,
             include: [{ model: OrderItem, as: 'items' }]
         });
@@ -1351,7 +1097,7 @@ export const cancelOrder = async (req, res) => {
                         ];
                         for (const cpId of comboProducts) {
                             const compVariant = await ProductVariant.findOne({
-                                where: {
+                                where: { 
                                     productId: cpId,
                                     ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
                                 }
@@ -1380,8 +1126,8 @@ export const cancelOrder = async (req, res) => {
                     } else {
                         const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
                         const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
-                            ? Number(item.quantity)
+                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
+                            ? Number(item.quantity) 
                             : Number(item.quantity) * sellingVolume * bUPP);
 
                         logger.info(`[Cancel Order Restore]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore} base units`);
