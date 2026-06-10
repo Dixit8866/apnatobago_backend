@@ -12,10 +12,12 @@ export const getPaginationOptions = (reqQuery) => {
 };
 
 export const formatPaginatedResponse = (data, page, limit) => {
+    const currentPage = Number(page) || 1;
+    const pageLimit = Number(limit) || 50;
     return {
         totalRecords: data.count,
-        totalPages: Math.ceil(data.count / limit),
-        currentPage: page,
+        totalPages: Math.max(1, Math.ceil(data.count / pageLimit)),
+        currentPage,
         data: data.rows
     };
 };

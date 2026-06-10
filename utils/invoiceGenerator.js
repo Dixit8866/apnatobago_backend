@@ -47,17 +47,6 @@ export const generateOrderInvoice = async (order) => {
             // ── Details Grid ──────────────────────────────────────────────────
             const startY = 85;
 
-            // Bill To
-            doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text('BILL TO / CUSTOMER:', 25, startY);
-            doc.fillColor('#000000').fontSize(14).font('Helvetica-Bold').text(String(order.user?.fullname || 'Customer').toUpperCase(), 25, startY + 10);
-            
-            doc.fontSize(7).font('Helvetica-Bold').text('ADDRESS:', 25, startY + 28);
-            doc.font('Helvetica').fontSize(8).fillColor('#334155')
-               .text(`${order.address || order.shippingAddress?.address || '-'}, ${order.user?.city || '-'}`, 25, startY + 36, { width: width / 1.7 });
-
-            doc.fontSize(7).font('Helvetica-Bold').text('TEL:', 25, startY + 58);
-            doc.fontSize(12).text(order.user?.number || '-', 25, startY + 66);
-
             // Invoice Meta
             const metaX = doc.page.width - 160;
             doc.rect(metaX - 5, startY, 140, 75).lineWidth(0.3).strokeColor('#cbd5e1').stroke();
