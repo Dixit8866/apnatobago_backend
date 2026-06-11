@@ -16,6 +16,8 @@ import { protect } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
+router.get('/:id', getOrderDetails);
+
 // All routes require Admin authentication
 router.use(protect);
 
@@ -33,6 +35,5 @@ router.post('/:id/items', addOrderItem);
 router.delete('/:id/items/:itemId', deleteOrderItem);
 
 // Wildcard routes last
-router.get('/:id', getOrderDetails);
 
 export default router;
