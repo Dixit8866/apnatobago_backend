@@ -16,13 +16,15 @@ import { protect } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
+// Public route for order invoice / details view
+router.get('/:id', getOrderDetails);
+
 // All routes require Admin authentication
 router.use(protect);
 
 router.get('/', getAllOrders);
 router.get('/sales-returns', getSalesReturns);
 router.put('/sales-returns/:id/approve', approveSalesReturn);
-router.get('/:id', getOrderDetails);
 router.get('/:id/invoice', downloadInvoice);
 router.get('/:id/delivery-label', downloadDeliveryLabel);
 router.put('/bulk-status', bulkUpdateOrderStatus);
