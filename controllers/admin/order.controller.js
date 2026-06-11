@@ -153,7 +153,10 @@ export const getAllOrders = async (req, res) => {
                 where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
                 // Restrict Delivered/Payment Collect/Payment Verify to today by default unless filtered
                 if (!startDate && !endDate && !date) {
-                    where.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+                    where[Op.or] = [
+                        { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
+                    ];
                 }
             } else if (status === 'Cancelled') {
                 where.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
@@ -175,19 +178,40 @@ export const getAllOrders = async (req, res) => {
             startOfDate.setHours(0, 0, 0, 0);
             const endOfDate = new Date(endDate);
             endOfDate.setHours(23, 59, 59, 999);
-            where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
+            if (dateFilterField === 'deliveredAt') {
+                where[Op.or] = [
+                    { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
+                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } }
+                ];
+            } else {
+                where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
+            }
         } else if (startDate) {
             const startOfDate = new Date(startDate);
             startOfDate.setHours(0, 0, 0, 0);
             const endOfDate = new Date(startDate);
             endOfDate.setHours(23, 59, 59, 999);
-            where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
+            if (dateFilterField === 'deliveredAt') {
+                where[Op.or] = [
+                    { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
+                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } }
+                ];
+            } else {
+                where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
+            }
         } else if (date) {
             const startOfDay = new Date(date);
             startOfDay.setHours(0, 0, 0, 0);
             const endOfDay = new Date(date);
             endOfDay.setHours(23, 59, 59, 999);
-            where[dateFilterField] = { [Op.between]: [startOfDay, endOfDay] };
+            if (dateFilterField === 'deliveredAt') {
+                where[Op.or] = [
+                    { deliveredAt: { [Op.between]: [startOfDay, endOfDay] } },
+                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfDay, endOfDay] } }
+                ];
+            } else {
+                where[dateFilterField] = { [Op.between]: [startOfDay, endOfDay] };
+            }
         }
 
         // Apply delivery boy filter
@@ -361,15 +385,33 @@ export const getAllOrders = async (req, res) => {
             shippingCountWhere.createdAt = countDateRange;
             pendingDueCountWhere.createdAt = countDateRange;
 
-            deliveredCountWhere.deliveredAt = countDateRange;
-            paymentCollectCountWhere.deliveredAt = countDateRange;
-            paymentVerifyCountWhere.deliveredAt = countDateRange;
+            deliveredCountWhere[Op.or] = [
+                { deliveredAt: countDateRange },
+                { deliveredAt: null, updatedAt: countDateRange }
+            ];
+            paymentCollectCountWhere[Op.or] = [
+                { deliveredAt: countDateRange },
+                { deliveredAt: null, updatedAt: countDateRange }
+            ];
+            paymentVerifyCountWhere[Op.or] = [
+                { deliveredAt: countDateRange },
+                { deliveredAt: null, updatedAt: countDateRange }
+            ];
             cancelledCountWhere.updatedAt = countDateRange;
         } else {
             // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set
-            deliveredCountWhere.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            paymentCollectCountWhere.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            paymentVerifyCountWhere.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            deliveredCountWhere[Op.or] = [
+                { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
+            ];
+            paymentCollectCountWhere[Op.or] = [
+                { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
+            ];
+            paymentVerifyCountWhere[Op.or] = [
+                { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
+            ];
             cancelledCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
         }
 
