@@ -761,7 +761,11 @@ export const bulkVerifyPayments = async (req, res) => {
 export const getOrderDetails = async (req, res) => {
     try {
         const { id } = req.params;
-        const order = await Order.findByPk(id, {
+        const isUUID = id.includes('-');
+        const queryOption = isUUID ? { id } : { orderId: id };
+
+        const order = await Order.findOne({
+            where: queryOption,
             include: [
                 {
                     model: User,
