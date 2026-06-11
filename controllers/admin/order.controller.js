@@ -145,6 +145,7 @@ export const getAllOrders = async (req, res) => {
         };
 
         const { startOfTodayUTC, endOfTodayUTC } = getISTTodayRange();
+        const dateFilterField = (status === 'Delivered' || status === 'Cancelled') ? 'updatedAt' : 'createdAt';
 
         // Apply status filter
         if (status && status !== 'All') {
@@ -152,13 +153,13 @@ export const getAllOrders = async (req, res) => {
                 where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
                 // Restrict Delivered/Payment Collect/Payment Verify to today by default unless filtered
                 if (!startDate && !endDate && !date) {
-                    where.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+                    where.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
                 }
             } else if (status === 'Cancelled') {
                 where.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
                 // Restrict Cancelled orders to today by default unless filtered
                 if (!startDate && !endDate && !date) {
-                    where.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+                    where.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
                 }
             } else if (status === 'Pending Due Order') {
                 where.paymentStatus = { [Op.ne]: 'Paid' };
@@ -174,19 +175,19 @@ export const getAllOrders = async (req, res) => {
             startOfDate.setHours(0, 0, 0, 0);
             const endOfDate = new Date(endDate);
             endOfDate.setHours(23, 59, 59, 999);
-            where.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+            where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
         } else if (startDate) {
             const startOfDate = new Date(startDate);
             startOfDate.setHours(0, 0, 0, 0);
             const endOfDate = new Date(startDate);
             endOfDate.setHours(23, 59, 59, 999);
-            where.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+            where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
         } else if (date) {
             const startOfDay = new Date(date);
             startOfDay.setHours(0, 0, 0, 0);
             const endOfDay = new Date(date);
             endOfDay.setHours(23, 59, 59, 999);
-            where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+            where[dateFilterField] = { [Op.between]: [startOfDay, endOfDay] };
         }
 
         // Apply delivery boy filter
@@ -314,28 +315,34 @@ export const getAllOrders = async (req, res) => {
             });
         }
 
+        let countDateRange = null;
         if (startDate && endDate) {
             const startOfDate = new Date(startDate);
             startOfDate.setHours(0, 0, 0, 0);
             const endOfDate = new Date(endDate);
             endOfDate.setHours(23, 59, 59, 999);
-            countWhere.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+            countDateRange = { [Op.between]: [startOfDate, endOfDate] };
         } else if (startDate) {
             const startOfDate = new Date(startDate);
             startOfDate.setHours(0, 0, 0, 0);
             const endOfDate = new Date(startDate);
             endOfDate.setHours(23, 59, 59, 999);
-            countWhere.createdAt = { [Op.between]: [startOfDate, endOfDate] };
+            countDateRange = { [Op.between]: [startOfDate, endOfDate] };
         } else if (date) {
             const startOfDay = new Date(date);
             startOfDay.setHours(0, 0, 0, 0);
             const endOfDay = new Date(date);
             endOfDay.setHours(23, 59, 59, 999);
-            countWhere.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+            countDateRange = { [Op.between]: [startOfDay, endOfDay] };
         }
 
         // Setup count filters
         const isDateFiltered = !!(startDate || endDate || date);
+        const pendingCountWhere = { ...countWhere, orderStatus: 'Pending' };
+        const packagingCountWhere = { ...countWhere, orderStatus: 'Packaging' };
+        const packedCountWhere = { ...countWhere, orderStatus: 'Packed' };
+        const shippingCountWhere = { ...countWhere, orderStatus: 'Shipping' };
+
         const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
         const paymentCollectCountWhere = { ...countWhere, orderStatus: 'Payment Collect' };
         const paymentVerifyCountWhere = { ...countWhere, orderStatus: 'Payment Verify' };
@@ -347,19 +354,30 @@ export const getAllOrders = async (req, res) => {
             orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
         };
 
-        // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set
-        if (!isDateFiltered) {
-            deliveredCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            paymentCollectCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            paymentVerifyCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            cancelledCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+        if (isDateFiltered && countDateRange) {
+            pendingCountWhere.createdAt = countDateRange;
+            packagingCountWhere.createdAt = countDateRange;
+            packedCountWhere.createdAt = countDateRange;
+            shippingCountWhere.createdAt = countDateRange;
+            pendingDueCountWhere.createdAt = countDateRange;
+
+            deliveredCountWhere.updatedAt = countDateRange;
+            paymentCollectCountWhere.updatedAt = countDateRange;
+            paymentVerifyCountWhere.updatedAt = countDateRange;
+            cancelledCountWhere.updatedAt = countDateRange;
+        } else {
+            // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set
+            deliveredCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            paymentCollectCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            paymentVerifyCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            cancelledCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
         }
 
         const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount, pendingDueCount] = await Promise.all([
-            Order.count({ where: { ...countWhere, orderStatus: 'Pending' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Packaging' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Packed' }, include: countInclude }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Shipping' }, include: countInclude }),
+            Order.count({ where: pendingCountWhere, include: countInclude }),
+            Order.count({ where: packagingCountWhere, include: countInclude }),
+            Order.count({ where: packedCountWhere, include: countInclude }),
+            Order.count({ where: shippingCountWhere, include: countInclude }),
             Order.count({ where: deliveredCountWhere, include: countInclude }),
             Order.count({ where: paymentCollectCountWhere, include: countInclude }),
             Order.count({ where: paymentVerifyCountWhere, include: countInclude }),
