@@ -505,6 +505,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
                 }
             } else if (status === 'Completed') {
                 order.orderStatus = 'Delivered';
+                order.deliveredAt = new Date();
                 await order.save();
                 await sendDeliveredNotification(order.id);
             }
@@ -579,7 +580,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
                 }
             }
         } else if (status === 'Completed') {
-            await Order.update({ orderStatus: 'Delivered' }, { where: { id: assignment.orderId } });
+            await Order.update({ orderStatus: 'Delivered', deliveredAt: new Date() }, { where: { id: assignment.orderId } });
             await sendDeliveredNotification(assignment.orderId);
         }
 
@@ -899,7 +900,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
         // Ensure current order status is updated to Payment Collect so it lands in the Payment Collect tab
         await Order.update(
-            { orderStatus: 'Payment Collect' },
+            { orderStatus: 'Payment Collect', deliveredAt: new Date() },
             { where: { id: assignment.orderId }, transaction: t }
         );
 

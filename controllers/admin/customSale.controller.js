@@ -111,6 +111,7 @@ export const createCustomSale = async (req, res) => {
             paymentMethod: paymentMethod || 'Cash',
             paymentStatus,
             orderStatus: 'Delivered', // Custom sales are usually delivered immediately
+            deliveredAt: new Date(),
             saleType: 'Direct',
             deliveryCharge,
             notes

@@ -145,7 +145,7 @@ export const getAllOrders = async (req, res) => {
         };
 
         const { startOfTodayUTC, endOfTodayUTC } = getISTTodayRange();
-        const dateFilterField = (status === 'Delivered' || status === 'Cancelled') ? 'updatedAt' : 'createdAt';
+        const dateFilterField = status === 'Delivered' ? 'deliveredAt' : (status === 'Cancelled' ? 'updatedAt' : 'createdAt');
 
         // Apply status filter
         if (status && status !== 'All') {
@@ -153,7 +153,7 @@ export const getAllOrders = async (req, res) => {
                 where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
                 // Restrict Delivered/Payment Collect/Payment Verify to today by default unless filtered
                 if (!startDate && !endDate && !date) {
-                    where.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+                    where.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
                 }
             } else if (status === 'Cancelled') {
                 where.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
@@ -361,15 +361,15 @@ export const getAllOrders = async (req, res) => {
             shippingCountWhere.createdAt = countDateRange;
             pendingDueCountWhere.createdAt = countDateRange;
 
-            deliveredCountWhere.updatedAt = countDateRange;
-            paymentCollectCountWhere.updatedAt = countDateRange;
-            paymentVerifyCountWhere.updatedAt = countDateRange;
+            deliveredCountWhere.deliveredAt = countDateRange;
+            paymentCollectCountWhere.deliveredAt = countDateRange;
+            paymentVerifyCountWhere.deliveredAt = countDateRange;
             cancelledCountWhere.updatedAt = countDateRange;
         } else {
             // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set
-            deliveredCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            paymentCollectCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            paymentVerifyCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            deliveredCountWhere.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            paymentCollectCountWhere.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            paymentVerifyCountWhere.deliveredAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
             cancelledCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
         }
 
@@ -440,8 +440,14 @@ export const updateOrderStatus = async (req, res) => {
             }
             if (orderStatus === 'Cancelled') {
                 order.orderStatus = 'Admin Cancel';
+                order.deliveredAt = null;
             } else {
                 order.orderStatus = orderStatus;
+                if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(orderStatus)) {
+                    order.deliveredAt = order.deliveredAt || new Date();
+                } else {
+                    order.deliveredAt = null;
+                }
             }
 
             if (notes) {
@@ -626,6 +632,11 @@ export const bulkUpdateOrderStatus = async (req, res) => {
         const updateFields = { orderStatus: targetStatus };
         if (orderStatus === 'Cancelled' || orderStatus === 'Admin Cancel') {
             updateFields.dueAmount = 0;
+            updateFields.deliveredAt = null;
+        } else if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(orderStatus)) {
+            updateFields.deliveredAt = new Date();
+        } else {
+            updateFields.deliveredAt = null;
         }
 
         await Order.update(
@@ -748,6 +759,7 @@ export const bulkVerifyPayments = async (req, res) => {
         for (const order of orders) {
             order.orderStatus = 'Payment Verify';
             order.paymentCollectStatus = 'Verified';
+            order.deliveredAt = order.deliveredAt || new Date();
 
             if (note) {
                 const timestamp = new Date().toLocaleString();

@@ -29,7 +29,7 @@ export const getOrderReport = async (req, res, next) => {
         const { status = 'Cancelled', startDate, endDate } = req.query;
         const where = { orderStatus: status };
         if (startDate && endDate) {
-            const dateField = (status === 'Delivered' || status === 'Cancelled') ? 'updatedAt' : 'createdAt';
+            const dateField = status === 'Delivered' ? 'deliveredAt' : (status === 'Cancelled' ? 'updatedAt' : 'createdAt');
             where[dateField] = { [Op.between]: [new Date(startDate + ' 00:00:00'), new Date(endDate + ' 23:59:59')] };
         }
 

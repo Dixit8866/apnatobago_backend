@@ -336,7 +336,8 @@ const runManualMigrations = async () => {
         try {
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "deliveryRoundId" VARCHAR(255)');
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "deliveryRoundTiming" VARCHAR(255)');
-        } catch (e) { console.log('[Migration Warning] Orders delivery timing columns failed:', e.message); }
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "deliveredAt" TIMESTAMP WITH TIME ZONE');
+        } catch (e) { console.log('[Migration Warning] Orders delivery timing/deliveredAt columns failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
