@@ -67,19 +67,21 @@ export const createUser = async (req, res, next) => {
 export const getAllUsers = async (req, res, next) => {
     try {
         const { page = 1, limit = 50, search = '', status, kycverification } = req.query;
-        const { limit: limitOptions, offset } = getPaginationOptions(page, limit);
+        const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
-        const where = {};
+        const searchWhere = {};
         if (search) {
-            where[Op.or] = [
+            searchWhere[Op.or] = [
                 { fullname: { [Op.iLike]: `%${search}%` } },
                 { number: { [Op.iLike]: `%${search}%` } },
                 { email: { [Op.iLike]: `%${search}%` } },
                 { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } }
             ];
         }
+        if (kycverification) searchWhere.kycverification = kycverification;
+
+        const where = { ...searchWhere };
         if (status) where.status = status;
-        if (kycverification) where.kycverification = kycverification;
 
         const include = [
             {
@@ -88,6 +90,15 @@ export const getAllUsers = async (req, res, next) => {
                 attributes: ['id', 'shopName', 'shopAddress', 'postcode']
             }
         ];
+
+        // Parallel status counts (search and KYC aware, not status-filtered)
+        const [totalCount, activeCount, inactiveCount, deletedCount] = await Promise.all([
+            User.count({ where: searchWhere, include, distinct: true }),
+            User.count({ where: { ...searchWhere, status: 'Active' }, include, distinct: true }),
+            User.count({ where: { ...searchWhere, status: 'Inactive' }, include, distinct: true }),
+            User.count({ where: { ...searchWhere, status: 'Deleted' }, include, distinct: true }),
+        ]);
+        const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
         if (req.query.paginate === 'false') {
             const users = await User.findAll({ 
@@ -111,7 +122,10 @@ export const getAllUsers = async (req, res, next) => {
         });
 
         const responseData = formatPaginatedResponse({ count, rows }, page, limitOptions);
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Users fetched.', responseData);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Users fetched.', {
+            ...responseData,
+            statusCounts
+        });
     } catch (error) {
         next(error);
     }

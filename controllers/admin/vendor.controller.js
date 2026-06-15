@@ -38,20 +38,31 @@ export const createVendor = async (req, res, next) => {
 export const getAllVendors = async (req, res, next) => {
     try {
         const { page = 1, limit = 50, search = '', status } = req.query;
-        const { limit: limitOptions, offset } = getPaginationOptions(page, limit);
+        const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
-        const where = {};
+        const searchWhere = {};
         if (search) {
-            where[Op.or] = [
+            searchWhere[Op.or] = [
                 { name: { [Op.iLike]: `%${search}%` } },
                 { companyName: { [Op.iLike]: `%${search}%` } },
                 { whatsappNumber: { [Op.iLike]: `%${search}%` } },
                 { email: { [Op.iLike]: `%${search}%` } },
             ];
         }
+
+        const where = { ...searchWhere };
         if (status) {
             where.status = status;
         }
+
+        // Parallel status counts (search-aware, not status-filtered, paranoid=false to include soft deleted if status counts require it, but since delete soft deletes them, we must check deleted count as paranoid false)
+        const [totalCount, activeCount, inactiveCount, deletedCount] = await Promise.all([
+            Vendor.count({ where: searchWhere }),
+            Vendor.count({ where: { ...searchWhere, status: 'Active' } }),
+            Vendor.count({ where: { ...searchWhere, status: 'Inactive' } }),
+            Vendor.count({ where: { ...searchWhere, status: 'Deleted' } }),
+        ]);
+        const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
         if (req.query.paginate === 'false') {
             const vendors = await Vendor.findAll({ where, order: [['createdAt', 'DESC']] });
@@ -66,7 +77,10 @@ export const getAllVendors = async (req, res, next) => {
         });
 
         const responseData = formatPaginatedResponse({ count, rows }, page, limitOptions);
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Vendors fetched successfully.', responseData);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Vendors fetched successfully.', {
+            ...responseData,
+            statusCounts
+        });
     } catch (error) {
         next(error);
     }
