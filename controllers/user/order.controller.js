@@ -361,27 +361,119 @@ export const createOrder = async (req, res) => {
             paymentStatus = 'Pending';
         }
 
-        // 5. Create the Order
-        const newOrder = await Order.create({
-            orderId: await generateUniqueOrderId(),
-            userId,
-            totalAmount: finalTotal,
-            paidAmount: paymentStatus === 'Paid' ? finalTotal : 0,
-            dueAmount: paymentStatus === 'Paid' ? 0 : finalTotal,
-            paymentMethod,
-            paymentStatus,
-            orderStatus: 'Pending',
-            deliveryMode,
-            deliveryCharge
-        }, { transaction: t });
+        // Check if there is an existing pending order for this user
+        const existingOrder = await Order.findOne({
+            where: { userId, orderStatus: 'Pending' },
+            transaction: t
+        });
 
-        // 6. Create Order Items
-        const finalOrderItems = orderItemsData.map(item => ({
-            ...item,
-            orderId: newOrder.id
-        }));
+        let targetOrder = null;
 
-        await OrderItem.bulkCreate(finalOrderItems, { transaction: t });
+        if (existingOrder) {
+            targetOrder = existingOrder;
+
+            // Merge items into the existing order
+            for (const incomingItem of orderItemsData) {
+                const { productId, variantId, quantity, price, sellUnit, variantInfo } = incomingItem;
+
+                const matchedItem = await OrderItem.findOne({
+                    where: { orderId: existingOrder.id, variantId, sellUnit },
+                    transaction: t
+                });
+
+                if (matchedItem) {
+                    const newQty = Number(matchedItem.quantity) + Number(quantity);
+                    await matchedItem.update({ quantity: newQty }, { transaction: t });
+                } else {
+                    await OrderItem.create({
+                        orderId: existingOrder.id,
+                        productId,
+                        variantId,
+                        quantity,
+                        price,
+                        sellUnit,
+                        variantInfo
+                    }, { transaction: t });
+                }
+            }
+
+            // Re-fetch all items in this order to calculate correct prices according to new total quantities (in case of pricing tiers)
+            const allOrderItems = await OrderItem.findAll({
+                where: { orderId: existingOrder.id },
+                transaction: t
+            });
+
+            let mergedSubtotal = 0;
+            for (const orderItem of allOrderItems) {
+                const variant = await ProductVariant.findByPk(orderItem.variantId, { transaction: t });
+                const bUPP = Number(variant.baseUnitsPerPack || 1);
+
+                const pricings = await ProductPricing.findAll({
+                    where: { variantId: orderItem.variantId },
+                    order: [['minQty', 'ASC']]
+                });
+
+                let applicablePricing = pricings.find(p =>
+                    p.customLevelId === userAppLevel &&
+                    Number(orderItem.quantity) >= Number(p.minQty) &&
+                    (p.maxQty === null || Number(orderItem.quantity) <= Number(p.maxQty))
+                );
+                if (!applicablePricing) {
+                    applicablePricing = pricings.find(p => p.customLevelId === userAppLevel);
+                }
+                if (!applicablePricing && pricings.length > 0) {
+                    applicablePricing = pricings[0];
+                }
+
+                let rawPrice = applicablePricing ? parseFloat(applicablePricing.price) : (parseFloat(variant.purchasePrice) || 0);
+                const itemPrice = orderItem.sellUnit === 'Inner' ? (rawPrice / bUPP) : rawPrice;
+                const itemSubtotal = itemPrice * parseFloat(orderItem.quantity);
+                mergedSubtotal += itemSubtotal;
+
+                await orderItem.update({ price: itemPrice }, { transaction: t });
+            }
+
+            // Recalculate delivery charge for the entire order
+            let mergedDeliveryCharge = 0;
+            if (settings && mergedSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
+                if (deliveryMode === 'Express') mergedDeliveryCharge = parseFloat(settings.expressDeliveryCharge);
+                else if (deliveryMode === 'Round') mergedDeliveryCharge = parseFloat(settings.deliveryOnRoundCharge);
+            }
+
+            const mergedTotal = roundTotal(mergedSubtotal + mergedDeliveryCharge);
+
+            // Update the existing order details
+            await existingOrder.update({
+                totalAmount: mergedTotal,
+                dueAmount: mergedTotal,
+                deliveryCharge: mergedDeliveryCharge
+            }, { transaction: t });
+
+        } else {
+            // Create a new Order
+            const newOrder = await Order.create({
+                orderId: await generateUniqueOrderId(),
+                userId,
+                totalAmount: finalTotal,
+                paidAmount: paymentStatus === 'Paid' ? finalTotal : 0,
+                dueAmount: paymentStatus === 'Paid' ? 0 : finalTotal,
+                paymentMethod,
+                paymentStatus,
+                orderStatus: 'Pending',
+                deliveryMode,
+                deliveryCharge
+            }, { transaction: t });
+
+            targetOrder = newOrder;
+
+            // Create Order Items
+            const finalOrderItems = orderItemsData.map(item => ({
+                ...item,
+                orderId: newOrder.id
+            }));
+
+            await OrderItem.bulkCreate(finalOrderItems, { transaction: t });
+        }
 
         // 7. Clear Cart
         await Cart.destroy({ where: { userId }, transaction: t });
@@ -452,7 +544,7 @@ export const createOrder = async (req, res) => {
                                 secondaryPerPrimary: stock.secondaryPerPrimary,
                                 totalQtyBaseUnits: deductFromThis,
                                 balanceAfterBaseUnits: newTotalBaseUnits,
-                                note: `Sales Order #${newOrder.orderId} (Combo Component)`,
+                                note: `Sales Order #${targetOrder.orderId} (Combo Component)`,
                                 createdBy: req.user?.fullname || 'Customer'
                             }, { transaction: t });
 
@@ -460,7 +552,7 @@ export const createOrder = async (req, res) => {
                         }
 
                         if (remainingToDeduct > 0) {
-                            logger.warn(`[Stock Deduction Shortfall]: Order #${newOrder.orderId} - Shortfall of ${remainingToDeduct} base units for combo component variant ${compVariant.id} in Godown ${targetGodownId}`);
+                            logger.warn(`[Stock Deduction Shortfall]: Order #${targetOrder.orderId} - Shortfall of ${remainingToDeduct} base units for combo component variant ${compVariant.id} in Godown ${targetGodownId}`);
                         }
                     }
                 } else {
@@ -501,7 +593,7 @@ export const createOrder = async (req, res) => {
                             secondaryPerPrimary: stock.secondaryPerPrimary,
                             totalQtyBaseUnits: deductFromThis,
                             balanceAfterBaseUnits: newTotalBaseUnits,
-                            note: `Sales Order #${newOrder.orderId}`,
+                            note: `Sales Order #${targetOrder.orderId}`,
                             createdBy: req.user?.fullname || 'Customer'
                         }, { transaction: t });
 
@@ -509,12 +601,12 @@ export const createOrder = async (req, res) => {
                     }
 
                     if (remainingToDeduct > 0) {
-                        logger.warn(`[Stock Deduction]: Order #${newOrder.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId} in Godown ${targetGodownId}`);
+                        logger.warn(`[Stock Deduction]: Order #${targetOrder.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId} in Godown ${targetGodownId}`);
                     }
                 }
             }
         } else {
-            logger.error(`[Stock Deduction]: No Godown found to deduct stock for Order #${newOrder.orderId}`);
+            logger.error(`[Stock Deduction]: No Godown found to deduct stock for Order #${targetOrder.orderId}`);
         }
 
         await t.commit();
@@ -522,10 +614,12 @@ export const createOrder = async (req, res) => {
         // 9. Trigger Admin Notification (Real-time)
         try {
             const adminNotify = await AdminNotification.create({
-                title: 'New Order Received!',
-                message: `User ${userData.fullname} has placed a new order #${newOrder.orderId} of ₹${newOrder.totalAmount}.`,
+                title: existingOrder ? 'Order Updated!' : 'New Order Received!',
+                message: existingOrder 
+                    ? `User ${userData.fullname} has updated pending order #${targetOrder.orderId} to ₹${targetOrder.totalAmount}.`
+                    : `User ${userData.fullname} has placed a new order #${targetOrder.orderId} of ₹${targetOrder.totalAmount}.`,
                 type: 'ORDER',
-                referenceId: newOrder.id,
+                referenceId: targetOrder.id,
                 clickAction: `/sales/user-orders`
             });
             emitAdminNotification(adminNotify);
@@ -537,17 +631,19 @@ export const createOrder = async (req, res) => {
         // 10. Trigger User Push Notification
         try {
             if (userData.fcmtoken) {
-                const userTitle = 'Your Order Successful!';
-                const userBody = `Hey ${userData.fullname}, your order #${newOrder.orderId} of ₹${newOrder.totalAmount} has been placed successfully!`;
+                const userTitle = existingOrder ? 'Order Updated!' : 'Your Order Successful!';
+                const userBody = existingOrder
+                    ? `Hey ${userData.fullname}, your pending order #${targetOrder.orderId} has been updated to ₹${targetOrder.totalAmount} successfully!`
+                    : `Hey ${userData.fullname}, your order #${targetOrder.orderId} of ₹${targetOrder.totalAmount} has been placed successfully!`;
                 // Use type: 'order' so that it plays the custom orderDetails notification sound/channel
-                await sendToDevice(userData.fcmtoken, userTitle, userBody, null, { type: 'order', id: String(newOrder.id), orderId: String(newOrder.id) });
+                await sendToDevice(userData.fcmtoken, userTitle, userBody, null, { type: 'order', id: String(targetOrder.id), orderId: String(targetOrder.id) });
                 await Notification.create({
                     title: userTitle,
                     body: userBody,
                     type: 'ORDER',
-                    target: String(newOrder.userId),
+                    target: String(targetOrder.userId),
                     status: 'SENT',
-                    clickAction: String(newOrder.id)
+                    clickAction: String(targetOrder.id)
                 });
             }
         } catch (pushErr) {
@@ -555,7 +651,7 @@ export const createOrder = async (req, res) => {
             logger.error(`[User Push Notification Error]: ${pushErr.message}`);
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Order placed successfully.", newOrder);
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, existingOrder ? "Order updated successfully." : "Order placed successfully.", targetOrder);
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Create Order Error]: ${error.message}`);
