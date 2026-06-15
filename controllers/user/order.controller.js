@@ -79,7 +79,8 @@ export const createOrder = async (req, res) => {
 
         // 1. Perform stock check for all items first
         for (const item of items) {
-            const { productId, variantId, quantity, sellUnit } = item;
+            const { productId, variantId, quantity } = item;
+            const sellUnit = item.sellUnit || 'Base';
 
             // Fetch Product and Variant
             const variant = await ProductVariant.findByPk(variantId, {
