@@ -245,7 +245,6 @@ export const getUserAnalytics = async (req, res, next) => {
         const recentOrders = await Order.findAll({
             where: { userId, orderStatus: { [Op.ne]: 'Cancelled' } },
             order: [['createdAt', 'DESC']],
-            limit: 5,
             include: [
                 {
                     model: OrderItem,
