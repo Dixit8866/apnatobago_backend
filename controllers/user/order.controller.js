@@ -249,7 +249,8 @@ export const createOrder = async (req, res) => {
 
         // 2. Fetch prices, build order items and subtotal since everything is in stock
         for (const item of items) {
-            const { productId, variantId, quantity, sellUnit } = item;
+            const { productId, variantId, quantity } = item;
+            const sellUnit = item.sellUnit || 'Base';
 
             const variant = await ProductVariant.findByPk(variantId, {
                 include: [
