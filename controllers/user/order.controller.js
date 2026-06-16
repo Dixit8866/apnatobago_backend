@@ -41,6 +41,8 @@ export const createOrder = async (req, res) => {
             items,
             paymentMethod,
             deliveryMode,
+            deliveryRoundId,
+            deliveryRoundTiming,
             totalAmount: frontendTotalAmount // Total sent from frontend for validation
         } = req.body;
 
@@ -448,7 +450,10 @@ export const createOrder = async (req, res) => {
             await existingOrder.update({
                 totalAmount: mergedTotal,
                 dueAmount: mergedTotal,
-                deliveryCharge: mergedDeliveryCharge
+                deliveryCharge: mergedDeliveryCharge,
+                deliveryMode,
+                deliveryRoundId,
+                deliveryRoundTiming
             }, { transaction: t });
 
         } else {
@@ -463,7 +468,9 @@ export const createOrder = async (req, res) => {
                 paymentStatus,
                 orderStatus: 'Pending',
                 deliveryMode,
-                deliveryCharge
+                deliveryCharge,
+                deliveryRoundId,
+                deliveryRoundTiming
             }, { transaction: t });
 
             targetOrder = newOrder;
