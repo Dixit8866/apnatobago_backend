@@ -669,6 +669,49 @@ export const createOrder = async (req, res) => {
 };
 
 /**
+ * Helper to populate delivery time round data from AppSettings if order uses Round mode.
+ */
+const populateDeliveryRound = async (orderData) => {
+    if (!orderData) return orderData;
+
+    // Ensure fields exist
+    orderData.deliveryMode = orderData.deliveryMode || null;
+    orderData.deliveryRoundId = orderData.deliveryRoundId || null;
+    orderData.deliveryRoundTiming = orderData.deliveryRoundTiming || null;
+
+    if (orderData.deliveryMode === 'Round' && orderData.deliveryRoundId) {
+        try {
+            const settings = await AppSettings.findOne();
+            if (settings && Array.isArray(settings.deliveryRoundSchedules)) {
+                const matchedRound = settings.deliveryRoundSchedules.find(r => r.id === orderData.deliveryRoundId);
+                if (matchedRound) {
+                    orderData.deliveryRound = {
+                        id: matchedRound.id || orderData.deliveryRoundId,
+                        name: matchedRound.name || '',
+                        start: matchedRound.start || '',
+                        end: matchedRound.end || ''
+                    };
+                    if (!orderData.deliveryRoundTiming) {
+                        orderData.deliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                    }
+                } else {
+                    orderData.deliveryRound = null;
+                }
+            } else {
+                orderData.deliveryRound = null;
+            }
+        } catch (err) {
+            logger.error(`[Populate Delivery Round Error]: ${err.message}`);
+            orderData.deliveryRound = null;
+        }
+    } else {
+        orderData.deliveryRound = null;
+    }
+
+    return orderData;
+};
+
+/**
  * @desc    Get all orders for the logged-in user
  * @route   GET /api/user/orders
  * @access  Private
@@ -730,8 +773,8 @@ export const getOrders = async (req, res) => {
                 order: orderOptions
             });
 
-            const updatedOrders = orders.map(o => {
-                const orderData = o.toJSON ? o.toJSON() : o;
+            const updatedOrders = await Promise.all(orders.map(async o => {
+                let orderData = o.toJSON ? o.toJSON() : o;
                 orderData.totalAmount = roundTotal(orderData.totalAmount);
                 orderData.dueAmount = roundTotal(orderData.dueAmount);
                 orderData.paidAmount = roundTotal(orderData.paidAmount);
@@ -747,8 +790,8 @@ export const getOrders = async (req, res) => {
                         return item;
                     });
                 }
-                return orderData;
-            });
+                return await populateDeliveryRound(orderData);
+            }));
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", updatedOrders);
         }
@@ -768,8 +811,8 @@ export const getOrders = async (req, res) => {
         const formattedResult = formatPaginatedResponse(result, page, limit);
 
         if (formattedResult.items) {
-            formattedResult.items = formattedResult.items.map(o => {
-                const orderData = o.toJSON ? o.toJSON() : o;
+            formattedResult.items = await Promise.all(formattedResult.items.map(async o => {
+                let orderData = o.toJSON ? o.toJSON() : o;
                 orderData.totalAmount = roundTotal(orderData.totalAmount);
                 orderData.dueAmount = roundTotal(orderData.dueAmount);
                 orderData.paidAmount = roundTotal(orderData.paidAmount);
@@ -785,8 +828,8 @@ export const getOrders = async (req, res) => {
                         return item;
                     });
                 }
-                return orderData;
-            });
+                return await populateDeliveryRound(orderData);
+            }));
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders fetched successfully.", formattedResult);
@@ -867,13 +910,14 @@ export const getOrderDetails = async (req, res) => {
                 distinct: true
             });
 
-            const orderData = order.toJSON ? order.toJSON() : order;
+            let orderData = order.toJSON ? order.toJSON() : order;
             orderData.totalAmount = roundTotal(orderData.totalAmount);
             orderData.dueAmount = roundTotal(orderData.dueAmount);
             orderData.paidAmount = roundTotal(orderData.paidAmount);
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
+            orderData = await populateDeliveryRound(orderData);
 
             // Format paginated items
             const formattedItems = itemsResult.rows.map(item => {
@@ -926,13 +970,14 @@ export const getOrderDetails = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
             }
 
-            const orderData = order.toJSON ? order.toJSON() : order;
+            let orderData = order.toJSON ? order.toJSON() : order;
             orderData.totalAmount = roundTotal(orderData.totalAmount);
             orderData.dueAmount = roundTotal(orderData.dueAmount);
             orderData.paidAmount = roundTotal(orderData.paidAmount);
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
+            orderData = await populateDeliveryRound(orderData);
             if (orderData.items) {
                 orderData.items = orderData.items.map(item => {
                     if (item.variant) {
@@ -1028,13 +1073,14 @@ export const getOrderDetailsV2 = async (req, res) => {
                 distinct: true
             });
 
-            const orderData = order.toJSON ? order.toJSON() : order;
+            let orderData = order.toJSON ? order.toJSON() : order;
             orderData.totalAmount = roundTotal(orderData.totalAmount);
             orderData.dueAmount = roundTotal(orderData.dueAmount);
             orderData.paidAmount = roundTotal(orderData.paidAmount);
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
+            orderData = await populateDeliveryRound(orderData);
 
             items = formatOrderItems(itemsResult.rows);
             itemsPagination = {
@@ -1086,13 +1132,14 @@ export const getOrderDetailsV2 = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        const orderData = order.toJSON ? order.toJSON() : order;
+        let orderData = order.toJSON ? order.toJSON() : order;
         orderData.totalAmount = roundTotal(orderData.totalAmount);
         orderData.dueAmount = roundTotal(orderData.dueAmount);
         orderData.paidAmount = roundTotal(orderData.paidAmount);
         if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
             orderData.orderStatus = 'Delivered';
         }
+        orderData = await populateDeliveryRound(orderData);
 
         items = formatOrderItems(orderData.items || []);
 
