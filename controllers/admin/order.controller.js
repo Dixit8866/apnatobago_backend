@@ -622,7 +622,7 @@ export const updateOrderStatus = async (req, res) => {
                 const user = await User.findByPk(order.userId);
                 if (user && user.fcmtoken) {
                     const title = 'Order Shipped!';
-                    const body = `Hey ${user.fullname}, your order #${order.orderId} has been shipped!`;
+                    const body = `Hey ${user.fullname}, your order #${order.orderId} is in shipping!`;
                     await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
                     await Notification.create({
                         title,
@@ -758,7 +758,7 @@ export const bulkUpdateOrderStatus = async (req, res) => {
                 for (const order of updatedOrders) {
                     if (order.user && order.user.fcmtoken) {
                         const title = 'Order Shipped!';
-                        const body = `Hey ${order.user.fullname}, your order #${order.orderId} has been shipped!`;
+                        const body = `Hey ${order.user.fullname}, your order #${order.orderId} is in shipping!`;
                         await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
                         await Notification.create({
                             title,

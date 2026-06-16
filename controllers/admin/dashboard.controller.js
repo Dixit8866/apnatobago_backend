@@ -1,4 +1,4 @@
-import { Order, PurchaseBill, OrderItem, Product, ProductVariant, MainCategory, User, Vendor, InventoryStock, Volume } from '../../models/index.js';
+import { Order, PurchaseBill, OrderItem, Product, ProductVariant, MainCategory, User, Vendor, InventoryStock, Volume, HelpSupport } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { Op, fn, col, literal } from 'sequelize';
@@ -265,6 +265,10 @@ export const getDashboardStats = async (req, res) => {
             }
         }
 
+        const pendingHelpSupportCount = await HelpSupport.count({
+            where: { status: 'Pending' }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Dashboard stats fetched successfully.", {
             summary: {
                 totalSales,
@@ -275,7 +279,8 @@ export const getDashboardStats = async (req, res) => {
                 newOrderCount,
                 deliveredOrderCount,
                 todayTotalOrder,
-                lowStockCount
+                lowStockCount,
+                pendingHelpSupportCount
             },
             paymentBifurcation: paymentStats,
             topProducts: enrichedProducts,
