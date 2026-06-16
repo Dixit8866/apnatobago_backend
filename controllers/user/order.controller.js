@@ -324,6 +324,18 @@ export const createOrder = async (req, res) => {
 
         // 3. Calculate delivery charge and final total
         const settings = await AppSettings.findOne({ transaction: t });
+        let resolvedDeliveryRoundTiming = deliveryRoundTiming;
+        if (deliveryMode === 'Round' && deliveryRoundId && settings && Array.isArray(settings.deliveryRoundSchedules)) {
+            const normalizedSchedules = settings.deliveryRoundSchedules.map((round, index) => ({
+                id: round.id || `round_${index + 1}`,
+                ...round
+            }));
+            const matchedRound = normalizedSchedules.find(r => r.id === deliveryRoundId);
+            if (matchedRound) {
+                resolvedDeliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+            }
+        }
+
         let deliveryCharge = 0;
         if (settings && calculatedSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
             if (deliveryMode === 'Express') deliveryCharge = parseFloat(settings.expressDeliveryCharge);
@@ -453,7 +465,7 @@ export const createOrder = async (req, res) => {
                 deliveryCharge: mergedDeliveryCharge,
                 deliveryMode,
                 deliveryRoundId,
-                deliveryRoundTiming
+                deliveryRoundTiming: resolvedDeliveryRoundTiming
             }, { transaction: t });
 
         } else {
@@ -470,7 +482,7 @@ export const createOrder = async (req, res) => {
                 deliveryMode,
                 deliveryCharge,
                 deliveryRoundId,
-                deliveryRoundTiming
+                deliveryRoundTiming: resolvedDeliveryRoundTiming
             }, { transaction: t });
 
             targetOrder = newOrder;
@@ -683,7 +695,11 @@ const populateDeliveryRound = async (orderData) => {
         try {
             const settings = await AppSettings.findOne();
             if (settings && Array.isArray(settings.deliveryRoundSchedules)) {
-                const matchedRound = settings.deliveryRoundSchedules.find(r => r.id === orderData.deliveryRoundId);
+                const normalizedSchedules = settings.deliveryRoundSchedules.map((round, index) => ({
+                    id: round.id || `round_${index + 1}`,
+                    ...round
+                }));
+                const matchedRound = normalizedSchedules.find(r => r.id === orderData.deliveryRoundId);
                 if (matchedRound) {
                     orderData.deliveryRound = {
                         id: matchedRound.id || orderData.deliveryRoundId,

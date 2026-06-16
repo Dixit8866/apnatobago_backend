@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -108,6 +108,14 @@ export const getAllOrders = async (req, res) => {
     try {
         const { status, date, search, deliveryBoyId, startDate, endDate, userId } = req.query;
         const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
+
+        // Pre-fetch settings to resolve any empty deliveryRoundTiming
+        const appSettings = await AppSettings.findOne();
+        const rawSchedules = appSettings && Array.isArray(appSettings.deliveryRoundSchedules) ? appSettings.deliveryRoundSchedules : [];
+        const normalizedSchedules = rawSchedules.map((round, index) => ({
+            id: round.id || `round_${index + 1}`,
+            ...round
+        }));
 
         if (userId) {
             where.userId = userId;
@@ -321,6 +329,12 @@ export const getAllOrders = async (req, res) => {
 
             // Attach to Sequelize models using setDataValue so they are serialized correctly
             result.rows.forEach(order => {
+                if (order.deliveryMode === 'Round' && order.deliveryRoundId && !order.deliveryRoundTiming) {
+                    const matchedRound = normalizedSchedules.find(r => r.id === order.deliveryRoundId);
+                    if (matchedRound) {
+                        order.setDataValue('deliveryRoundTiming', matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`);
+                    }
+                }
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
@@ -905,6 +919,21 @@ export const getOrderDetails = async (req, res) => {
 
         if (!order) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        // Resolve deliveryRoundTiming dynamically if not set
+        if (order.deliveryMode === 'Round' && order.deliveryRoundId && !order.deliveryRoundTiming) {
+            const appSettings = await AppSettings.findOne();
+            if (appSettings && Array.isArray(appSettings.deliveryRoundSchedules)) {
+                const normalizedSchedules = appSettings.deliveryRoundSchedules.map((round, index) => ({
+                    id: round.id || `round_${index + 1}`,
+                    ...round
+                }));
+                const matchedRound = normalizedSchedules.find(r => r.id === order.deliveryRoundId);
+                if (matchedRound) {
+                    order.setDataValue('deliveryRoundTiming', matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`);
+                }
+            }
         }
 
         const adjustedOrder = adjustOrderPayments(order);

@@ -38,7 +38,7 @@ export const getAppSettings = async (req, res) => {
 
         if (Array.isArray(settingsData.deliveryRoundSchedules)) {
             settingsData.deliveryRoundSchedules = settingsData.deliveryRoundSchedules.map((round, index) => ({
-                id: round.id || `round_${index + 1}_${Math.random().toString(36).substring(2, 9)}`,
+                id: round.id || `round_${index + 1}`,
                 ...round
             }));
         }
