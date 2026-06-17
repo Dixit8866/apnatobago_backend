@@ -187,21 +187,7 @@ export const getProducts = async (req, res) => {
             whereClause.isTobaccoProduct = false;
         }
 
-        // Define stock subquery to only fetch products with active stock > 0
-        const stockSubquery = `(
-            SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
-            FROM "inventory_stocks" AS "stock"
-            INNER JOIN "product_variants" AS "variant" ON "variant"."id" = "stock"."variantId"
-            WHERE "variant"."productId" = "Product"."id"
-              AND "stock"."status" = 'Active'
-              AND "stock"."deletedAt" IS NULL
-              AND "variant"."status" != 'Deleted'
-              AND "variant"."deletedAt" IS NULL
-        )`;
 
-        whereClause[Op.and] = [
-            sequelize.literal(`${stockSubquery} > 0`)
-        ];
 
         // Only fetch pricings for the user's assigned level
         const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
@@ -458,20 +444,7 @@ export const searchCatalogue = async (req, res) => {
             productWhere.isTobaccoProduct = false;
         }
 
-        const stockSubquery = `(
-            SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
-            FROM "inventory_stocks" AS "stock"
-            INNER JOIN "product_variants" AS "variant" ON "variant"."id" = "stock"."variantId"
-            WHERE "variant"."productId" = "Product"."id"
-              AND "stock"."status" = 'Active'
-              AND "stock"."deletedAt" IS NULL
-              AND "variant"."status" != 'Deleted'
-              AND "variant"."deletedAt" IS NULL
-        )`;
 
-        productWhere[Op.and] = [
-            sequelize.literal(`${stockSubquery} > 0`)
-        ];
 
         // Only fetch pricings for the user's assigned level
         const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
