@@ -377,9 +377,14 @@ export const createOrder = async (req, res) => {
             paymentStatus = 'Pending';
         }
 
-        // Check if there is an existing pending order for this user
+        // Check if there is an existing pending order for this user with matching delivery mode and round ID
         const existingOrder = await Order.findOne({
-            where: { userId, orderStatus: 'Pending' },
+            where: { 
+                userId, 
+                orderStatus: 'Pending',
+                deliveryMode: deliveryMode || null,
+                deliveryRoundId: deliveryRoundId || null
+            },
             transaction: t
         });
 
