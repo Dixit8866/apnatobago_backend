@@ -52,6 +52,7 @@ const startServer = async () => {
         await sequelize.sync({ force: false, alter: { drop: false } });
         
         // Seed SuperAdmin if database is empty
+        // await seedAdmin();
         await seedAdmin();
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);
