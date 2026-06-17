@@ -2,6 +2,7 @@ import sequelize from '../config/db.js';
 import MainCategory from '../models/superadmin-models/MainCategory.js';
 import SubCategory from '../models/superadmin-models/SubCategory.js';
 import CompanyCategory from '../models/superadmin-models/CompanyCategory.js';
+import Volume from '../models/superadmin-models/Volume.js';
 
 const mainCategories = [
   {
@@ -61,7 +62,7 @@ const mainCategories = [
   {
     id: "9f8ef570-3ab7-4f5e-86ef-87041211c4d5",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779235955170-ea1550df2bdc3b1ebbea917251f7e854.png",
-    title: { en: "Tobacco", gu: "ટોબેકો\t\t\t\t\t\t\t\t\t\t\t\t", hn: "टोबैકો " },
+    title: { en: "Tobacco", gu: "ટોબેકો\t\t\t\t\t\t\t\t\t\t\t\t", hn: "टोबैको " },
     description: {},
     position: 3,
     status: "Active",
@@ -172,7 +173,7 @@ const subCategories = [
     id: "63e2c651-62ae-4d0d-843b-0d70d3ee7a4e",
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779005325634-04ed03d2c32f7d591f54711753c956ef.webp",
-    title: { en: "Coffee", gu: "કોફી ", hn: "कोफी " },
+    title: { en: "Coffee", gu: "કોફી ", hn: "કોફી " },
     description: {},
     position: 10,
     status: "Active",
@@ -312,7 +313,7 @@ const subCategories = [
     id: "d934eff4-583d-4cbb-b8ef-87e1ca8cb34a",
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1778849920084-5d221c4e9e8f66fe2e632a1e623608f6.webp",
-    title: { en: "Sadi bidi", gu: "સાદી સિગારેટ ", hn: "सादी सिगरेट " },
+    title: { en: "Sadi bidi", gu: "સાદી સિગારેટ ", hn: "સાજી સિગારેટ " },
     description: {},
     position: 1,
     status: "Active",
@@ -332,7 +333,7 @@ const subCategories = [
     id: "dac43efc-431d-47bb-90ae-36d092247b75",
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779011517656-2e3b984d03ffda06be094d1b1fddd522.webp",
-    title: { en: "All General Product ", gu: "All જનરલ પ્રોડક્ટ ", hn: "All जनरल प्रोडक्ट " },
+    title: { en: "All General Product ", gu: "All જનરલ પ્રોડક્ટ ", hn: "All جنرل પ્રોડક્ટ " },
     description: {},
     position: 13,
     status: "Active",
@@ -453,7 +454,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "60c72c0f-17dd-44a0-8891-bd40cbe20cfb",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779127571492-a7d2f4d88159b195450b4f458a4a5656.webp",
-    title: { en: "Godfather ", gu: "ગોડફાધર ", hn: "गोडफाधर " },
+    title: { en: "Godfather ", gu: "ગોડફાધર ", hn: "गोડફાધર " },
     description: {},
     position: 0,
     status: "Active",
@@ -508,7 +509,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "60c72c0f-17dd-44a0-8891-bd40cbe20cfb",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779127563924-310d5d9d71f46f462c303620da84a014.webp",
-    title: { en: "Opel", gu: "ઓપેલ ", hn: "ओपेल " },
+    title: { en: "Opel", gu: "ઓપેલ ", hn: "ઓપેલ " },
     description: {},
     position: 0,
     status: "Active",
@@ -519,7 +520,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "87ca780e-1292-44fc-a403-31fe2784ef6d",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230918441-253f14e87d756318e3119da5b6a4a7ad.webp",
-    title: { en: "Coca Cola", gu: "કોકા કોલા", hn: "कोका कोला" },
+    title: { en: "Coca Cola", gu: "કોકા કોલા", hn: "કોકા કોલા" },
     description: {},
     position: 0,
     status: "Active",
@@ -563,7 +564,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "ca869211-5acf-4e7d-9c5f-16e4c481ef0a",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779318712134-95033c17b93ad940182dfeb4707e3851.webp",
-    title: { en: "Bajaj Almond ", gu: "બજાજ અલમોન્ડ ", hn: "बजाज आलमंड " },
+    title: { en: "Bajaj Almond ", gu: "બજાજ અલમોન્ડ ", hn: "બજાજ અલમોન્ડ " },
     description: {},
     position: 0,
     status: "Active",
@@ -574,7 +575,7 @@ const companyCategories = [
     mainCategoryId: "e3e0e795-e272-4b87-9f8c-82fd8122634d",
     subCategoryId: "fedfa709-73d6-44ca-b7f2-527873a278e4",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230016538-3fa4db9254178911f3beb8879f50a952.webp",
-    title: { en: "Other Choclate ", gu: "Other ચોકલેટ", hn: "Other चॉक्लेट" },
+    title: { en: "Other Choclate ", gu: "Other ચોકલેટ", hn: "Other ચૉકલેટ" },
     description: {},
     position: 0,
     status: "Active",
@@ -640,7 +641,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "dac43efc-431d-47bb-90ae-36d092247b75",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779317297225-4e512daa2d94f3ee160c4d1a4c3b45db.webp",
-    title: { en: "All Janral Product ", gu: "All જનરલ પ્રોડક્ટ ", hn: "All جنرل प्रोडक्ट " },
+    title: { en: "All Janral Product ", gu: "All જનરલ પ્રોડક્ટ ", hn: "All General Product " },
     description: {},
     position: 0,
     status: "Active",
@@ -684,7 +685,7 @@ const companyCategories = [
     mainCategoryId: "29c2297c-ed38-4c6d-bffb-1aaddedc70e7",
     subCategoryId: "b6599734-1f3e-4b90-b89e-fc4324bfbc2e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779023881014-5a7018d36fa736c576484b462b2bbab3.webp",
-    title: { en: "R.M.D", gu: "આર.એમ.ડી", hn: "आर.ऐम .डी" },
+    title: { en: "R.M.D", gu: "આર.એમ.ડી", hn: "R.M.D" },
     description: {},
     position: 0,
     status: "Deleted",
@@ -695,7 +696,7 @@ const companyCategories = [
     mainCategoryId: "e3e0e795-e272-4b87-9f8c-82fd8122634d",
     subCategoryId: "96233cb1-5457-44bd-ad41-d57c8afaafd4",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779022178358-3d4c3968766335b53cb5345299122b63.webp",
-    title: { en: "Cadbury ", gu: "કેડબરી", hn: "कैडबरी" },
+    title: { en: "Cadbury ", gu: "કેડબરી", hn: "કેડબરી" },
     description: {},
     position: 0,
     status: "Active",
@@ -728,7 +729,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223846429-af2d43e99e96f7a9fad2ca25e9c995d8.webp",
-    title: { en: "Goldflack", gu: "ગોલ્ડફ્લેક", hn: "गोल्डफ्लेक" },
+    title: { en: "Goldflack", gu: "ગોલ્ડફ્લેક", hn: "ગોલ્ડફ્લેક" },
     description: {},
     position: 0,
     status: "Active",
@@ -739,7 +740,7 @@ const companyCategories = [
     mainCategoryId: "e3e0e795-e272-4b87-9f8c-82fd8122634d",
     subCategoryId: "fedfa709-73d6-44ca-b7f2-527873a278e4",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779022117495-7eeda3a7df3c1c86078ac2a51a018b35.webp",
-    title: { en: "Alpenliebe ", gu: "અલ્પેનલિએબે", hn: "अल्पेंलिएबे" },
+    title: { en: "Alpenliebe ", gu: "અલ્પેનલિએબે", hn: "અલ્પેનલિએબે" },
     description: {},
     position: 0,
     status: "Active",
@@ -772,7 +773,7 @@ const companyCategories = [
     mainCategoryId: "957aefc5-ee15-40b9-9709-8d148f0be855",
     subCategoryId: "30fc9431-1658-44b0-a249-08a88d8f8839",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780225845763-12a20d8b7369724f7620f4c58efa05af.webp",
-    title: { en: "Miraj ", gu: "મિરાજ ", hn: "मिराज " },
+    title: { en: "Miraj ", gu: "મિરાજ ", hn: "મિરાજ " },
     description: {},
     position: 0,
     status: "Active",
@@ -794,7 +795,7 @@ const companyCategories = [
     mainCategoryId: "e3e0e795-e272-4b87-9f8c-82fd8122634d",
     subCategoryId: "fedfa709-73d6-44ca-b7f2-527873a278e4",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779022390640-72eea6d82d1924216eb8d6331a3775a0.webp",
-    title: { en: "Tic Tic", gu: "ટીક ટીક", hn: "टिक  टिक" },
+    title: { en: "Tic Tic", gu: "ટીક ટીક", hn: "ટીક ટીક" },
     description: {},
     position: 0,
     status: "Active",
@@ -805,7 +806,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "87ca780e-1292-44fc-a403-31fe2784ef6d",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230870046-477ef548fdd4aab647b0ca03924cd123.webp",
-    title: { en: "Campa ", gu: "કેમ્પા ", hn: "कैम्पा" },
+    title: { en: "Campa ", gu: "કેમ્પા ", hn: "કેમ્પા" },
     description: {},
     position: 0,
     status: "Active",
@@ -816,7 +817,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223875247-b20032da1ddc5b75fcabda29f898cc31.webp",
-    title: { en: "Total", gu: "ટોતલ", hn: "टोटल" },
+    title: { en: "Total", gu: "ટોતલ", hn: "ટોતલ" },
     description: {},
     position: 0,
     status: "Active",
@@ -838,7 +839,7 @@ const companyCategories = [
     mainCategoryId: "e3e0e795-e272-4b87-9f8c-82fd8122634d",
     subCategoryId: "fedfa709-73d6-44ca-b7f2-527873a278e4",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779022363256-35862dde6dc827ecab5f26fb391d3c14.webp",
-    title: { en: "Mentos", gu: "મેન્ટોસ", hn: "मेन्टोस" },
+    title: { en: "Mentos", gu: "મેન્ટોસ", hn: "મેન્ટોસ" },
     description: {},
     position: 0,
     status: "Active",
@@ -860,7 +861,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223832297-60b44570432926ee45efd7efd5c190ef.webp",
-    title: { en: "Marbolo", gu: "મારબોલો", hn: "मारबोलो" },
+    title: { en: "Marbolo", gu: "મારબોલો", hn: "મારબોલો" },
     description: {},
     position: 0,
     status: "Active",
@@ -871,7 +872,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "26620d41-b103-43b1-a5f0-521852931c70",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779235680498-30d7b1dae9d50425bf10e79f570f2fd7.webp",
-    title: { en: "Santoor ", gu: "સંતૂર ", hn: "संतूर " },
+    title: { en: "Santoor ", gu: "સંતૂર ", hn: "સંતૂર " },
     description: {},
     position: 0,
     status: "Active",
@@ -882,7 +883,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "26620d41-b103-43b1-a5f0-521852931c70",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779236135237-e15f3b2ba0119a7f4e77ddeeff52a28a.webp",
-    title: { en: "Nirma", gu: "નિરમા ", hn: "निरમા " },
+    title: { en: "Nirma", gu: "નિરમા ", hn: "નિરમા " },
     description: {},
     position: 0,
     status: "Active",
@@ -893,7 +894,7 @@ const companyCategories = [
     mainCategoryId: "29c2297c-ed38-4c6d-bffb-1aaddedc70e7",
     subCategoryId: "b6599734-1f3e-4b90-b89e-fc4324bfbc2e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779023917796-dceba70f683046672ae8fae9b8e20189.webp",
-    title: { en: "Baba Navratn ", gu: "બાબા  નવરત્ન", hn: "बाबा नवरत्न" },
+    title: { en: "Baba Navratn ", gu: "બાબા  નવરત્ન", hn: "બાબા નવરત્ન" },
     description: {},
     position: 0,
     status: "Active",
@@ -915,7 +916,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223233353-46f0894cccebefefe08c7ebac91684fd.webp",
-    title: { en: "Forsquare", gu: "ફોરસ્કવેર", hn: "फोरस्क्वेर" },
+    title: { en: "Forsquare", gu: "ફોરસ્કવેર", hn: "ફોરસ્કવેર" },
     description: {},
     position: 0,
     status: "Active",
@@ -926,7 +927,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "26620d41-b103-43b1-a5f0-521852931c70",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779235757784-80b7693dfa97a653391cc0446e81608e.webp",
-    title: { en: "Lifeboy ", gu: "લાઈફબોય ", hn: "लाइफ्बोय " },
+    title: { en: "Lifeboy ", gu: "લાઈફબોય ", hn: "લાઈફબોય " },
     description: {},
     position: 0,
     status: "Active",
@@ -937,7 +938,7 @@ const companyCategories = [
     mainCategoryId: "85ac7df8-d796-4bfb-919b-0db32b529bdb",
     subCategoryId: "a1466b69-4d9b-48a9-a7b2-46ac106cd07b",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779005940642-7b73ea00ea9ded67b4b222639b272cbb.webp",
-    title: { en: "Parle ", gu: "પારલે  ", hn: "पारले" },
+    title: { en: "Parle ", gu: "પારલે  ", hn: "પારલે" },
     description: {},
     position: 0,
     status: "Active",
@@ -948,7 +949,7 @@ const companyCategories = [
     mainCategoryId: "29c2297c-ed38-4c6d-bffb-1aaddedc70e7",
     subCategoryId: "b6599734-1f3e-4b90-b89e-fc4324bfbc2e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779028408720-b94cdbe921f78fbaf17c0b7c34a132a3.webp",
-    title: { en: "Baba ", gu: "બાબા", hn: "बाबा" },
+    title: { en: "Baba ", gu: "બાબા", hn: "બાબા" },
     description: {},
     position: 0,
     status: "Active",
@@ -959,7 +960,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "87ca780e-1292-44fc-a403-31fe2784ef6d",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230621466-083bb600b7ecdeb993ae583269752bcc.webp",
-    title: { en: "Bagira", gu: "બગીરા", hn: "बगिरा" },
+    title: { en: "Bagira", gu: "બગીરા", hn: "બગીરા" },
     description: {},
     position: 0,
     status: "Active",
@@ -970,7 +971,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "26620d41-b103-43b1-a5f0-521852931c70",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779236232667-5f5db637ef2a3865e72c20541b541f60.webp",
-    title: { en: "No.1 Godrej", gu: "No.1 ગોધરેજ ", hn: "No.1 गोधरेज " },
+    title: { en: "No.1 Godrej", gu: "No.1 ગોધરેજ ", hn: "No.1 ગોધરેજ " },
     description: {},
     position: 0,
     status: "Active",
@@ -992,7 +993,7 @@ const companyCategories = [
     mainCategoryId: "29c2297c-ed38-4c6d-bffb-1aaddedc70e7",
     subCategoryId: "b6599734-1f3e-4b90-b89e-fc4324bfbc2e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779023558341-045e7aeb9b6e8d2ad228aef0d624d2df.webp",
-    title: { en: "Vimal", gu: "વિમલ", hn: "विमल" },
+    title: { en: "Vimal", gu: "વિમલ", hn: "વિમલ" },
     description: {},
     position: 0,
     status: "Active",
@@ -1003,7 +1004,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "26620d41-b103-43b1-a5f0-521852931c70",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779236104470-b97924bf6a1f7e84d05e7aac3c1d8108.webp",
-    title: { en: "Detol", gu: "ડેટોલ ", hn: "डेटोल " },
+    title: { en: "Detol", gu: "ડેટોલ ", hn: "ડેટોલ " },
     description: {},
     position: 0,
     status: "Active",
@@ -1014,7 +1015,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "a9e3d94e-ee97-4378-b103-c0e60a24257b",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230074312-f6eeb91799f67886deb4bc04bde11a68.webp",
-    title: { en: "Other Cold Drinks", gu: "Other કોલ્ડડ્રિંક્સ ", hn: "Other कोल्डड्रिंक्स " },
+    title: { en: "Other Cold Drinks", gu: "Other કોલ્ડડ્રિંક્સ ", hn: "Other કોલ્ડડ્રિંક્સ " },
     description: {},
     position: 0,
     status: "Active",
@@ -1025,7 +1026,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "a98d3877-dcda-4cca-92ad-8e74d8ab854e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779125161649-cd043f9c908442a1c01f5461b5999714.webp",
-    title: { en: "Jivaraj", gu: "જીવરાજ ", hn: "जीवराज " },
+    title: { en: "Jivaraj", gu: "જીવરાજ ", hn: "જીવરાજ " },
     description: {},
     position: 0,
     status: "Active",
@@ -1036,7 +1037,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223868172-817ea242f803fc04b82ec3214593b594.webp",
-    title: { en: "Bristol", gu: "બ્રિસ્ટોલ ", hn: "ब्रिस्टोल" },
+    title: { en: "Bristol", gu: "બ્રિસ્ટોલ ", hn: "બ્રિસ્ટોલ" },
     description: {},
     position: 0,
     status: "Active",
@@ -1047,7 +1048,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "63e2c651-62ae-4d0d-843b-0d70d3ee7a4e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230271722-58ecfd03bebb7850e93d7ea22ae288fd.webp",
-    title: { en: "Nestle", gu: "नेस्टले", hn: "नेस्ले " },
+    title: { en: "Nestle", gu: "નેસ્ટલે", hn: "નેસ્ટલે " },
     description: {},
     position: 0,
     status: "Active",
@@ -1058,7 +1059,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "a9e3d94e-ee97-4378-b103-c0e60a24257b",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230401087-72820dc5d4be58c663962f4a4c8c1c7e.webp",
-    title: { en: "Sosyo", gu: "સોસ્યો", hn: "सोस्यो" },
+    title: { en: "Sosyo", gu: "સોસ્યો", hn: "સોસ્યો" },
     description: {},
     position: 0,
     status: "Active",
@@ -1069,7 +1070,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "26620d41-b103-43b1-a5f0-521852931c70",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779284883624-0e624c6879abc2ad0c005b9dfb910ff5.webp",
-    title: { en: "Vivel ", gu: "વિવેલ ", hn: "विवेल " },
+    title: { en: "Vivel ", gu: "વિવેલ ", hn: "વિવેલ " },
     description: {},
     position: 0,
     status: "Active",
@@ -1091,7 +1092,7 @@ const companyCategories = [
     mainCategoryId: "29c2297c-ed38-4c6d-bffb-1aaddedc70e7",
     subCategoryId: "b6599734-1f3e-4b90-b89e-fc4324bfbc2e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779023535666-6937bd539d3c4734da9d5652e4ee04d4.webp",
-    title: { en: "Rajnigandha", gu: "રજનીગંધા", hn: "रजनीगंधा" },
+    title: { en: "Rajnigandha", gu: "રજનીગંધા", hn: "રજનીગંધા" },
     description: {},
     position: 0,
     status: "Active",
@@ -1102,7 +1103,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "a9e3d94e-ee97-4378-b103-c0e60a24257b",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230447133-972f432d876206a3012c45944da15806.webp",
-    title: { en: "Davat ", gu: "દાવત", hn: "दावत" },
+    title: { en: "Davat ", gu: "દાવત", hn: "દાવત" },
     description: {},
     position: 0,
     status: "Active",
@@ -1146,7 +1147,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "96b0e3a0-3b33-49b8-af34-ff83a7604283",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779309948797-b8f2981e39157099e29b1d28282909f6.webp",
-    title: { en: "Nargis ", gu: "નારગીસ", hn: "नारगीस" },
+    title: { en: "Nargis ", gu: "નારગીસ", hn: "નારગીસ" },
     description: {},
     position: 0,
     status: "Active",
@@ -1157,7 +1158,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "87ca780e-1292-44fc-a403-31fe2784ef6d",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230321085-9a3d7595526e8a21cfe2a0e5a2619f9b.webp",
-    title: { en: "Monster", gu: "મોન્સ્ટર", hn: "मॉन्स्टर" },
+    title: { en: "Monster", gu: "મોન્સ્ટર", hn: "મોન્સ્ટર" },
     description: {},
     position: 0,
     status: "Active",
@@ -1168,7 +1169,7 @@ const companyCategories = [
     mainCategoryId: "89285db8-02c0-4ec5-980f-4bee6a0402db",
     subCategoryId: "daa1b92d-ed3a-42ed-ac30-fb667333f84a",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779319070794-1cd2d4698754b05926ec04b3e490898c.webp",
-    title: { en: "Closeup ", gu: "કલોસપ", hn: "क्लोज़अप " },
+    title: { en: "Closeup ", gu: "કલોસપ", hn: "કલોસપ" },
     description: {},
     position: 0,
     status: "Active",
@@ -1179,7 +1180,7 @@ const companyCategories = [
     mainCategoryId: "957aefc5-ee15-40b9-9709-8d148f0be855",
     subCategoryId: "30fc9431-1658-44b0-a249-08a88d8f8839",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780225301803-6097384cf7e3d135be32d86e34dbd658.webp",
-    title: { en: "Other Tambakoo ", gu: "Other તમ્બાકૂ ", hn: "Other तम्बाकू " },
+    title: { en: "Other Tambakoo ", gu: "Other તમ્બાકૂ ", hn: "Other તમ્બાકૂ " },
     description: {},
     position: 0,
     status: "Active",
@@ -1212,7 +1213,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "a9e3d94e-ee97-4378-b103-c0e60a24257b",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230676642-c1ac493cd586968f60af8443459e3cef.webp",
-    title: { en: "Fenta", gu: "ફેન્ટા", hn: "फेंटा" },
+    title: { en: "Fenta", gu: "ફેન્ટા", hn: "fenta" },
     description: {},
     position: 0,
     status: "Active",
@@ -1234,7 +1235,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223861210-28345d2b83cce4de36800cac6d6f665a.webp",
-    title: { en: "American Club", gu: "અમેરિકન ક્લબ", hn: "अमेरिकन क्लब" },
+    title: { en: "American Club", gu: "અમેરિકન ક્લબ", hn: "અમેરિકન ક્લબ" },
     description: {},
     position: 0,
     status: "Active",
@@ -1256,7 +1257,7 @@ const companyCategories = [
     mainCategoryId: "29c2297c-ed38-4c6d-bffb-1aaddedc70e7",
     subCategoryId: "b6599734-1f3e-4b90-b89e-fc4324bfbc2e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779023658741-a7b88d3263b88650d60dac9f7c5b40fe.webp",
-    title: { en: "Shikher ", gu: "શિખર", hn: "शिखर" },
+    title: { en: "Shikher ", gu: "શિખર", hn: "શિખર" },
     description: {},
     position: 0,
     status: "Active",
@@ -1267,7 +1268,7 @@ const companyCategories = [
     mainCategoryId: "e3e0e795-e272-4b87-9f8c-82fd8122634d",
     subCategoryId: "fedfa709-73d6-44ca-b7f2-527873a278e4",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779022198379-69b19b995a9e8e33d6a7fdae93362d21.webp",
-    title: { en: "Hajmola", gu: "હાજમોલા", hn: "हाजमोला" },
+    title: { en: "Hajmola", gu: "હાજમોલા", hn: "હાજમોલા" },
     description: {},
     position: 0,
     status: "Active",
@@ -1278,7 +1279,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780224374985-2c28de2a92e93c42d6f7819f4738606a.webp",
-    title: { en: "Other Cigaret ", gu: "Other સિગારેટ ", hn: "Other सिगरेट " },
+    title: { en: "Other Cigaret ", gu: "Other સિગારેટ ", hn: "Other Cigaret " },
     description: {},
     position: 0,
     status: "Active",
@@ -1289,7 +1290,7 @@ const companyCategories = [
     mainCategoryId: "29c2297c-ed38-4c6d-bffb-1aaddedc70e7",
     subCategoryId: "b6599734-1f3e-4b90-b89e-fc4324bfbc2e",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779226595133-fa97ae1570360d22acb0a07a79c1b07f.webp",
-    title: { en: "Karamchand ", gu: "કરમચંદ ", hn: "करમચંદ " },
+    title: { en: "Karamchand ", gu: "કરમચંદ ", hn: "Karamchand " },
     description: {},
     position: 0,
     status: "Active",
@@ -1300,7 +1301,7 @@ const companyCategories = [
     mainCategoryId: "85ac7df8-d796-4bfb-919b-0db32b529bdb",
     subCategoryId: "a4cdce88-126a-42b5-a6f4-f27e9d29afbc",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779006367777-bd73aad520fcd9f44512dd724a6a763b.webp",
-    title: { en: "Oreo", gu: "ઓરિઓ", hn: "ઓરિઓ " },
+    title: { en: "Oreo", gu: "ઓરિઓ", hn: "Oreo " },
     description: {},
     position: 0,
     status: "Active",
@@ -1322,7 +1323,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "a9e3d94e-ee97-4378-b103-c0e60a24257b",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780230810287-d9f1c880848d54847ac1a8c2aeeb1ca5.webp",
-    title: { en: "Favrito", gu: "ફેવરીતો", hn: "ફેવરીતો" },
+    title: { en: "Favrito", gu: "ફેવરીતો", hn: "Favrito" },
     description: {},
     position: 0,
     status: "Active",
@@ -1344,7 +1345,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223853336-b71ccead21cb3c3b96a5af900690b6bc.webp",
-    title: { en: "Stellar", gu: "સ્ટેલર", hn: "स्टेलर" },
+    title: { en: "Stellar", gu: "સ્ટેલર", hn: "Stellar" },
     description: {},
     position: 0,
     status: "Active",
@@ -1355,7 +1356,7 @@ const companyCategories = [
     mainCategoryId: "e3e0e795-e272-4b87-9f8c-82fd8122634d",
     subCategoryId: "a76e1f82-411c-4d22-b706-095734df5f4d",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1779022337690-37c2afb0e6ca39baa843bb06ebdf42db.webp",
-    title: { en: "Centerfresh", gu: "સેન્ટર્ફરેશ", hn: "सेंटरफ्रेश" },
+    title: { en: "Centerfresh", gu: "સેન્ટર્ફરેશ", hn: "Centerfresh" },
     description: {},
     position: 0,
     status: "Active",
@@ -1366,7 +1367,7 @@ const companyCategories = [
     mainCategoryId: "47b5d282-9cd2-4656-a695-8c237b4b2bfb",
     subCategoryId: "8a34d118-6aaa-4f13-9dd3-3181c00ce609",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780223957432-01e7cf61ead85b5e751e7bd63df54664.webp",
-    title: { en: "Edition ", gu: "એડિશન", hn: "એડિશન" },
+    title: { en: "Edition ", gu: "એડિશન", hn: "Edition" },
     description: {},
     position: 0,
     status: "Active",
@@ -1377,7 +1378,7 @@ const companyCategories = [
     mainCategoryId: "ddaaf65c-bf04-48eb-84bf-0000d47e784e",
     subCategoryId: "87ca780e-1292-44fc-a403-31fe2784ef6d",
     image: "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780231033598-d56858318a9c4a479fe6a143e9d0f954.webp",
-    title: { en: "Hell", gu: "હેલ", hn: "हेल" },
+    title: { en: "Hell", gu: "હેલ", hn: "Hell" },
     description: {},
     position: 0,
     status: "Active",
@@ -1407,6 +1408,149 @@ const companyCategories = [
   }
 ];
 
+const volumes = [
+  {
+    id: "19ff3b1c-aaf9-450a-bcb2-081e24eb0e4a",
+    name: { en: "Yallow&Black ", gu: "Yallow&Black ", hn: "Yallow&Black " },
+    status: "Active"
+  },
+  {
+    id: "25ff06cc-cf15-431a-b16c-e2a53ada7c91",
+    name: { en: "Pouch ", gu: "પાઉચ", hn: "पाउच" },
+    status: "Active"
+  },
+  {
+    id: "269aa484-ba28-4503-bb9a-c6dc8098e608",
+    name: { en: "Pati ", gu: "પટી", hn: "पटी" },
+    status: "Active"
+  },
+  {
+    id: "2a42d1d6-1d46-4a6c-86de-3b782af5aab2",
+    name: { en: "Dabi", gu: "ડબી", hn: "डबी" },
+    status: "Active"
+  },
+  {
+    id: "2c37734e-a2e2-4a3b-918e-99c1241d597a",
+    name: { en: "Bandho", gu: "બાંધો", hn: "बांधो" },
+    status: "Active"
+  },
+  {
+    id: "2e804ab4-ee7c-4139-921b-fae3847d4e26",
+    name: { en: "Packet", gu: "પેકેટ", hn: "पैकेट" },
+    status: "Active"
+  },
+  {
+    id: "3451fa71-7dbc-4a25-aae0-5f6fce472cc6",
+    name: { en: "Dando", gu: "ડંડો", hn: "डंडो" },
+    status: "Active"
+  },
+  {
+    id: "34c6997f-8ba1-42c2-8f32-7ba2c537ff08",
+    name: { en: "Peti", gu: "પેટી ", hn: "पेटी" },
+    status: "Active"
+  },
+  {
+    id: "486a6a5d-7033-41c7-9b17-2d383aa04825",
+    name: { en: "Unit", gu: "યુનિટ ", hn: "यूनिट  " },
+    status: "Active"
+  },
+  {
+    id: "4d8b6c60-8ea3-41ee-8118-41ce428e1837",
+    name: { en: "GRM", gu: "ગ્રામ ", hn: "ग्राम " },
+    status: "Active"
+  },
+  {
+    id: "4e7359b6-5d9b-481a-aece-a7a89d6bb5e5",
+    name: { en: "Box", gu: "બોક્સ", hn: "बॉक्स" },
+    status: "Active"
+  },
+  {
+    id: "536f53e4-5de8-4f76-892c-e1a42910eb99",
+    name: { en: "Baslu", gu: "બસલુ", hn: "बसलु " },
+    status: "Active"
+  },
+  {
+    id: "5cae33e0-1b11-4b2c-ba60-7cae0b872696",
+    name: { en: "KG", gu: "KG", hn: "KG" },
+    status: "Active"
+  },
+  {
+    id: "5f42ad5c-217e-4b29-a16a-260306c1deaf",
+    name: { en: "Green ", gu: "Green ", hn: "Green " },
+    status: "Active"
+  },
+  {
+    id: "6633fd18-78f3-4b0e-85fa-8556ff8ce56e",
+    name: { en: "Mava ", gu: "માવા ", hn: "માવા " },
+    status: "Active"
+  },
+  {
+    id: "72b87c96-7197-458b-99c2-3c2635c2534d",
+    name: { en: "Bidi ", gu: "બીડી ", hn: "બીડી " },
+    status: "Active"
+  },
+  {
+    id: "80b5cc4f-ad38-433d-a1bd-34a0841bd329",
+    name: { en: "Red", gu: "Red", hn: "Red" },
+    status: "Active"
+  },
+  {
+    id: "83c46539-acaa-45a0-bf29-b4acaa315f08",
+    name: { en: "Cartoon", gu: "કાર્ટૂન ", hn: "कार्टून " },
+    status: "Active"
+  },
+  {
+    id: "8d11d1e0-62d4-4b28-91cd-9cdadd6acbfa",
+    name: { en: "Jar ", gu: "જાર ", hn: "જાર " },
+    status: "Active"
+  },
+  {
+    id: "99fc8109-6a42-4787-a056-ad245f0ecee9",
+    name: { en: "Groos ", gu: "ગરૂસ", hn: "ग्रुस " },
+    status: "Active"
+  },
+  {
+    id: "af620eee-ac47-4fd6-a36e-92371c423e70",
+    name: { en: "Jambo", gu: "જમ્બો", hn: "जम्बो" },
+    status: "Active"
+  },
+  {
+    id: "b0543217-659a-499a-8768-0bc9dbf53b87",
+    name: { en: "Yallow", gu: "Yallow", hn: "Yallow" },
+    status: "Active"
+  },
+  {
+    id: "c2b318f1-b05f-4c32-a214-bc1da7c266bb",
+    name: { en: "GRM", gu: "ગ્રામ ", hn: "gram" },
+    status: "Deleted"
+  },
+  {
+    id: "cee53ef8-96b6-4812-b3d7-375f9a6ca804",
+    name: { en: "Padiki ", gu: "પડીકી ", hn: "પડીકી " },
+    status: "Active"
+  },
+  {
+    id: "dd739813-6168-4ece-a40d-16a3f6c15b8b",
+    name: { en: "Kato ", gu: "કટો ", hn: "કટો " },
+    status: "Deleted"
+  },
+  {
+    id: "dfe83d2a-1f0c-4528-b815-e18505316522",
+    name: { en: "Kato ", gu: "કટો ", hn: "કટો " },
+    status: "Active"
+  },
+  {
+    id: "e4cfe5ca-86ca-4245-ba85-46aede38eba1",
+    name: { en: "Orenge ", gu: "Orenge ", hn: "Orenge " },
+    status: "Active"
+  },
+  {
+    id: "f5a0d90a-7727-42dd-a20d-e076623fd7e6",
+    name: { en: "Dabo", gu: "ડબો", hn: "દબો" },
+    status: "Active"
+  }
+];
+
 const seed = async () => {
     try {
         await sequelize.authenticate();
@@ -1429,8 +1573,14 @@ const seed = async () => {
             await CompanyCategory.upsert(comp);
         }
         console.log('[Seed] Company categories seeded successfully.');
+
+        console.log('[Seed] Seeding volumes...');
+        for (const vol of volumes) {
+            await Volume.upsert(vol);
+        }
+        console.log('[Seed] Volumes seeded successfully.');
         
-        console.log('[Seed] All categories, subcategories, and company categories imported successfully ✓');
+        console.log('[Seed] All categories, subcategories, company categories, and volumes imported successfully ✓');
         process.exit(0);
     } catch (error) {
         console.error('[Seed Error] Failed to seed:', error.message);
