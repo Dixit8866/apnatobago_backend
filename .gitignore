@@ -17,6 +17,7 @@ package-lock.json
 .env.development
 .env.test
 .env.production
+.env.testproduction
 .env.*.local
 
 # Keep only the example file
