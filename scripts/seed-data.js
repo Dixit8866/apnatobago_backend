@@ -13,7 +13,12 @@ import CompanyCategory from '../models/superadmin-models/CompanyCategory.js';
 import Volume from '../models/superadmin-models/Volume.js';
 import CustomLevel from '../models/superadmin-models/CustomLevel.js';
 
-const CustomLevel = [
+// Make sure these imports exist
+import products from './products.js';
+import variants from './variants.js';
+import pricings from './pricings.js';
+
+const customLevelsData = [
   {
     "id": "18992e0e-6587-49dd-b163-fa174a6a277e",
     "name": "Basic",
@@ -42,6 +47,7 @@ const CustomLevel = [
 
 async function seed() {
   console.log('[Seed] Starting Seeding from Static Data...');
+
   try {
     await sequelize.authenticate();
     console.log('[Seed] DB Connection authenticated successfully.');
@@ -49,18 +55,20 @@ async function seed() {
     const t = await sequelize.transaction();
 
     try {
-      console.log('[Seed] Ensuring referenced master categories/volumes/custom levels exist...');
+      console.log(
+        '[Seed] Ensuring referenced master categories/volumes/custom levels exist...'
+      );
 
       const mainCategoryIds = new Set();
       const subCategoryIds = new Set();
       const companyCategoryIds = new Set();
       const volumeIds = new Set();
-      const customLevelIds = new Set();
 
       for (const p of products) {
         if (p.mainCategoryId) mainCategoryIds.add(p.mainCategoryId);
         if (p.subCategoryId) subCategoryIds.add(p.subCategoryId);
-        if (p.companyCategoryId) companyCategoryIds.add(p.companyCategoryId);
+        if (p.companyCategoryId)
+          companyCategoryIds.add(p.companyCategoryId);
       }
 
       for (const v of variants) {
@@ -69,120 +77,182 @@ async function seed() {
         if (v.innerUnitLabel) volumeIds.add(v.innerUnitLabel);
       }
 
-      for (const pr of pricings) {
-        if (pr.customLevelId) customLevelIds.add(pr.customLevelId);
-      }
-
-      // 1. Ensure Main Categories exist
+      // Main Categories
       for (const id of mainCategoryIds) {
-        const exists = await MainCategory.findByPk(id, { transaction: t });
+        const exists = await MainCategory.findByPk(id, {
+          transaction: t,
+          paranoid: false
+        });
+
         if (!exists) {
-          await MainCategory.create({
-            id,
-            title: { en: `Main Category ${id}` },
-            image: '',
-            status: 'Active'
-          }, { transaction: t });
-          console.log(`[Seed] Created default MainCategory: ${id}`);
+          await MainCategory.create(
+            {
+              id,
+              title: { en: `Main Category ${id}` },
+              image: '',
+              status: 'Active'
+            },
+            { transaction: t }
+          );
+
+          console.log(
+            `[Seed] Created default MainCategory: ${id}`
+          );
         }
       }
 
-      // 2. Ensure Sub Categories exist
+      // Sub Categories
       for (const id of subCategoryIds) {
-        const exists = await SubCategory.findByPk(id, { transaction: t });
+        const exists = await SubCategory.findByPk(id, {
+          transaction: t,
+          paranoid: false
+        });
+
         if (!exists) {
-          const productWithSub = products.find(p => p.subCategoryId === id);
-          const mId = productWithSub ? productWithSub.mainCategoryId : Array.from(mainCategoryIds)[0];
-          await SubCategory.create({
-            id,
-            mainCategoryId: mId,
-            title: { en: `Sub Category ${id}` },
-            image: '',
-            status: 'Active'
-          }, { transaction: t });
-          console.log(`[Seed] Created default SubCategory: ${id}`);
+          const productWithSub = products.find(
+            p => p.subCategoryId === id
+          );
+
+          const mId = productWithSub
+            ? productWithSub.mainCategoryId
+            : [...mainCategoryIds][0];
+
+          await SubCategory.create(
+            {
+              id,
+              mainCategoryId: mId,
+              title: { en: `Sub Category ${id}` },
+              image: '',
+              status: 'Active'
+            },
+            { transaction: t }
+          );
+
+          console.log(
+            `[Seed] Created default SubCategory: ${id}`
+          );
         }
       }
 
-      // 3. Ensure Company Categories exist
+      // Company Categories
       for (const id of companyCategoryIds) {
-        const exists = await CompanyCategory.findByPk(id, { transaction: t });
+        const exists = await CompanyCategory.findByPk(id, {
+          transaction: t,
+          paranoid: false
+        });
+
         if (!exists) {
-          await CompanyCategory.create({
-            id,
-            title: { en: `Company Category ${id}` },
-            image: '',
-            status: 'Active'
-          }, { transaction: t });
-          console.log(`[Seed] Created default CompanyCategory: ${id}`);
+          await CompanyCategory.create(
+            {
+              id,
+              title: { en: `Company Category ${id}` },
+              image: '',
+              status: 'Active'
+            },
+            { transaction: t }
+          );
+
+          console.log(
+            `[Seed] Created default CompanyCategory: ${id}`
+          );
         }
       }
 
-      // 4. Ensure Volumes exist
+      // Volumes
       for (const id of volumeIds) {
-        const exists = await Volume.findByPk(id, { transaction: t });
+        const exists = await Volume.findByPk(id, {
+          transaction: t,
+          paranoid: false
+        });
+
         if (!exists) {
-          await Volume.create({
-            id,
-            name: { en: `Volume ${id}` },
-            status: 'Active'
-          }, { transaction: t });
+          await Volume.create(
+            {
+              id,
+              name: { en: `Volume ${id}` },
+              status: 'Active'
+            },
+            { transaction: t }
+          );
+
           console.log(`[Seed] Created default Volume: ${id}`);
         }
       }
 
-      // 5. Ensure Custom Levels exist
-      for (const id of customLevelIds) {
-        const exists = await CustomLevel.findByPk(id, { transaction: t });
+      // Custom Levels
+      for (const level of customLevelsData) {
+        const exists = await CustomLevel.findByPk(level.id, {
+          transaction: t,
+          paranoid: false
+        });
+
         if (!exists) {
-          await CustomLevel.create({
-            id,
-            name: `Level ${id}`,
-            status: 'Active'
-          }, { transaction: t });
-          console.log(`[Seed] Created default CustomLevel: ${id}`);
+          await CustomLevel.create(
+            {
+              id: level.id,
+              name: level.name,
+              status: level.status
+            },
+            { transaction: t }
+          );
+
+          console.log(
+            `[Seed] Created CustomLevel: ${level.name}`
+          );
         }
       }
 
-      // 6. Seeding Products
+      // Products
       console.log('[Seed] Seeding Products...');
+
       const productFields = Object.keys(Product.rawAttributes);
+
       await Product.bulkCreate(products, {
         updateOnDuplicate: productFields,
-        transaction: t,
-        paranoid: false
+        transaction: t
       });
-      console.log('[Seed] Seeding Products completed.');
 
-      // 7. Seeding Product Variants
+      // Variants
       console.log('[Seed] Seeding Product Variants...');
-      const variantFields = Object.keys(ProductVariant.rawAttributes);
+
+      const variantFields = Object.keys(
+        ProductVariant.rawAttributes
+      );
+
       await ProductVariant.bulkCreate(variants, {
         updateOnDuplicate: variantFields,
-        transaction: t,
-        paranoid: false
+        transaction: t
       });
-      console.log('[Seed] Seeding Product Variants completed.');
 
-      // 8. Seeding Product Pricings
+      // Pricings
       console.log('[Seed] Seeding Product Pricings...');
-      const pricingFields = Object.keys(ProductPricing.rawAttributes);
+
+      const pricingFields = Object.keys(
+        ProductPricing.rawAttributes
+      );
+
       await ProductPricing.bulkCreate(pricings, {
         updateOnDuplicate: pricingFields,
-        transaction: t,
-        paranoid: false
+        transaction: t
       });
-      console.log('[Seed] Seeding Product Pricings completed.');
 
       await t.commit();
-      console.log('[Seed] All products, variants, and pricings imported statically successfully ✓');
+
+      console.log(
+        '[Seed] All products, variants, and pricings imported successfully ✓'
+      );
+
       process.exit(0);
-    } catch (e) {
+    } catch (error) {
       await t.rollback();
-      throw e;
+      throw error;
     }
   } catch (error) {
-    console.error('[Seed Error] Failed to seed from static data:', error.message);
+    console.error(
+      '[Seed Error] Failed to seed from static data:',
+      error
+    );
+
     process.exit(1);
   }
 }
