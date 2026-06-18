@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -10,7 +10,7 @@ const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
 export const createUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId } = req.body;
 
         if (!fullname || !number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Fullname, number, and password are required.');
@@ -38,6 +38,7 @@ export const createUser = async (req, res, next) => {
             creditline: creditline || 0,
             blockcredit: blockcredit ?? false,
             applevel: finalAppLevel || null,
+            routeCategoryId: routeCategoryId || null,
             status: status || 'Active',
             kycverification: kycverification || 'pending',
             orderReminder: true,
@@ -88,6 +89,11 @@ export const getAllUsers = async (req, res, next) => {
                 model: BusinessProfile,
                 as: 'businessProfile',
                 attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+            },
+            {
+                model: RouteCategory,
+                as: 'routeCategory',
+                attributes: ['id', 'name', 'pincode']
             }
         ];
 
@@ -137,7 +143,8 @@ export const getUserById = async (req, res, next) => {
             attributes: SAFE_ATTRIBUTES,
             include: [
                 { model: CustomLevel, as: 'rewardLevel', attributes: ['id', 'name'] },
-                { model: BusinessProfile, as: 'businessProfile' }
+                { model: BusinessProfile, as: 'businessProfile' },
+                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] }
             ]
         });
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
@@ -149,7 +156,7 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
@@ -169,6 +176,7 @@ export const updateUser = async (req, res, next) => {
             creditline: creditline !== undefined ? creditline : user.creditline,
             blockcredit: blockcredit !== undefined ? blockcredit : user.blockcredit,
             applevel: (applevel === '' || applevel === undefined) ? (applevel === '' ? null : user.applevel) : applevel,
+            routeCategoryId: (routeCategoryId === '' || routeCategoryId === undefined) ? (routeCategoryId === '' ? null : user.routeCategoryId) : routeCategoryId,
             status: status ?? user.status,
             kycverification: kycverification ?? user.kycverification,
         };
@@ -203,7 +211,10 @@ export const updateUser = async (req, res, next) => {
 
         const updated = await User.findByPk(user.id, { 
             attributes: SAFE_ATTRIBUTES,
-            include: [{ model: BusinessProfile, as: 'businessProfile' }]
+            include: [
+                { model: BusinessProfile, as: 'businessProfile' },
+                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] }
+            ]
         });
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User updated.', updated);
     } catch (error) {

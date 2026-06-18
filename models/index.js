@@ -36,6 +36,7 @@ import BusinessProfile from './user/BusinessProfile.js';
 import HelpSupport from './user/HelpSupport.js';
 import OrderPayment from './user/OrderPayment.js';
 import SalesReturn from './superadmin-models/SalesReturn.js';
+import RouteCategory from './superadmin-models/RouteCategory.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -132,6 +133,14 @@ VendorOrder.belongsTo(Vendor, { foreignKey: 'vendorId', as: 'vendor' });
 // User -> CustomLevel
 CustomLevel.hasMany(User, { foreignKey: 'applevel', as: 'users' });
 User.belongsTo(CustomLevel, { foreignKey: 'applevel', as: 'rewardLevel' });
+
+// RouteCategory -> User
+RouteCategory.hasMany(User, { foreignKey: 'routeCategoryId', as: 'users' });
+User.belongsTo(RouteCategory, { foreignKey: 'routeCategoryId', as: 'routeCategory' });
+
+// RouteCategory -> Order
+RouteCategory.hasMany(Order, { foreignKey: 'routeCategoryId', as: 'orders' });
+Order.belongsTo(RouteCategory, { foreignKey: 'routeCategoryId', as: 'routeCategory' });
 
 // PurchaseBill Associations
 Vendor.hasMany(PurchaseBill, { foreignKey: 'vendorId', as: 'purchaseBills' });
@@ -261,6 +270,16 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Users longitude column failed:', e.message); }
 
         try {
+            // Add routeCategoryId to users table
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "routeCategoryId" UUID REFERENCES route_categories(id) ON DELETE SET NULL');
+        } catch (e) { console.log('[Migration Warning] Users routeCategoryId column failed:', e.message); }
+
+        try {
+            // Add routeCategoryId to orders table
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "routeCategoryId" UUID REFERENCES route_categories(id) ON DELETE SET NULL');
+        } catch (e) { console.log('[Migration Warning] Orders routeCategoryId column failed:', e.message); }
+
+        try {
             // Add deviceType and version to users table
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deviceType" VARCHAR(255)');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "version" VARCHAR(255)');
@@ -382,5 +401,6 @@ export {
     HelpSupport,
     OrderPayment,
     SalesReturn,
+    RouteCategory,
     runManualMigrations
 };

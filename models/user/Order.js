@@ -111,6 +111,10 @@ const Order = sequelize.define(
             type: DataTypes.DATE,
             allowNull: true,
         },
+        routeCategoryId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,

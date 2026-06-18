@@ -99,6 +99,14 @@ export const createCustomSale = async (req, res) => {
         if (paidAmount >= grandTotalAmount) paymentStatus = 'Paid';
         else if (paidAmount > 0) paymentStatus = 'Partial';
 
+        let resolvedRouteCategoryId = null;
+        if (userId) {
+            const userObj = await User.findByPk(userId, { transaction: t });
+            if (userObj) {
+                resolvedRouteCategoryId = userObj.routeCategoryId || null;
+            }
+        }
+
         // 2. Create the Order
         const newSale = await Order.create({
             orderId: generateUniqueDirectSaleId(),
@@ -114,7 +122,8 @@ export const createCustomSale = async (req, res) => {
             deliveredAt: new Date(),
             saleType: 'Direct',
             deliveryCharge,
-            notes
+            notes,
+            routeCategoryId: resolvedRouteCategoryId
         }, { transaction: t });
 
         // 3. Create Order Items

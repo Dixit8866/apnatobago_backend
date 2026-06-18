@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -106,7 +106,7 @@ export const downloadDeliveryLabel = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
     try {
-        const { status, date, search, deliveryBoyId, startDate, endDate, userId } = req.query;
+        const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId } = req.query;
         const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
 
         // Pre-fetch settings to resolve any empty deliveryRoundTiming
@@ -227,6 +227,11 @@ export const getAllOrders = async (req, res) => {
             where['$assignment.deliveryBoyId$'] = deliveryBoyId;
         }
 
+        // Apply route category filter
+        if (routeCategoryId) {
+            where.routeCategoryId = routeCategoryId;
+        }
+
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
@@ -344,6 +349,10 @@ export const getAllOrders = async (req, res) => {
         // ── Calculate Dynamic Status Counts for Tab Badges ────────────────────────
         const countWhere = { saleType: 'Online' };
         const countInclude = [];
+
+        if (routeCategoryId) {
+            countWhere.routeCategoryId = routeCategoryId;
+        }
 
         if (deliveryBoyId) {
             countWhere['$assignment.deliveryBoyId$'] = deliveryBoyId;

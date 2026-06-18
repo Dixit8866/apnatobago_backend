@@ -27,6 +27,7 @@ import dashboardRoutes from './dashboard.routes.js';
 import helpSupportRoutes from './helpSupport.routes.js';
 import customSaleRoutes from './custom-sale.routes.js';
 import reportRoutes from './report.routes.js';
+import routeCategoryRoutes from './routeCategory.routes.js';
 
 const router = express.Router();
 
@@ -58,5 +59,6 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/help-support', helpSupportRoutes);
 router.use('/custom-sales', customSaleRoutes);
 router.use('/reports', reportRoutes);
+router.use('/route-categories', routeCategoryRoutes);
 
 export default router;
