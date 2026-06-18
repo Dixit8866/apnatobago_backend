@@ -452,7 +452,37 @@ export const getAllOrders = async (req, res) => {
             Order.count({ where: pendingDueCountWhere, include: countInclude })
         ]);
 
+        // Calculate dynamic order counts by routeCategory for the currently active tab status and date filter
+        const routeCountWhere = { ...where };
+        delete routeCountWhere.routeCategoryId;
+        routeCountWhere.routeCategoryId = { [Op.ne]: null };
+
+        const routeCountInclude = [];
+        if (deliveryBoyId) {
+            routeCountInclude.push({
+                model: OrderAssignment,
+                as: 'assignment'
+            });
+        }
+
+        const routeCountsRaw = await Order.count({
+            where: routeCountWhere,
+            include: routeCountInclude,
+            group: ['routeCategoryId']
+        });
+
+        const routeCounts = {};
+        if (Array.isArray(routeCountsRaw)) {
+            routeCountsRaw.forEach(r => {
+                const id = r.routeCategoryId;
+                if (id) {
+                    routeCounts[id] = parseInt(r.count || 0, 10);
+                }
+            });
+        }
+
         const responseData = formatPaginatedResponse(result, page, limit);
+        responseData.routeCounts = routeCounts;
 
         // Attach counts to response
         responseData.statusCounts = {

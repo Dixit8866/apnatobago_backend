@@ -10,7 +10,6 @@
     "dev": "NODE_ENV=development nodemon server.js",
     "start:prod": "NODE_ENV=production node server.js",
     "seed": "node scripts/seedAdmin.js",
-    "seed:data": "node scripts/seed-data.js",
     "seed:prod": "NODE_ENV=production node scripts/seedAdmin.js",
     "update-apiKey": "node scripts/updateVendorApiKey.js",
     "update-apiKey:prod": "NODE_ENV=production node scripts/updateVendorApiKey.js",
