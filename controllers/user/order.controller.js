@@ -1472,3 +1472,569 @@ export const getOrdersWithPaymentStatus = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * @desc    Update a pending order (add/remove/modify items)
+ * @route   PUT /api/user/orders/:id
+ * @access  Private
+ */
+export const updateOrder = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const id = req.params.id || req.body.orderId || req.body.id;
+        const { items } = req.body; // Array of { productId, variantId, quantity, sellUnit }
+        const userId = req.user.id;
+        const userAppLevel = req.user.applevel;
+
+        if (!id) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide orderId or id.");
+        }
+
+        if (!items || !Array.isArray(items)) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide items array.");
+        }
+
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+        const whereClause = { userId };
+        if (isUuid) {
+            whereClause.id = id;
+        } else {
+            whereClause.orderId = id;
+        }
+
+        const order = await Order.findOne({
+            where: whereClause,
+            include: [{ model: OrderItem, as: 'items' }],
+            transaction: t
+        });
+
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        if (order.orderStatus !== 'Pending') {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Only 'Pending' orders can be updated. This order is '${order.orderStatus}'.`);
+        }
+
+        // Fetch User and target Godown for stock check
+        const userData = await User.findByPk(userId, { transaction: t });
+        if (!userData) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
+        }
+
+        let targetGodownId = null;
+        if (userData.postcode) {
+            const godown = await Godown.findOne({
+                where: { pincodes: { [Op.contains]: [userData.postcode] } },
+                transaction: t
+            });
+            if (godown) targetGodownId = godown.id;
+        }
+
+        if (!targetGodownId) {
+            const mainGodown = await Godown.findOne({ where: { type: 'main' }, transaction: t });
+            if (mainGodown) targetGodownId = mainGodown.id;
+        }
+
+        if (!targetGodownId) {
+            const anyGodown = await Godown.findOne({ transaction: t });
+            if (anyGodown) targetGodownId = anyGodown.id;
+        }
+
+        if (!targetGodownId) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "No fulfillment center found to check stock.");
+        }
+
+        // 1. Temporarily RESTORE stock of all OLD items of this order so we check stock correctly
+        if (order.items && order.items.length > 0) {
+            for (const item of order.items) {
+                const variant = await ProductVariant.findByPk(item.variantId, {
+                    include: [{ model: Product, as: 'product' }],
+                    transaction: t
+                });
+                if (!variant) continue;
+
+                if (variant.product?.isCombo) {
+                    const comboProducts = [
+                        variant.product.comboProduct1Id,
+                        variant.product.comboProduct2Id
+                    ];
+                    for (const cpId of comboProducts) {
+                        const compVariant = await ProductVariant.findOne({
+                            where: { 
+                                productId: cpId,
+                                ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                            },
+                            transaction: t
+                        }) || await ProductVariant.findOne({
+                            where: { productId: cpId },
+                            transaction: t
+                        });
+
+                        if (!compVariant) continue;
+
+                        const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
+                        const compSellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
+                            ? Number(item.quantity)
+                            : Number(item.quantity) * compSellingVolume * compBUPP);
+
+                        const stock = await InventoryStock.findOne({
+                            where: { productId: cpId, godownId: targetGodownId },
+                            order: [['createdAt', 'DESC']],
+                            transaction: t
+                        }) || await InventoryStock.findOne({
+                            where: { productId: cpId },
+                            order: [['createdAt', 'DESC']],
+                            transaction: t
+                        });
+
+                        if (stock) {
+                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore }, { transaction: t });
+                        }
+                    }
+                } else {
+                    const bUPP = Number(variant.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                    const sellingVolume = Number(variant.sellingVolume || item.variantInfo?.sellingVolume || 1);
+                    const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
+                        ? Number(item.quantity) 
+                        : Number(item.quantity) * sellingVolume * bUPP);
+
+                    const stock = await InventoryStock.findOne({
+                        where: { productId: item.productId, godownId: targetGodownId },
+                        order: [['createdAt', 'DESC']],
+                        transaction: t
+                    }) || await InventoryStock.findOne({
+                        where: { productId: item.productId },
+                        order: [['createdAt', 'DESC']],
+                        transaction: t
+                    });
+
+                    if (stock) {
+                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore }, { transaction: t });
+                    }
+                }
+            }
+        }
+
+        // 2. Perform stock check for all NEW items
+        const outOfStockItems = [];
+        for (const item of items) {
+            const { productId, variantId, quantity } = item;
+            const sellUnit = item.sellUnit || 'Base';
+
+            const variant = await ProductVariant.findByPk(variantId, {
+                include: [
+                    { model: Product, as: 'product' },
+                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                ],
+                transaction: t
+            });
+
+            if (!variant) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant ${variantId} not found.`);
+            }
+
+            const bUPP = Number(variant.baseUnitsPerPack || 1);
+            const deductionRequired = Math.round(sellUnit === 'Inner'
+                ? Number(quantity)
+                : Number(quantity) * bUPP);
+
+            if (variant.product?.isCombo) {
+                let combo1Variant = await ProductVariant.findOne({
+                    where: { 
+                        productId: variant.product.comboProduct1Id,
+                        ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                    },
+                    transaction: t
+                }) || await ProductVariant.findOne({
+                    where: { productId: variant.product.comboProduct1Id },
+                    transaction: t
+                });
+
+                let combo2Variant = await ProductVariant.findOne({
+                    where: { 
+                        productId: variant.product.comboProduct2Id,
+                        ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                    },
+                    transaction: t
+                }) || await ProductVariant.findOne({
+                    where: { productId: variant.product.comboProduct2Id },
+                    transaction: t
+                });
+
+                if (!combo1Variant || !combo2Variant) {
+                    await t.rollback();
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Combo components variants not found for this product.`);
+                }
+
+                const bUPP1 = Number(combo1Variant.baseUnitsPerPack || 1);
+                const deduction1 = Math.round(sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP1);
+
+                const bUPP2 = Number(combo2Variant.baseUnitsPerPack || 1);
+                const deduction2 = Math.round(sellUnit === 'Inner' ? Number(quantity) : Number(quantity) * bUPP2);
+
+                const stock1 = await InventoryStock.sum('totalBaseUnits', {
+                    where: {
+                        productId: variant.product.comboProduct1Id,
+                        godownId: targetGodownId,
+                        totalBaseUnits: { [Op.gt]: 0 }
+                    },
+                    transaction: t
+                }) || 0;
+
+                if (deduction1 > stock1) {
+                    const prod1 = await Product.findByPk(variant.product.comboProduct1Id, { transaction: t });
+                    const prod1Name = prod1?.name ? (prod1.name.en || Object.values(prod1.name)[0] || 'Product 1') : 'Product 1';
+                    outOfStockItems.push({
+                        productId: variant.product.comboProduct1Id,
+                        variantId: combo1Variant.id,
+                        productName: `${prod1Name} (Combo Component)`,
+                        availableQty: stock1,
+                        unitLabel: 'units',
+                        requestedQty: deduction1
+                    });
+                }
+
+                const stock2 = await InventoryStock.sum('totalBaseUnits', {
+                    where: {
+                        productId: variant.product.comboProduct2Id,
+                        godownId: targetGodownId,
+                        totalBaseUnits: { [Op.gt]: 0 }
+                    },
+                    transaction: t
+                }) || 0;
+
+                if (deduction2 > stock2) {
+                    const prod2 = await Product.findByPk(variant.product.comboProduct2Id, { transaction: t });
+                    const prod2Name = prod2?.name ? (prod2.name.en || Object.values(prod2.name)[0] || 'Product 2') : 'Product 2';
+                    outOfStockItems.push({
+                        productId: variant.product.comboProduct2Id,
+                        variantId: combo2Variant.id,
+                        productName: `${prod2Name} (Combo Component)`,
+                        availableQty: stock2,
+                        unitLabel: 'units',
+                        requestedQty: deduction2
+                    });
+                }
+            } else {
+                const totalStock = await InventoryStock.sum('totalBaseUnits', {
+                    where: {
+                        productId: item.productId,
+                        godownId: targetGodownId,
+                        totalBaseUnits: { [Op.gt]: 0 }
+                    },
+                    transaction: t
+                }) || 0;
+
+                const availableStock = parseFloat(totalStock);
+                if (deductionRequired > availableStock) {
+                    const productName = typeof variant.product?.name === 'object'
+                        ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')
+                        : (variant.product?.name || 'Product');
+
+                    const unitLabel = sellUnit === 'Inner'
+                        ? (variant.innerUnitRef?.name ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel || 'Unit') : (variant.innerUnitLabel || 'Unit'))
+                        : (variant.baseUnitRef?.name ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel || 'Pack') : (variant.baseUnitLabel || 'Pack'));
+
+                    const availableInUserUnit = sellUnit === 'Inner'
+                        ? Math.floor(availableStock)
+                        : Math.floor(availableStock / bUPP);
+
+                    outOfStockItems.push({
+                        productId: item.productId,
+                        variantId: item.variantId,
+                        productName,
+                        availableQty: availableInUserUnit,
+                        unitLabel,
+                        requestedQty: quantity
+                    });
+                }
+            }
+        }
+
+        if (outOfStockItems.length > 0) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Insufficient stock for some products.", { outOfStockItems });
+        }
+
+        // 3. Delete old order items
+        await OrderItem.destroy({
+            where: { orderId: order.id },
+            transaction: t
+        });
+
+        // 4. Create new order items & calculate pricing
+        let calculatedSubtotal = 0;
+        const newOrderItemsData = [];
+
+        for (const item of items) {
+            const { productId, variantId, quantity } = item;
+            const sellUnit = item.sellUnit || 'Base';
+
+            const variant = await ProductVariant.findByPk(variantId, {
+                include: [
+                    { model: Product, as: 'product' },
+                    { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                    { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                ],
+                transaction: t
+            });
+
+            const bUPP = Number(variant.baseUnitsPerPack || 1);
+            const pricings = await ProductPricing.findAll({
+                where: { variantId },
+                order: [['minQty', 'ASC']],
+                transaction: t
+            });
+
+            let applicablePricing = pricings.find(p =>
+                p.customLevelId === userAppLevel &&
+                quantity >= Number(p.minQty) &&
+                (p.maxQty === null || quantity <= Number(p.maxQty))
+            );
+
+            if (!applicablePricing) {
+                applicablePricing = pricings.find(p => p.customLevelId === userAppLevel);
+            }
+            if (!applicablePricing && pricings.length > 0) {
+                applicablePricing = pricings[0];
+            }
+
+            let rawPrice = applicablePricing ? parseFloat(applicablePricing.price) : (parseFloat(variant.purchasePrice) || 0);
+            const itemPrice = sellUnit === 'Inner' ? (rawPrice / bUPP) : rawPrice;
+            const itemSubtotal = itemPrice * parseFloat(quantity);
+            calculatedSubtotal += itemSubtotal;
+
+            newOrderItemsData.push({
+                orderId: order.id,
+                productId,
+                variantId,
+                quantity,
+                price: itemPrice,
+                sellUnit,
+                variantInfo: {
+                    productName: variant.product.name,
+                    volume: variant.volume,
+                    extra: variant.extra || '',
+                    extraName: variant.extra || '',
+                    image: variant.image || variant.product.thumbnail,
+                    innerUnitLabel: variant.innerUnitRef?.name
+                        ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel)
+                        : variant.innerUnitLabel,
+                    baseUnitLabel: variant.baseUnitRef?.name
+                        ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
+                        : variant.baseUnitLabel,
+                    sellingVolume: variant.sellingVolume
+                }
+            });
+        }
+
+        await OrderItem.bulkCreate(newOrderItemsData, { transaction: t });
+
+        // 5. Deduct new stock
+        for (const item of newOrderItemsData) {
+            const variant = await ProductVariant.findByPk(item.variantId, {
+                include: [{ model: Product, as: 'product' }],
+                transaction: t
+            });
+            if (!variant) continue;
+
+            if (variant.product?.isCombo) {
+                const comboProducts = [
+                    { id: variant.product.comboProduct1Id, key: 'comboProduct1' },
+                    { id: variant.product.comboProduct2Id, key: 'comboProduct2' }
+                ];
+
+                for (const cp of comboProducts) {
+                    const compVariant = await ProductVariant.findOne({
+                        where: { 
+                            productId: cp.id,
+                            ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
+                        },
+                        transaction: t
+                    }) || await ProductVariant.findOne({
+                        where: { productId: cp.id },
+                        transaction: t
+                    });
+
+                    if (!compVariant) continue;
+
+                    const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
+                    const compDeduction = Math.round(item.sellUnit === 'Inner'
+                        ? Number(item.quantity)
+                        : Number(item.quantity) * compBUPP);
+
+                    const stocks = await InventoryStock.findAll({
+                        where: {
+                            productId: cp.id,
+                            godownId: targetGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        order: [['createdAt', 'ASC']],
+                        transaction: t
+                    });
+
+                    let remainingToDeduct = compDeduction;
+                    for (const stock of stocks) {
+                        if (remainingToDeduct <= 0) break;
+
+                        const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                        const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                        await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                        await InventoryTransaction.create({
+                            stockId: stock.id,
+                            productId: cp.id,
+                            variantId: compVariant.id,
+                            godownId: targetGodownId,
+                            type: 'SALE',
+                            primaryUnitId: stock.primaryUnitId,
+                            secondaryUnitId: stock.secondaryUnitId,
+                            secondaryPerPrimary: stock.secondaryPerPrimary,
+                            totalQtyBaseUnits: deductFromThis,
+                            balanceAfterBaseUnits: newTotalBaseUnits,
+                            note: `Sales Order #${order.orderId} (Updated Combo Component)`,
+                            createdBy: req.user?.fullname || 'Customer'
+                        }, { transaction: t });
+
+                        remainingToDeduct -= deductFromThis;
+                    }
+                }
+            } else {
+                const bUPP = Number(variant.baseUnitsPerPack || 1);
+                const deductionRequired = Math.round(item.sellUnit === 'Inner'
+                    ? Number(item.quantity)
+                    : Number(item.quantity) * bUPP);
+
+                const stocks = await InventoryStock.findAll({
+                    where: {
+                        productId: item.productId,
+                        godownId: targetGodownId,
+                        totalBaseUnits: { [Op.gt]: 0 }
+                    },
+                    order: [['createdAt', 'ASC']],
+                    transaction: t
+                });
+
+                let remainingToDeduct = deductionRequired;
+                for (const stock of stocks) {
+                    if (remainingToDeduct <= 0) break;
+
+                    const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                    const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                    await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                    await InventoryTransaction.create({
+                        stockId: stock.id,
+                        productId: item.productId,
+                        variantId: item.variantId,
+                        godownId: targetGodownId,
+                        type: 'SALE',
+                        primaryUnitId: stock.primaryUnitId,
+                        secondaryUnitId: stock.secondaryUnitId,
+                        secondaryPerPrimary: stock.secondaryPerPrimary,
+                        totalQtyBaseUnits: deductFromThis,
+                        balanceAfterBaseUnits: newTotalBaseUnits,
+                        note: `Sales Order #${order.orderId} (Updated)`,
+                        createdBy: req.user?.fullname || 'Customer'
+                    }, { transaction: t });
+
+                    remainingToDeduct -= deductFromThis;
+                }
+            }
+        }
+
+        // 6. Recalculate delivery charges & update order totals
+        const settings = await AppSettings.findOne({ transaction: t });
+        let deliveryCharge = 0;
+        if (settings && calculatedSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
+            if (order.deliveryMode === 'Express') deliveryCharge = parseFloat(settings.expressDeliveryCharge);
+            else if (order.deliveryMode === 'Round') deliveryCharge = parseFloat(settings.deliveryOnRoundCharge);
+        }
+
+        const newTotal = roundTotal(calculatedSubtotal + deliveryCharge);
+
+        await order.update({
+            totalAmount: newTotal,
+            dueAmount: newTotal, // Assuming payment is pending (Outstanding baki)
+            deliveryCharge: deliveryCharge,
+            notes: order.notes ? `${order.notes}\n[Updated by Customer]` : `[Updated by Customer]`
+        }, { transaction: t });
+
+        await t.commit();
+
+        // 7. Trigger Admin Notification (Real-time)
+        try {
+            const adminNotify = await AdminNotification.create({
+                title: 'Order Updated by User!',
+                message: `User ${userData.fullname} has updated pending order #${order.orderId} to ₹${newTotal}.`,
+                type: 'ORDER',
+                referenceId: order.id,
+                clickAction: `/sales/user-orders`
+            });
+            emitAdminNotification(adminNotify);
+        } catch (notifyErr) {
+            console.error('[Admin Notification Error]:', notifyErr);
+        }
+
+        // 8. Trigger User Push Notification
+        try {
+            if (userData.fcmtoken) {
+                const userTitle = 'Order Updated!';
+                const userBody = `Hey ${userData.fullname}, your pending order #${order.orderId} has been updated to ₹${newTotal} successfully!`;
+                await sendToDevice(userData.fcmtoken, userTitle, userBody, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                await Notification.create({
+                    title: userTitle,
+                    body: userBody,
+                    type: 'ORDER',
+                    target: String(order.userId),
+                    status: 'SENT',
+                    clickAction: String(order.id)
+                });
+            }
+        } catch (pushErr) {
+            console.error('[User Push Notification Error]:', pushErr);
+        }
+
+        // Fetch updated order to return in response
+        const updatedOrder = await Order.findOne({
+            where: { id: order.id },
+            include: [
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'image', 'extra'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order updated successfully.", updatedOrder);
+
+    } catch (error) {
+        if (t) await t.rollback();
+        logger.error(`[Update Order Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
