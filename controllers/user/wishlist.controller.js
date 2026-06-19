@@ -3,6 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import sequelize from '../../config/db.js';
 
 const getVolumeLabel = (volumeRef, fallback = '') => {
     if (!volumeRef || !volumeRef.name) return fallback;
@@ -42,7 +43,21 @@ export const getWishlist = async (req, res) => {
                     {
                         model: ProductVariant,
                         as: 'variants',
-                        attributes: { exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'] },
+                        attributes: {
+                            exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'],
+                            include: [
+                                [
+                                    sequelize.literal(`(
+                                        SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
+                                        FROM "inventory_stocks" AS "stock"
+                                        WHERE "stock"."variantId" = "variants"."id"
+                                          AND "stock"."status" = 'Active'
+                                          AND "stock"."deletedAt" IS NULL
+                                    )`),
+                                    'totalStock'
+                                ]
+                            ]
+                        },
                         include: [
                             { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -83,6 +98,13 @@ export const getWishlist = async (req, res) => {
             const formattedWishlist = wishlistItems.map(item => {
                 const itemJson = item.toJSON();
                 if (itemJson.product && itemJson.product.variants) {
+                    let outOfStock = true;
+                    if (itemJson.product.variants.length > 0) {
+                        const hasAvailableStock = itemJson.product.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
+                        outOfStock = !hasAvailableStock;
+                    }
+                    itemJson.product.outOfStock = outOfStock;
+
                     itemJson.product.variants = itemJson.product.variants.map(v => {
                         const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
                         const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');
@@ -135,6 +157,13 @@ export const getWishlist = async (req, res) => {
             formattedResult.data = formattedResult.data.map(item => {
                 const itemJson = item.toJSON ? item.toJSON() : item;
                 if (itemJson.product && itemJson.product.variants) {
+                    let outOfStock = true;
+                    if (itemJson.product.variants.length > 0) {
+                        const hasAvailableStock = itemJson.product.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
+                        outOfStock = !hasAvailableStock;
+                    }
+                    itemJson.product.outOfStock = outOfStock;
+
                     itemJson.product.variants = itemJson.product.variants.map(v => {
                         const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
                         const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');

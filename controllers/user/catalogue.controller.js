@@ -277,6 +277,13 @@ export const getProducts = async (req, res) => {
             const productJson = p.toJSON();
             productJson.isWishlisted = wishlistedProductIds.has(productJson.id);
 
+            let outOfStock = true;
+            if (productJson.variants && productJson.variants.length > 0) {
+                const hasAvailableStock = productJson.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
+                outOfStock = !hasAvailableStock;
+            }
+            productJson.outOfStock = outOfStock;
+
             if (productJson.variants) {
                 productJson.variants = productJson.variants.filter(v => {
                     const totalStock = parseFloat(v.totalStock) || 0;
@@ -524,6 +531,13 @@ export const searchCatalogue = async (req, res) => {
         const mappedProducts = products.map(p => {
             const productJson = p.toJSON();
             productJson.isWishlisted = wishlistedProductIds.has(productJson.id);
+
+            let outOfStock = true;
+            if (productJson.variants && productJson.variants.length > 0) {
+                const hasAvailableStock = productJson.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
+                outOfStock = !hasAvailableStock;
+            }
+            productJson.outOfStock = outOfStock;
 
             if (productJson.variants) {
                 productJson.variants = productJson.variants.filter(v => {
