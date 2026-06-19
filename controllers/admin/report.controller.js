@@ -9,6 +9,8 @@ import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
 import PurchaseBill from '../../models/superadmin-models/PurchaseBill.js';
 import User from '../../models/user/User.js';
 import Volume from '../../models/superadmin-models/Volume.js';
+import OrderPayment from '../../models/user/OrderPayment.js';
+import DeliveryBoy from '../../models/superadmin-models/DeliveryBoy.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 
 // Helper for CSV generation
@@ -27,10 +29,31 @@ const jsonToCsv = (items) => {
 export const getOrderReport = async (req, res, next) => {
     try {
         const { status = 'Cancelled', startDate, endDate } = req.query;
-        const where = { orderStatus: status };
+        
+        let statusList = [status];
+        if (status === 'Cancelled') {
+            statusList = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
+        } else if (status === 'Delivered') {
+            statusList = ['Delivered', 'Payment Collect', 'Payment Verify'];
+        }
+
+        const where = { orderStatus: { [Op.in]: statusList } };
+
         if (startDate && endDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+
             const dateField = status === 'Delivered' ? 'deliveredAt' : (status === 'Cancelled' ? 'updatedAt' : 'createdAt');
-            where[dateField] = { [Op.between]: [new Date(startDate + ' 00:00:00'), new Date(endDate + ' 23:59:59')] };
+            if (dateField === 'deliveredAt') {
+                where[Op.or] = [
+                    { deliveredAt: { [Op.between]: [start, end] } },
+                    { deliveredAt: null, updatedAt: { [Op.between]: [start, end] } }
+                ];
+            } else {
+                where[dateField] = { [Op.between]: [start, end] };
+            }
         }
 
         const orders = await Order.findAll({
@@ -41,8 +64,8 @@ export const getOrderReport = async (req, res, next) => {
 
         const reportData = orders.map(o => ({
             'Order ID': o.orderId,
-            'Customer': o.user?.fullname || 'Unknown',
-            'Phone': o.user?.number || '-',
+            'Customer': o.user?.fullname || o.customerName || 'Unknown',
+            'Phone': o.user?.number || o.customerNumber || '-',
             'Total Amount': o.totalAmount,
             'Status': o.orderStatus,
             'Date': o.createdAt.toLocaleDateString()
@@ -68,7 +91,11 @@ export const getTopSellingReport = async (req, res, next) => {
         const { startDate, endDate } = req.query;
         const where = {};
         if (startDate && endDate) {
-            where.createdAt = { [Op.between]: [new Date(startDate + ' 00:00:00'), new Date(endDate + ' 23:59:59')] };
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [start, end] };
         }
 
         const items = await OrderItem.findAll({
@@ -85,13 +112,14 @@ export const getTopSellingReport = async (req, res, next) => {
         });
 
         const reportData = items.map(i => ({
-            'Product': i.product?.name?.en || 'Unnamed',
+            'Product': i.product?.name ? (i.product.name.en || Object.values(i.product.name)[0]) : 'Unnamed',
             'Total Quantity': i.getDataValue('totalQty'),
             'Total Revenue': i.getDataValue('totalRevenue')
         }));
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=top_selling_report.csv');
             return res.status(200).send(jsonToCsv(reportData));
         }
 
@@ -115,7 +143,7 @@ export const getLowStockReport = async (req, res, next) => {
         });
 
         const reportData = stocks.map(s => ({
-            'Product': s.product?.name?.en || 'Unnamed',
+            'Product': s.product?.name ? (s.product.name.en || Object.values(s.product.name)[0]) : 'Unnamed',
             'Volume': s.variant?.volume || '-',
             'Available Stock': s.totalBaseUnits,
             'Alert Level': 10
@@ -123,6 +151,7 @@ export const getLowStockReport = async (req, res, next) => {
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=low_stock_report.csv');
             return res.status(200).send(jsonToCsv(reportData));
         }
 
@@ -140,7 +169,11 @@ export const getPartyReport = async (req, res, next) => {
         const { startDate, endDate } = req.query;
         const where = {};
         if (startDate && endDate) {
-            where.createdAt = { [Op.between]: [new Date(startDate + ' 00:00:00'), new Date(endDate + ' 23:59:59')] };
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [start, end] };
         }
 
         const users = await User.findAll({
@@ -159,6 +192,7 @@ export const getPartyReport = async (req, res, next) => {
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=party_report.csv');
             return res.status(200).send(jsonToCsv(reportData));
         }
 
@@ -176,7 +210,11 @@ export const getPurchaseReport = async (req, res, next) => {
         const { startDate, endDate } = req.query;
         const where = {};
         if (startDate && endDate) {
-            where.createdAt = { [Op.between]: [new Date(startDate), new Date(endDate)] };
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [start, end] };
         }
 
         const bills = await PurchaseBill.findAll({
@@ -187,7 +225,7 @@ export const getPurchaseReport = async (req, res, next) => {
 
         const reportData = bills.map(b => ({
             'Bill ID': b.billId,
-            'Product': b.product?.name?.en || 'Unnamed',
+            'Product': b.product?.name ? (b.product.name.en || Object.values(b.product.name)[0]) : 'Unnamed',
             'Quantity': b.quantity,
             'Total Amount': b.totalAmount,
             'Date': b.createdAt.toLocaleDateString()
@@ -231,7 +269,7 @@ export const getInventoryReport = async (req, res, next) => {
         });
 
         const reportData = stocks.map(s => ({
-            'Product': s.product?.name?.en || 'Unnamed',
+            'Product': s.product?.name ? (s.product.name.en || Object.values(s.product.name)[0]) : 'Unnamed',
             'Variant': s.variant?.volume || '-',
             'Stock Count': s.totalBaseUnits,
             'Expiry Date': s.expiryDate ? s.expiryDate.toLocaleDateString() : 'N/A',
@@ -264,7 +302,7 @@ export const getProductMasterReport = async (req, res, next) => {
         for (const p of products) {
             for (const v of (p.variants || [])) {
                 reportData.push({
-                    'Product Name': p.name?.en || 'Unnamed',
+                    'Product Name': p.name ? (p.name.en || Object.values(p.name)[0]) : 'Unnamed',
                     'Volume': v.volume,
                     'Purchase Price': v.purchasePrice,
                     'Status': v.status
@@ -274,10 +312,119 @@ export const getProductMasterReport = async (req, res, next) => {
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=product_master_report.csv');
             return res.status(200).send(jsonToCsv(reportData));
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product master report fetched.', reportData);
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Report: Payment Collection Summary
+ */
+export const getPaymentCollectionReport = async (req, res, next) => {
+    try {
+        const { startDate, endDate } = req.query;
+        const where = {};
+        if (startDate && endDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [start, end] };
+        }
+
+        const payments = await OrderPayment.findAll({
+            where,
+            include: [
+                {
+                    model: Order,
+                    as: 'order',
+                    attributes: ['orderId', 'customerName', 'customerNumber'],
+                    include: [
+                        {
+                            model: User,
+                            as: 'user',
+                            attributes: ['fullname', 'number']
+                        }
+                    ]
+                },
+                {
+                    model: DeliveryBoy,
+                    as: 'deliveryBoy',
+                    attributes: ['name']
+                }
+            ],
+            order: [['createdAt', 'DESC']]
+        });
+
+        const reportData = payments.map(p => ({
+            'Order ID': p.order?.orderId || '-',
+            'Customer': p.order?.user?.fullname || p.order?.customerName || 'Unknown',
+            'Phone': p.order?.user?.number || p.order?.customerNumber || '-',
+            'Amount': p.amount,
+            'Payment Method': p.paymentMethod,
+            'Collected By': p.deliveryBoy?.name || 'Self/Online',
+            'Status': p.isSubmitted ? 'Submitted' : 'Pending',
+            'Date': p.createdAt.toLocaleDateString()
+        }));
+
+        if (req.query.format === 'csv') {
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=payment_collection_report.csv');
+            return res.status(200).send(jsonToCsv(reportData));
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Payment collection report fetched.', reportData);
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Report: Payment Reconciliation
+ */
+export const getPaymentReconciliationReport = async (req, res, next) => {
+    try {
+        const { startDate, endDate } = req.query;
+        const where = {};
+        if (startDate && endDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            where.createdAt = { [Op.between]: [start, end] };
+        }
+
+        const orders = await Order.findAll({
+            where,
+            include: [{ model: User, as: 'user', attributes: ['id', 'fullname', 'number'] }],
+            order: [['createdAt', 'DESC']]
+        });
+
+        const reportData = orders.map(o => ({
+            'Order ID': o.orderId,
+            'Customer': o.user?.fullname || o.customerName || 'Unknown',
+            'Phone': o.user?.number || o.customerNumber || '-',
+            'Total Amount': o.totalAmount,
+            'Paid Amount': o.paidAmount,
+            'Due Amount': o.dueAmount,
+            'Payment Method': o.paymentMethod,
+            'Payment Status': o.paymentStatus,
+            'Order Status': o.orderStatus,
+            'Date': o.createdAt.toLocaleDateString()
+        }));
+
+        if (req.query.format === 'csv') {
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=payment_reconciliation_report.csv');
+            return res.status(200).send(jsonToCsv(reportData));
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Payment reconciliation report fetched.', reportData);
     } catch (error) {
         next(error);
     }

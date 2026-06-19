@@ -6,7 +6,9 @@ import {
     getPartyReport,
     getInventoryReport,
     getPurchaseReport,
-    getProductMasterReport
+    getProductMasterReport,
+    getPaymentCollectionReport,
+    getPaymentReconciliationReport
 } from '../../controllers/admin/report.controller.js';
 
 const router = express.Router();
@@ -20,5 +22,7 @@ router.get('/parties', getPartyReport);
 router.get('/inventory', getInventoryReport);
 router.get('/purchase', getPurchaseReport);
 router.get('/products', getProductMasterReport);
+router.get('/payment-collection', getPaymentCollectionReport);
+router.get('/payment-reconciliation', getPaymentReconciliationReport);
 
 export default router;
