@@ -96,11 +96,6 @@ export const getWishlist = async (req, res) => {
             const formattedWishlist = wishlistItems.map(item => {
                 const itemJson = item.toJSON();
                 if (itemJson.product) {
-                    // Flatten product.name from multilingual Map to String (Flutter type safety)
-                    if (itemJson.product.name && typeof itemJson.product.name === 'object') {
-                        itemJson.product.name = itemJson.product.name.en || itemJson.product.name.gu || itemJson.product.name.hi || Object.values(itemJson.product.name)[0] || '';
-                    }
-
                     let outOfStock = true;
                     if (itemJson.product.variants && itemJson.product.variants.length > 0) {
                         const hasAvailableStock = itemJson.product.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
@@ -119,30 +114,11 @@ export const getWishlist = async (req, res) => {
                         });
 
                         itemJson.product.variants = itemJson.product.variants.map(v => {
-                            // Flatten volumeRef.name to string
-                            if (v.volumeRef && v.volumeRef.name && typeof v.volumeRef.name === 'object') {
-                                v.volumeRef = { ...v.volumeRef, name: v.volumeRef.name.en || v.volumeRef.name.gu || Object.values(v.volumeRef.name)[0] || '' };
+                            if (v.baseUnitRef && v.baseUnitRef.name) {
+                                v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
                             }
-                            // Flatten baseUnitRef.name to string
-                            if (v.baseUnitRef && v.baseUnitRef.name && typeof v.baseUnitRef.name === 'object') {
-                                const baseLabel = v.baseUnitRef.name.en || v.baseUnitRef.name.gu || Object.values(v.baseUnitRef.name)[0] || '';
-                                v.baseUnitRef = { ...v.baseUnitRef, name: baseLabel };
-                                v.baseUnitLabel = baseLabel || v.baseUnitLabel;
-                            }
-                            // Flatten innerUnitRef.name to string
-                            if (v.innerUnitRef && v.innerUnitRef.name && typeof v.innerUnitRef.name === 'object') {
-                                const innerLabel = v.innerUnitRef.name.en || v.innerUnitRef.name.gu || Object.values(v.innerUnitRef.name)[0] || '';
-                                v.innerUnitRef = { ...v.innerUnitRef, name: innerLabel };
-                                v.innerUnitLabel = innerLabel || v.innerUnitLabel;
-                            }
-                            // Flatten customLevel.name in pricings
-                            if (v.pricings && Array.isArray(v.pricings)) {
-                                v.pricings = v.pricings.map(p => {
-                                    if (p.customLevel && p.customLevel.name && typeof p.customLevel.name === 'object') {
-                                        p.customLevel = { ...p.customLevel, name: p.customLevel.name.en || p.customLevel.name.gu || Object.values(p.customLevel.name)[0] || '' };
-                                    }
-                                    return p;
-                                });
+                            if (v.innerUnitRef && v.innerUnitRef.name) {
+                                v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                             }
                             v.extraName = v.extra || '';
                             return v;
@@ -175,11 +151,6 @@ export const getWishlist = async (req, res) => {
             formattedResult.data = formattedResult.data.map(item => {
                 const itemJson = item.toJSON ? item.toJSON() : item;
                 if (itemJson.product) {
-                    // Flatten product.name from multilingual Map to String (Flutter type safety)
-                    if (itemJson.product.name && typeof itemJson.product.name === 'object') {
-                        itemJson.product.name = itemJson.product.name.en || itemJson.product.name.gu || itemJson.product.name.hi || Object.values(itemJson.product.name)[0] || '';
-                    }
-
                     let outOfStock = true;
                     if (itemJson.product.variants && itemJson.product.variants.length > 0) {
                         const hasAvailableStock = itemJson.product.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
@@ -198,30 +169,11 @@ export const getWishlist = async (req, res) => {
                         });
 
                         itemJson.product.variants = itemJson.product.variants.map(v => {
-                            // Flatten volumeRef.name to string
-                            if (v.volumeRef && v.volumeRef.name && typeof v.volumeRef.name === 'object') {
-                                v.volumeRef = { ...v.volumeRef, name: v.volumeRef.name.en || v.volumeRef.name.gu || Object.values(v.volumeRef.name)[0] || '' };
+                            if (v.baseUnitRef && v.baseUnitRef.name) {
+                                v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
                             }
-                            // Flatten baseUnitRef.name to string
-                            if (v.baseUnitRef && v.baseUnitRef.name && typeof v.baseUnitRef.name === 'object') {
-                                const baseLabel = v.baseUnitRef.name.en || v.baseUnitRef.name.gu || Object.values(v.baseUnitRef.name)[0] || '';
-                                v.baseUnitRef = { ...v.baseUnitRef, name: baseLabel };
-                                v.baseUnitLabel = baseLabel || v.baseUnitLabel;
-                            }
-                            // Flatten innerUnitRef.name to string
-                            if (v.innerUnitRef && v.innerUnitRef.name && typeof v.innerUnitRef.name === 'object') {
-                                const innerLabel = v.innerUnitRef.name.en || v.innerUnitRef.name.gu || Object.values(v.innerUnitRef.name)[0] || '';
-                                v.innerUnitRef = { ...v.innerUnitRef, name: innerLabel };
-                                v.innerUnitLabel = innerLabel || v.innerUnitLabel;
-                            }
-                            // Flatten customLevel.name in pricings
-                            if (v.pricings && Array.isArray(v.pricings)) {
-                                v.pricings = v.pricings.map(p => {
-                                    if (p.customLevel && p.customLevel.name && typeof p.customLevel.name === 'object') {
-                                        p.customLevel = { ...p.customLevel, name: p.customLevel.name.en || p.customLevel.name.gu || Object.values(p.customLevel.name)[0] || '' };
-                                    }
-                                    return p;
-                                });
+                            if (v.innerUnitRef && v.innerUnitRef.name) {
+                                v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                             }
                             v.extraName = v.extra || '';
                             return v;
