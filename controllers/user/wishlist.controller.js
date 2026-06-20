@@ -50,7 +50,7 @@ export const getWishlist = async (req, res) => {
                                     sequelize.literal(`(
                                         SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
                                         FROM "inventory_stocks" AS "stock"
-                                        WHERE "stock"."variantId" = "variants"."id"
+                                        WHERE "stock"."variantId" = "product->variants"."id"
                                           AND "stock"."status" = 'Active'
                                           AND "stock"."deletedAt" IS NULL
                                     )`),
