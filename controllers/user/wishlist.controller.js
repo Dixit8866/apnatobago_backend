@@ -136,6 +136,8 @@ export const getWishlist = async (req, res) => {
                 return itemJson;
             });
 
+            console.log(formattedWishlist,"====formattedWishlist")
+
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Wishlist fetched successfully", formattedWishlist);
         }
 
