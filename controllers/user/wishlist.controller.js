@@ -93,8 +93,6 @@ export const getWishlist = async (req, res) => {
                 order
             });
 
-            console.log(wishlistItems, "===wishlistItems")
-
             const formattedWishlist = wishlistItems.map(item => {
                 const itemJson = item.toJSON();
                 if (itemJson.product && itemJson.product.variants) {
@@ -109,6 +107,12 @@ export const getWishlist = async (req, res) => {
                         const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
                         const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');
                         const innerUnitName = getVolumeLabel(v.innerUnitRef, v.volume || '');
+                        
+                        // Fix: Flatten multilingual name objects into simple strings for Flutter model parsing compatibility
+                        if (v.volumeRef) v.volumeRef = { ...v.volumeRef, name: volumeName };
+                        if (v.baseUnitRef) v.baseUnitRef = { ...v.baseUnitRef, name: baseUnitName };
+                        if (v.innerUnitRef) v.innerUnitRef = { ...v.innerUnitRef, name: innerUnitName };
+
                         if (debug) {
                             console.log('[Wishlist debug] variant=', {
                                 variantId: v.id,
@@ -170,6 +174,12 @@ export const getWishlist = async (req, res) => {
                         const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
                         const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');
                         const innerUnitName = getVolumeLabel(v.innerUnitRef, v.volume || '');
+
+                        // Fix: Flatten multilingual name objects into simple strings for Flutter model parsing compatibility
+                        if (v.volumeRef) v.volumeRef = { ...v.volumeRef, name: volumeName };
+                        if (v.baseUnitRef) v.baseUnitRef = { ...v.baseUnitRef, name: baseUnitName };
+                        if (v.innerUnitRef) v.innerUnitRef = { ...v.innerUnitRef, name: innerUnitName };
+
                         if (debug) {
                             console.log('[Wishlist debug] variant=', {
                                 variantId: v.id,
