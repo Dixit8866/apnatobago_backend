@@ -67,7 +67,7 @@ export const createUser = async (req, res, next) => {
 
 export const getAllUsers = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status, kycverification } = req.query;
+        const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
         const searchWhere = {};
@@ -80,6 +80,7 @@ export const getAllUsers = async (req, res, next) => {
             ];
         }
         if (kycverification) searchWhere.kycverification = kycverification;
+        if (routeCategoryId) searchWhere.routeCategoryId = routeCategoryId;
 
         const where = { ...searchWhere };
         if (status) where.status = status;
@@ -106,6 +107,28 @@ export const getAllUsers = async (req, res, next) => {
         ]);
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
+        // Calculate user counts by routeCategory for the currently active tab status, search and KYC status filters
+        const routeCountWhere = { ...where };
+        delete routeCountWhere.routeCategoryId;
+        routeCountWhere.routeCategoryId = { [Op.ne]: null };
+
+        const routeCountsRaw = await User.count({
+            where: routeCountWhere,
+            include,
+            distinct: true,
+            group: ['routeCategoryId']
+        });
+
+        const routeCounts = {};
+        if (Array.isArray(routeCountsRaw)) {
+            routeCountsRaw.forEach(r => {
+                const id = r.routeCategoryId;
+                if (id) {
+                    routeCounts[id] = parseInt(r.count || 0, 10);
+                }
+            });
+        }
+
         if (req.query.paginate === 'false') {
             const users = await User.findAll({ 
                 where, 
@@ -130,7 +153,8 @@ export const getAllUsers = async (req, res, next) => {
         const responseData = formatPaginatedResponse({ count, rows }, page, limitOptions);
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Users fetched.', {
             ...responseData,
-            statusCounts
+            statusCounts,
+            routeCounts
         });
     } catch (error) {
         next(error);
