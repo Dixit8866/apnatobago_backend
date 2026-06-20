@@ -141,7 +141,7 @@ export const getOrderReport = async (req, res, next) => {
                 'Profit': profit.toFixed(2),
                 'Total Amount': totalAmount.toFixed(2),
                 'Status': o.orderStatus,
-                'Date': o.createdAt.toLocaleDateString()
+                'Date': (status === 'Delivered' ? (o.deliveredAt || o.updatedAt || o.createdAt) : (status === 'Cancelled' ? (o.updatedAt || o.createdAt) : o.createdAt)).toLocaleDateString()
             };
         });
 
