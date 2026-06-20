@@ -95,47 +95,35 @@ export const getWishlist = async (req, res) => {
 
             const formattedWishlist = wishlistItems.map(item => {
                 const itemJson = item.toJSON();
-                if (itemJson.product && itemJson.product.variants) {
+                if (itemJson.product) {
                     let outOfStock = true;
-                    if (itemJson.product.variants.length > 0) {
+                    if (itemJson.product.variants && itemJson.product.variants.length > 0) {
                         const hasAvailableStock = itemJson.product.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
                         outOfStock = !hasAvailableStock;
                     }
                     itemJson.product.outOfStock = outOfStock;
 
-                    itemJson.product.variants = itemJson.product.variants.map(v => {
-                        const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
-                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');
-                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.volume || '');
-                        
-                        // Fix: Flatten multilingual name objects into simple strings for Flutter model parsing compatibility
-                        if (v.volumeRef) v.volumeRef = { ...v.volumeRef, name: volumeName };
-                        if (v.baseUnitRef) v.baseUnitRef = { ...v.baseUnitRef, name: baseUnitName };
-                        if (v.innerUnitRef) v.innerUnitRef = { ...v.innerUnitRef, name: innerUnitName };
+                    if (itemJson.product.variants) {
+                        itemJson.product.variants = itemJson.product.variants.filter(v => {
+                            const totalStock = parseFloat(v.totalStock) || 0;
+                            const hasExtra = v.extra && v.extra.toString().trim() !== '';
+                            if (hasExtra) {
+                                return totalStock > 0;
+                            }
+                            return true;
+                        });
 
-                        if (debug) {
-                            console.log('[Wishlist debug] variant=', {
-                                variantId: v.id,
-                                volume: v.volume,
-                                baseUnitLabelRaw: v.baseUnitLabel,
-                                innerUnitLabelRaw: v.innerUnitLabel,
-                                baseUnitRefName: v.baseUnitRef?.name,
-                                innerUnitRefName: v.innerUnitRef?.name,
-                                resolvedBaseUnitLabel: baseUnitName,
-                                resolvedInnerUnitLabel: innerUnitName
-                            });
-                        }
-                        return {
-                            ...v,
-                            volumeLabel: volumeName,
-                            baseUnitLabel: baseUnitName,
-                            innerUnitLabel: innerUnitName,
-                            extra: v.extra || '',
-                            extraName: v.extra || '',
-                            image: v.image || itemJson.product.thumbnail,
-                            thumbnail: v.image || itemJson.product.thumbnail
-                        };
-                    });
+                        itemJson.product.variants = itemJson.product.variants.map(v => {
+                            if (v.baseUnitRef && v.baseUnitRef.name) {
+                                v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
+                            }
+                            if (v.innerUnitRef && v.innerUnitRef.name) {
+                                v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
+                            }
+                            v.extraName = v.extra || '';
+                            return v;
+                        });
+                    }
                 }
                 return itemJson;
             });
@@ -162,48 +150,35 @@ export const getWishlist = async (req, res) => {
         if (formattedResult.data) {
             formattedResult.data = formattedResult.data.map(item => {
                 const itemJson = item.toJSON ? item.toJSON() : item;
-                if (itemJson.product && itemJson.product.variants) {
+                if (itemJson.product) {
                     let outOfStock = true;
-                    if (itemJson.product.variants.length > 0) {
+                    if (itemJson.product.variants && itemJson.product.variants.length > 0) {
                         const hasAvailableStock = itemJson.product.variants.some(v => (parseFloat(v.totalStock) || 0) > 0);
                         outOfStock = !hasAvailableStock;
                     }
                     itemJson.product.outOfStock = outOfStock;
 
-                    itemJson.product.variants = itemJson.product.variants.map(v => {
-                        const volumeName = getVolumeLabel(v.volumeRef, v.volume || '');
-                        const baseUnitName = getVolumeLabel(v.baseUnitRef, v.volume || '');
-                        const innerUnitName = getVolumeLabel(v.innerUnitRef, v.volume || '');
+                    if (itemJson.product.variants) {
+                        itemJson.product.variants = itemJson.product.variants.filter(v => {
+                            const totalStock = parseFloat(v.totalStock) || 0;
+                            const hasExtra = v.extra && v.extra.toString().trim() !== '';
+                            if (hasExtra) {
+                                return totalStock > 0;
+                            }
+                            return true;
+                        });
 
-                        // Fix: Flatten multilingual name objects into simple strings for Flutter model parsing compatibility
-                        if (v.volumeRef) v.volumeRef = { ...v.volumeRef, name: volumeName };
-                        if (v.baseUnitRef) v.baseUnitRef = { ...v.baseUnitRef, name: baseUnitName };
-                        if (v.innerUnitRef) v.innerUnitRef = { ...v.innerUnitRef, name: innerUnitName };
-
-                        if (debug) {
-                            console.log('[Wishlist debug] variant=', {
-                                variantId: v.id,
-                                volume: v.volume,
-                                baseUnitLabelRaw: v.baseUnitLabel,
-                                innerUnitLabelRaw: v.innerUnitLabel,
-                                baseUnitRefName: v.baseUnitRef?.name,
-                                innerUnitRefName: v.innerUnitRef?.name,
-                                resolvedBaseUnitLabel: baseUnitName,
-                                resolvedInnerUnitLabel: innerUnitName
-                            });
-                        }
-
-                        return {
-                            ...v,
-                            volumeLabel: volumeName,
-                            baseUnitLabel: baseUnitName,
-                            innerUnitLabel: innerUnitName,
-                            extra: v.extra || '',
-                            extraName: v.extra || '',
-                            image: v.image || itemJson.product.thumbnail,
-                            thumbnail: v.image || itemJson.product.thumbnail
-                        };
-                    });
+                        itemJson.product.variants = itemJson.product.variants.map(v => {
+                            if (v.baseUnitRef && v.baseUnitRef.name) {
+                                v.baseUnitLabel = Object.values(v.baseUnitRef.name)[0] || v.baseUnitLabel;
+                            }
+                            if (v.innerUnitRef && v.innerUnitRef.name) {
+                                v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
+                            }
+                            v.extraName = v.extra || '';
+                            return v;
+                        });
+                    }
                 }
                 return itemJson;
             });
