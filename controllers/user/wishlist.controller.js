@@ -38,13 +38,13 @@ export const getWishlist = async (req, res) => {
                 model: Product,
                 as: 'product',
                 where: req.user && !req.user.showtabacco ? { isTobaccoProduct: false } : {},
-                attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt'] },
+                attributes: { exclude: ['isTobaccoProduct', 'position', 'createdAt', 'updatedAt', 'deletedAt', 'productDescription'] },
                 include: [
                     {
                         model: ProductVariant,
                         as: 'variants',
                         attributes: {
-                            exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt'],
+                            exclude: ['purchasePrice', 'productId', 'createdAt', 'updatedAt', 'deletedAt', 'variantInfo'],
                             include: [
                                 [
                                     sequelize.literal(`(
