@@ -8,7 +8,6 @@ import ProductVariant from '../../models/superadmin-models/ProductVariant.js';
 import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
 import PurchaseBill from '../../models/superadmin-models/PurchaseBill.js';
 import User from '../../models/user/User.js';
-import Volume from '../../models/superadmin-models/Volume.js';
 import OrderPayment from '../../models/user/OrderPayment.js';
 import DeliveryBoy from '../../models/superadmin-models/DeliveryBoy.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
@@ -21,6 +20,26 @@ const jsonToCsv = (items) => {
         Object.values(row).map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')
     );
     return [header, ...rows].join('\n');
+};
+
+// Helper for Excel (XLS) generation
+const jsonToXls = (items) => {
+    if (!items.length) return '';
+    const keys = Object.keys(items[0]);
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8"/><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Report</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body><table border="1"><thead><tr style="background-color: #f2f2f2; font-weight: bold;">`;
+    keys.forEach(key => {
+        html += `<th>${key}</th>`;
+    });
+    html += `</tr></thead><tbody>`;
+    items.forEach(row => {
+        html += `<tr>`;
+        Object.values(row).forEach(val => {
+            html += `<td>${val !== null && val !== undefined ? String(val) : ''}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</tbody></table></body></html>`;
+    return html;
 };
 
 /**
@@ -58,18 +77,93 @@ export const getOrderReport = async (req, res, next) => {
 
         const orders = await Order.findAll({
             where,
-            include: [{ model: User, as: 'user', attributes: ['id', 'fullname', 'number'] }],
+            include: [
+                { model: User, as: 'user', attributes: ['id', 'fullname', 'number'] },
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'purchasePrice', 'baseUnitsPerPack'] }
+                    ]
+                }
+            ],
             order: [['createdAt', 'DESC']]
         });
 
-        const reportData = orders.map(o => ({
-            'Order ID': o.orderId,
-            'Customer': o.user?.fullname || o.customerName || 'Unknown',
-            'Phone': o.user?.number || o.customerNumber || '-',
-            'Total Amount': o.totalAmount,
-            'Status': o.orderStatus,
-            'Date': o.createdAt.toLocaleDateString()
-        }));
+        let grandPurchase = 0;
+        let grandSales = 0;
+        let grandProfit = 0;
+        let grandTotalAmount = 0;
+
+        const reportData = orders.map(o => {
+            let totalPurchaseCost = 0;
+            let totalSalesAmount = 0;
+
+            if (o.items && o.items.length > 0) {
+                o.items.forEach(item => {
+                    const price = parseFloat(item.price || 0);
+                    const qty = parseFloat(item.quantity || 0);
+                    const itemSales = price * qty;
+                    totalSalesAmount += itemSales;
+
+                    const variant = item.variant;
+                    const purchasePrice = parseFloat(variant?.purchasePrice || 0);
+                    const bUPP = parseFloat(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+
+                    let itemCost = 0;
+                    if (item.sellUnit === 'Inner') {
+                        itemCost = (purchasePrice / bUPP) * qty;
+                    } else {
+                        itemCost = purchasePrice * qty;
+                    }
+                    totalPurchaseCost += itemCost;
+                });
+            } else {
+                totalSalesAmount = parseFloat(o.totalAmount || 0);
+            }
+
+            const sales = totalSalesAmount;
+            const purchase = totalPurchaseCost;
+            const profit = sales - purchase;
+            const totalAmount = parseFloat(o.totalAmount || 0);
+
+            grandPurchase += purchase;
+            grandSales += sales;
+            grandProfit += profit;
+            grandTotalAmount += totalAmount;
+
+            return {
+                'Order ID': o.orderId,
+                'Customer': o.user?.fullname || o.customerName || 'Unknown',
+                'Phone': o.user?.number || o.customerNumber || '-',
+                'Purchase': purchase.toFixed(2),
+                'Sales': sales.toFixed(2),
+                'Profit': profit.toFixed(2),
+                'Total Amount': totalAmount.toFixed(2),
+                'Status': o.orderStatus,
+                'Date': o.createdAt.toLocaleDateString()
+            };
+        });
+
+        if (reportData.length > 0) {
+            reportData.push({
+                'Order ID': 'GRAND TOTAL',
+                'Customer': '',
+                'Phone': '',
+                'Purchase': grandPurchase.toFixed(2),
+                'Sales': grandSales.toFixed(2),
+                'Profit': grandProfit.toFixed(2),
+                'Total Amount': grandTotalAmount.toFixed(2),
+                'Status': '',
+                'Date': ''
+            });
+        }
+
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', `attachment; filename=orders_${status}_report.xls`);
+            return res.status(200).send(jsonToXls(reportData));
+        }
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
@@ -117,6 +211,12 @@ export const getTopSellingReport = async (req, res, next) => {
             'Total Revenue': i.getDataValue('totalRevenue')
         }));
 
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', 'attachment; filename=top_selling_report.xls');
+            return res.status(200).send(jsonToXls(reportData));
+        }
+
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
             res.setHeader('Content-Disposition', 'attachment; filename=top_selling_report.csv');
@@ -148,6 +248,12 @@ export const getLowStockReport = async (req, res, next) => {
             'Available Stock': s.totalBaseUnits,
             'Alert Level': 10
         }));
+
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', 'attachment; filename=low_stock_report.xls');
+            return res.status(200).send(jsonToXls(reportData));
+        }
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
@@ -190,6 +296,12 @@ export const getPartyReport = async (req, res, next) => {
             'Joined Date': u.createdAt.toLocaleDateString()
         }));
 
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', 'attachment; filename=party_report.xls');
+            return res.status(200).send(jsonToXls(reportData));
+        }
+
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
             res.setHeader('Content-Disposition', 'attachment; filename=party_report.csv');
@@ -230,6 +342,12 @@ export const getPurchaseReport = async (req, res, next) => {
             'Total Amount': b.totalAmount,
             'Date': b.createdAt.toLocaleDateString()
         }));
+
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', 'attachment; filename=purchase_report.xls');
+            return res.status(200).send(jsonToXls(reportData));
+        }
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
@@ -277,6 +395,12 @@ export const getInventoryReport = async (req, res, next) => {
             'Total Value': Number(s.totalBaseUnits) * Number(s.avgPurchasePricePerBaseUnit)
         }));
 
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', `attachment; filename=inventory_${type || 'all'}_report.xls`);
+            return res.status(200).send(jsonToXls(reportData));
+        }
+
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
             res.setHeader('Content-Disposition', `attachment; filename=inventory_${type || 'all'}_report.csv`);
@@ -308,6 +432,12 @@ export const getProductMasterReport = async (req, res, next) => {
                     'Status': v.status
                 });
             }
+        }
+
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', 'attachment; filename=product_master_report.xls');
+            return res.status(200).send(jsonToXls(reportData));
         }
 
         if (req.query.format === 'csv') {
@@ -372,6 +502,12 @@ export const getPaymentCollectionReport = async (req, res, next) => {
             'Date': p.createdAt.toLocaleDateString()
         }));
 
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', 'attachment; filename=payment_collection_report.xls');
+            return res.status(200).send(jsonToXls(reportData));
+        }
+
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
             res.setHeader('Content-Disposition', 'attachment; filename=payment_collection_report.csv');
@@ -417,6 +553,12 @@ export const getPaymentReconciliationReport = async (req, res, next) => {
             'Order Status': o.orderStatus,
             'Date': o.createdAt.toLocaleDateString()
         }));
+
+        if (req.query.format === 'excel') {
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', 'attachment; filename=payment_reconciliation_report.xls');
+            return res.status(200).send(jsonToXls(reportData));
+        }
 
         if (req.query.format === 'csv') {
             res.setHeader('Content-Type', 'text/csv');
