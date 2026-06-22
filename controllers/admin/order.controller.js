@@ -106,7 +106,7 @@ export const downloadDeliveryLabel = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
     try {
-        const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId } = req.query;
+        const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming } = req.query;
         const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
 
         // Pre-fetch settings to resolve any empty deliveryRoundTiming
@@ -230,6 +230,28 @@ export const getAllOrders = async (req, res) => {
         // Apply route category filter
         if (routeCategoryId) {
             where.routeCategoryId = routeCategoryId;
+        }
+
+        // Apply delivery timing filter (Express or a specific Round timing slot)
+        if (deliveryTiming) {
+            if (deliveryTiming === 'Express') {
+                where.deliveryMode = 'Express';
+            } else {
+                where.deliveryMode = 'Round';
+                // Find all round IDs that match this timing label in settings
+                const matchingRoundIds = normalizedSchedules
+                    .filter(r => (r.time || `${r.start || ''} - ${r.end || ''}`) === deliveryTiming)
+                    .map(r => r.id);
+
+                if (matchingRoundIds.length > 0) {
+                    where[Op.or] = [
+                        { deliveryRoundTiming: deliveryTiming },
+                        { deliveryRoundId: { [Op.in]: matchingRoundIds } }
+                    ];
+                } else {
+                    where.deliveryRoundTiming = deliveryTiming;
+                }
+            }
         }
 
         const pagination = getPaginationOptions(req.query);
@@ -481,8 +503,59 @@ export const getAllOrders = async (req, res) => {
             });
         }
 
+        // Calculate timing counts — distribution of delivery modes/timings for the current status+route+date filter
+        // (excluding the timing filter itself, so all slots show their counts)
+        const timingBaseWhere = { ...where };
+        delete timingBaseWhere.deliveryMode;
+        delete timingBaseWhere.deliveryRoundTiming;
+
+        const timingCountsInclude = [];
+        if (deliveryBoyId) {
+            timingCountsInclude.push({ model: OrderAssignment, as: 'assignment' });
+        }
+
+        const [expressTimingCount, roundTimingCountsRaw] = await Promise.all([
+            Order.count({
+                where: { ...timingBaseWhere, deliveryMode: 'Express' },
+                include: timingCountsInclude,
+                subQuery: false
+            }),
+            Order.count({
+                where: { ...timingBaseWhere, deliveryMode: 'Round' },
+                include: timingCountsInclude,
+                group: ['deliveryRoundId', 'deliveryRoundTiming'],
+                subQuery: false
+            })
+        ]);
+
+        const timingCounts = {};
+        if (expressTimingCount > 0) {
+            timingCounts['Express'] = expressTimingCount;
+        }
+        if (Array.isArray(roundTimingCountsRaw)) {
+            roundTimingCountsRaw.forEach(r => {
+                const roundId = r.deliveryRoundId;
+                let timing = r.deliveryRoundTiming;
+                
+                // If timing label is empty in DB, try to resolve it from normalizedSchedules using roundId
+                if (!timing && roundId) {
+                    const matchedRound = normalizedSchedules.find(s => s.id === roundId);
+                    if (matchedRound) {
+                        timing = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                    }
+                }
+                
+                if (timing) {
+                    timingCounts[timing] = (timingCounts[timing] || 0) + parseInt(r.count || 0, 10);
+                }
+            });
+        }
+
         const responseData = formatPaginatedResponse(result, page, limit);
         responseData.routeCounts = routeCounts;
+        responseData.timingCounts = timingCounts;
+        responseData.allRoundTimings = normalizedSchedules.map(r => r.time || `${r.start || ''} - ${r.end || ''}`).filter(Boolean);
+        responseData.showExpress = appSettings ? !!appSettings.showExpressDelivery : false;
 
         // Attach counts to response
         responseData.statusCounts = {

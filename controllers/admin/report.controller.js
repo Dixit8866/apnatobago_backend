@@ -8,6 +8,7 @@ import ProductVariant from '../../models/superadmin-models/ProductVariant.js';
 import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
 import PurchaseBill from '../../models/superadmin-models/PurchaseBill.js';
 import User from '../../models/user/User.js';
+import BusinessProfile from '../../models/user/BusinessProfile.js';
 import OrderPayment from '../../models/user/OrderPayment.js';
 import DeliveryBoy from '../../models/superadmin-models/DeliveryBoy.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
@@ -78,7 +79,18 @@ export const getOrderReport = async (req, res, next) => {
         const orders = await Order.findAll({
             where,
             include: [
-                { model: User, as: 'user', attributes: ['id', 'fullname', 'number'] },
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['id', 'shopName']
+                        }
+                    ]
+                },
                 {
                     model: OrderItem,
                     as: 'items',
@@ -132,14 +144,20 @@ export const getOrderReport = async (req, res, next) => {
             grandProfit += profit;
             grandTotalAmount += totalAmount;
 
+            const shopName = o.user?.businessProfile?.shopName;
+            const customerDisplay = shopName 
+                ? `${o.user?.fullname || o.customerName || 'Unknown'} (${shopName})` 
+                : (o.user?.fullname || o.customerName || 'Unknown');
+
             return {
                 'Order ID': o.orderId,
-                'Customer': o.user?.fullname || o.customerName || 'Unknown',
+                'Customer': customerDisplay,
                 'Phone': o.user?.number || o.customerNumber || '-',
                 'Purchase': purchase.toFixed(2),
                 'Sales': sales.toFixed(2),
                 'Profit': profit.toFixed(2),
                 'Total Amount': totalAmount.toFixed(2),
+                'Payment Method': o.paymentMethod || '-',
                 'Status': o.orderStatus,
                 'Date': (status === 'Delivered' ? (o.deliveredAt || o.updatedAt || o.createdAt) : (status === 'Cancelled' ? (o.updatedAt || o.createdAt) : o.createdAt)).toLocaleDateString()
             };
@@ -154,6 +172,7 @@ export const getOrderReport = async (req, res, next) => {
                 'Sales': grandSales.toFixed(2),
                 'Profit': grandProfit.toFixed(2),
                 'Total Amount': grandTotalAmount.toFixed(2),
+                'Payment Method': '',
                 'Status': '',
                 'Date': ''
             });
