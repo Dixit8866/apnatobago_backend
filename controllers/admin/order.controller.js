@@ -611,10 +611,33 @@ export const updateOrderStatus = async (req, res) => {
                 order.deliveredAt = null;
             } else {
                 order.orderStatus = orderStatus;
-                if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(orderStatus)) {
-                    order.deliveredAt = order.deliveredAt || new Date();
-                } else {
+                
+                // Track timestamps for fulfillment milestones and clear downstream steps on reversion
+                if (orderStatus === 'Pending') {
+                    order.packagingAt = null;
+                    order.packedAt = null;
+                    order.shippingAt = null;
                     order.deliveredAt = null;
+                } else if (orderStatus === 'Packaging') {
+                    order.packagingAt = order.packagingAt || new Date();
+                    order.packedAt = null;
+                    order.shippingAt = null;
+                    order.deliveredAt = null;
+                } else if (orderStatus === 'Packed') {
+                    order.packagingAt = order.packagingAt || new Date();
+                    order.packedAt = order.packedAt || new Date();
+                    order.shippingAt = null;
+                    order.deliveredAt = null;
+                } else if (orderStatus === 'Shipping') {
+                    order.packagingAt = order.packagingAt || new Date();
+                    order.packedAt = order.packedAt || new Date();
+                    order.shippingAt = order.shippingAt || new Date();
+                    order.deliveredAt = null;
+                } else if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(orderStatus)) {
+                    order.packagingAt = order.packagingAt || new Date();
+                    order.packedAt = order.packedAt || new Date();
+                    order.shippingAt = order.shippingAt || new Date();
+                    order.deliveredAt = order.deliveredAt || new Date();
                 }
             }
 
@@ -801,10 +824,31 @@ export const bulkUpdateOrderStatus = async (req, res) => {
         if (orderStatus === 'Cancelled' || orderStatus === 'Admin Cancel') {
             updateFields.dueAmount = 0;
             updateFields.deliveredAt = null;
-        } else if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(orderStatus)) {
-            updateFields.deliveredAt = new Date();
-        } else {
+        } else if (orderStatus === 'Pending') {
+            updateFields.packagingAt = null;
+            updateFields.packedAt = null;
+            updateFields.shippingAt = null;
             updateFields.deliveredAt = null;
+        } else if (orderStatus === 'Packaging') {
+            updateFields.packagingAt = new Date();
+            updateFields.packedAt = null;
+            updateFields.shippingAt = null;
+            updateFields.deliveredAt = null;
+        } else if (orderStatus === 'Packed') {
+            updateFields.packagingAt = Order.sequelize.literal('COALESCE("packagingAt", NOW())');
+            updateFields.packedAt = new Date();
+            updateFields.shippingAt = null;
+            updateFields.deliveredAt = null;
+        } else if (orderStatus === 'Shipping') {
+            updateFields.packagingAt = Order.sequelize.literal('COALESCE("packagingAt", NOW())');
+            updateFields.packedAt = Order.sequelize.literal('COALESCE("packedAt", NOW())');
+            updateFields.shippingAt = new Date();
+            updateFields.deliveredAt = null;
+        } else if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(orderStatus)) {
+            updateFields.packagingAt = Order.sequelize.literal('COALESCE("packagingAt", NOW())');
+            updateFields.packedAt = Order.sequelize.literal('COALESCE("packedAt", NOW())');
+            updateFields.shippingAt = Order.sequelize.literal('COALESCE("shippingAt", NOW())');
+            updateFields.deliveredAt = new Date();
         }
 
         await Order.update(

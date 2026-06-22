@@ -111,6 +111,18 @@ const Order = sequelize.define(
             type: DataTypes.DATE,
             allowNull: true,
         },
+        packagingAt: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        packedAt: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        shippingAt: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
         routeCategoryId: {
             type: DataTypes.UUID,
             allowNull: true,
