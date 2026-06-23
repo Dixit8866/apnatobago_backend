@@ -15,6 +15,14 @@ const BankSetting = sequelize.define('BankSetting', {
         type: DataTypes.STRING,
         allowNull: false,
     },
+    accountNumber: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    ifscCode: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     image: {
         type: DataTypes.STRING,
         allowNull: true,

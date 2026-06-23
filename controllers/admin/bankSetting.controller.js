@@ -8,7 +8,7 @@ import sequelize from '../../config/db.js';
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, image, status } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, image, status } = req.body;
 
         if (!bankName || !bankName.trim()) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank Name is required. (બેંકનું નામ જરૂરી છે.)");
@@ -40,6 +40,8 @@ export const createBankSetting = async (req, res, next) => {
         const bankSetting = await BankSetting.create({
             bankName: normalizedBankName,
             accountName: normalizedAccountName,
+            accountNumber: accountNumber ? accountNumber.trim() : null,
+            ifscCode: ifscCode ? ifscCode.trim() : null,
             image: image || null,
             status: status || 'Active'
         });
@@ -129,7 +131,7 @@ export const getBankSettingById = async (req, res, next) => {
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
 export const updateBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, image, status } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, image, status } = req.body;
         const bankSetting = await BankSetting.findByPk(req.params.id);
         if (!bankSetting) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Bank Setting not found.");
@@ -166,6 +168,14 @@ export const updateBankSetting = async (req, res, next) => {
 
             bankSetting.bankName = currentBankName;
             bankSetting.accountName = currentAccountName;
+        }
+
+        if (accountNumber !== undefined) {
+            bankSetting.accountNumber = accountNumber ? accountNumber.trim() : null;
+        }
+
+        if (ifscCode !== undefined) {
+            bankSetting.ifscCode = ifscCode ? ifscCode.trim() : null;
         }
 
         if (image !== undefined) {
