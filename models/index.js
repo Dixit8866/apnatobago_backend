@@ -37,6 +37,7 @@ import HelpSupport from './user/HelpSupport.js';
 import OrderPayment from './user/OrderPayment.js';
 import SalesReturn from './superadmin-models/SalesReturn.js';
 import RouteCategory from './superadmin-models/RouteCategory.js';
+import BankSetting from './superadmin-models/BankSetting.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -402,5 +403,6 @@ export {
     OrderPayment,
     SalesReturn,
     RouteCategory,
+    BankSetting,
     runManualMigrations
 };

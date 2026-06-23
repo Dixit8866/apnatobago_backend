@@ -28,6 +28,7 @@ import helpSupportRoutes from './helpSupport.routes.js';
 import customSaleRoutes from './custom-sale.routes.js';
 import reportRoutes from './report.routes.js';
 import routeCategoryRoutes from './routeCategory.routes.js';
+import bankSettingRoutes from './bankSetting.routes.js';
 
 const router = express.Router();
 
@@ -60,5 +61,6 @@ router.use('/help-support', helpSupportRoutes);
 router.use('/custom-sales', customSaleRoutes);
 router.use('/reports', reportRoutes);
 router.use('/route-categories', routeCategoryRoutes);
+router.use('/bank-settings', bankSettingRoutes);
 
 export default router;
