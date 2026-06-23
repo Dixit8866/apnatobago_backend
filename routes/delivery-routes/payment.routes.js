@@ -3,7 +3,8 @@ import {
     initializeRazorpayOrder, 
     verifyRazorpayPayment, 
     getCollectedPayments, 
-    getSubmittedPayments 
+    getSubmittedPayments,
+    getDeliveryBoyBankDetails
 } from '../../controllers/delivery/payment.controller.js';
 import { protectDeliveryBoy } from '../../middlewares/auth.middleware.js';
 
@@ -20,5 +21,8 @@ router.get('/collected', getCollectedPayments);
 
 // GET /api/delivery/payments/submitted - Get detailed breakdown of submitted payments today
 router.get('/submitted', getSubmittedPayments);
+
+// GET /api/delivery/payments/bank-details - Get assigned bank settings/details for a delivery boy
+router.get('/bank-details', getDeliveryBoyBankDetails);
 
 export default router;

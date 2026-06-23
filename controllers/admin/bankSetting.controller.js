@@ -1,4 +1,5 @@
 import BankSetting from '../../models/superadmin-models/BankSetting.js';
+import DeliveryBoy from '../../models/superadmin-models/DeliveryBoy.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -8,7 +9,7 @@ import sequelize from '../../config/db.js';
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, accountNumber, ifscCode, image, status } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status } = req.body;
 
         if (!bankName || !bankName.trim()) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank Name is required. (બેંકનું નામ જરૂરી છે.)");
@@ -42,6 +43,7 @@ export const createBankSetting = async (req, res, next) => {
             accountName: normalizedAccountName,
             accountNumber: accountNumber ? accountNumber.trim() : null,
             ifscCode: ifscCode ? ifscCode.trim() : null,
+            deliveryBoyId: deliveryBoyId || null,
             image: image || null,
             status: status || 'Active'
         });
@@ -87,6 +89,13 @@ export const getBankSettings = async (req, res, next) => {
         if (req.query.paginate === 'false') {
             const bankSettings = await BankSetting.findAll({
                 where: whereClause,
+                include: [
+                    {
+                        model: DeliveryBoy,
+                        as: 'deliveryBoy',
+                        attributes: ['id', 'name', 'phone']
+                    }
+                ],
                 order: [['createdAt', 'DESC']]
             });
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank Settings fetched successfully.", { categories: bankSettings, statusCounts });
@@ -97,6 +106,13 @@ export const getBankSettings = async (req, res, next) => {
 
         const result = await BankSetting.findAndCountAll({
             where: whereClause,
+            include: [
+                {
+                    model: DeliveryBoy,
+                    as: 'deliveryBoy',
+                    attributes: ['id', 'name', 'phone']
+                }
+            ],
             limit,
             offset,
             order: [['createdAt', 'DESC']]
@@ -104,8 +120,7 @@ export const getBankSettings = async (req, res, next) => {
 
         const responseData = formatPaginatedResponse(result, page, limit);
 
-        // Note: For DataPageLayout compatibility, the paginated array is usually inside rows.
-        // We've wrapped it in responseData via formatPaginatedResponse, but let's make sure it matches.
+        // Note: For DataPageLayout compatibility, the paginated array is usually inside data.
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank Settings fetched successfully.", {
             ...responseData,
             statusCounts,
@@ -118,7 +133,15 @@ export const getBankSettings = async (req, res, next) => {
 // ─── GET BY ID ───────────────────────────────────────────────────────────────
 export const getBankSettingById = async (req, res, next) => {
     try {
-        const bankSetting = await BankSetting.findByPk(req.params.id);
+        const bankSetting = await BankSetting.findByPk(req.params.id, {
+            include: [
+                {
+                    model: DeliveryBoy,
+                    as: 'deliveryBoy',
+                    attributes: ['id', 'name', 'phone']
+                }
+            ]
+        });
         if (!bankSetting) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Bank Setting not found.");
         }
@@ -131,7 +154,7 @@ export const getBankSettingById = async (req, res, next) => {
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
 export const updateBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, accountNumber, ifscCode, image, status } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status } = req.body;
         const bankSetting = await BankSetting.findByPk(req.params.id);
         if (!bankSetting) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Bank Setting not found.");
@@ -176,6 +199,10 @@ export const updateBankSetting = async (req, res, next) => {
 
         if (ifscCode !== undefined) {
             bankSetting.ifscCode = ifscCode ? ifscCode.trim() : null;
+        }
+
+        if (deliveryBoyId !== undefined) {
+            bankSetting.deliveryBoyId = deliveryBoyId || null;
         }
 
         if (image !== undefined) {

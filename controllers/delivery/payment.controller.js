@@ -1,4 +1,4 @@
-import { Order, AppSettings, OrderPayment, User, BusinessProfile } from '../../models/index.js';
+import { Order, AppSettings, OrderPayment, User, BusinessProfile, BankSetting } from '../../models/index.js';
 import { restoreUserCreditFromPayment } from './order.controller.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -623,6 +623,35 @@ export const getSubmittedPayments = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Submitted payments fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Delivery Submitted Payments Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get assigned bank settings/details for a delivery boy (using authenticated id or request parameter query)
+ * @route   GET /api/delivery/payments/bank-details
+ * @access  Private (Delivery Boy Only)
+ */
+export const getDeliveryBoyBankDetails = async (req, res) => {
+    try {
+        const deliveryBoyId = req.query.deliveryBoyId || req.user.id;
+        logger.info(`[Delivery Bank Details]: Fetching bank details for delivery boy ID: ${deliveryBoyId}`);
+
+        if (!deliveryBoyId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Delivery boy ID is required.");
+        }
+
+        const bankDetails = await BankSetting.findAll({
+            where: {
+                deliveryBoyId,
+                status: 'Active'
+            },
+            order: [['createdAt', 'DESC']]
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank details fetched successfully.", bankDetails);
+    } catch (error) {
+        logger.error(`[Delivery Get Bank Details Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

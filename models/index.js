@@ -193,6 +193,10 @@ OrderAssignment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 DeliveryBoy.hasMany(OrderAssignment, { foreignKey: 'deliveryBoyId', as: 'assignments' });
 OrderAssignment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
 
+// BankSetting Associations
+DeliveryBoy.hasMany(BankSetting, { foreignKey: 'deliveryBoyId', as: 'bankSettings' });
+BankSetting.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
+
 Product.belongsTo(Product, { foreignKey: 'comboProduct1Id', as: 'comboProduct1' });
 Product.belongsTo(Product, { foreignKey: 'comboProduct2Id', as: 'comboProduct2' });
 
@@ -362,6 +366,7 @@ const runManualMigrations = async () => {
         try {
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "accountNumber" VARCHAR(255)');
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "ifscCode" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID REFERENCES delivery_boys(id) ON DELETE SET NULL');
         } catch (e) { console.log('[Migration Warning] Bank settings columns failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');
