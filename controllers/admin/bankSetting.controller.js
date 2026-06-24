@@ -9,7 +9,7 @@ import sequelize from '../../config/db.js';
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status, openingBalance, branchName } = req.body;
 
         if (!bankName || !bankName.trim()) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank Name is required. (બેંકનું નામ જરૂરી છે.)");
@@ -45,7 +45,9 @@ export const createBankSetting = async (req, res, next) => {
             ifscCode: ifscCode ? ifscCode.trim() : null,
             deliveryBoyId: deliveryBoyId || null,
             image: image || null,
-            status: status || 'Active'
+            status: status || 'Active',
+            openingBalance: openingBalance !== undefined && openingBalance !== null ? parseFloat(openingBalance) : 0.00,
+            branchName: branchName ? branchName.trim() : null
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Bank Setting created successfully.", bankSetting);
@@ -154,7 +156,7 @@ export const getBankSettingById = async (req, res, next) => {
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
 export const updateBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status, openingBalance, branchName } = req.body;
         const bankSetting = await BankSetting.findByPk(req.params.id);
         if (!bankSetting) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Bank Setting not found.");
@@ -207,6 +209,14 @@ export const updateBankSetting = async (req, res, next) => {
 
         if (image !== undefined) {
             bankSetting.image = image;
+        }
+
+        if (openingBalance !== undefined) {
+            bankSetting.openingBalance = openingBalance !== null ? parseFloat(openingBalance) : 0.00;
+        }
+
+        if (branchName !== undefined) {
+            bankSetting.branchName = branchName ? branchName.trim() : null;
         }
 
         if (status) {

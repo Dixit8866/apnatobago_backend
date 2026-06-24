@@ -367,6 +367,8 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "accountNumber" VARCHAR(255)');
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "ifscCode" VARCHAR(255)');
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID REFERENCES delivery_boys(id) ON DELETE SET NULL');
+            await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "openingBalance" DECIMAL(15, 2) DEFAULT 0.00');
+            await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "branchName" VARCHAR(255)');
         } catch (e) { console.log('[Migration Warning] Bank settings columns failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');

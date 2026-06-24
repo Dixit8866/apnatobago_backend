@@ -31,6 +31,15 @@ const BankSetting = sequelize.define('BankSetting', {
         type: DataTypes.STRING,
         allowNull: true,
     },
+    openingBalance: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0.00,
+    },
+    branchName: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     status: {
         type: DataTypes.STRING,
         defaultValue: 'Active' // Active | Inactive | Deleted
