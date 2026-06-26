@@ -280,6 +280,12 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Users routeCategoryId column failed:', e.message); }
 
         try {
+            // Add deliveryRoundId and deliveryRoundTiming to users table
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deliveryRoundId" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deliveryRoundTiming" VARCHAR(255)');
+        } catch (e) { console.log('[Migration Warning] Users delivery round/timing columns failed:', e.message); }
+
+        try {
             // Add routeCategoryId to orders table
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "routeCategoryId" UUID REFERENCES route_categories(id) ON DELETE SET NULL');
         } catch (e) { console.log('[Migration Warning] Orders routeCategoryId column failed:', e.message); }

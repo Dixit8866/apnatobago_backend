@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile, RouteCategory } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -10,7 +10,7 @@ const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
 export const createUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId } = req.body;
 
         if (!fullname || !number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Fullname, number, and password are required.');
@@ -32,6 +32,21 @@ export const createUser = async (req, res, next) => {
             }
         }
 
+        let resolvedDeliveryRoundTiming = null;
+        if (deliveryRoundId && deliveryRoundId !== 'none') {
+            const settings = await AppSettings.findOne();
+            if (settings && Array.isArray(settings.deliveryRoundSchedules)) {
+                const normalizedSchedules = settings.deliveryRoundSchedules.map((round, index) => ({
+                    id: round.id || `round_${index + 1}`,
+                    ...round
+                }));
+                const matchedRound = normalizedSchedules.find(r => r.id === deliveryRoundId);
+                if (matchedRound) {
+                    resolvedDeliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                }
+            }
+        }
+
         const user = await User.create({
             fullname, email, dialcode: dialcode || '+91', number, city, postcode, password,
             showtabacco: showtabacco ?? false,
@@ -39,6 +54,8 @@ export const createUser = async (req, res, next) => {
             blockcredit: blockcredit ?? false,
             applevel: finalAppLevel || null,
             routeCategoryId: routeCategoryId || null,
+            deliveryRoundId: (deliveryRoundId === 'none' || !deliveryRoundId) ? null : deliveryRoundId,
+            deliveryRoundTiming: resolvedDeliveryRoundTiming,
             status: status || 'Active',
             kycverification: kycverification || 'pending',
             orderReminder: true,
@@ -180,13 +197,32 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
         if (number && number !== user.number) {
             const existing = await User.findOne({ where: { number } });
             if (existing) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Number already in use.');
+        }
+
+        let resolvedDeliveryRoundTiming = undefined;
+        if (deliveryRoundId !== undefined) {
+            if (deliveryRoundId === '' || deliveryRoundId === null || deliveryRoundId === 'none') {
+                resolvedDeliveryRoundTiming = null;
+            } else {
+                const settings = await AppSettings.findOne();
+                if (settings && Array.isArray(settings.deliveryRoundSchedules)) {
+                    const normalizedSchedules = settings.deliveryRoundSchedules.map((round, index) => ({
+                        id: round.id || `round_${index + 1}`,
+                        ...round
+                    }));
+                    const matchedRound = normalizedSchedules.find(r => r.id === deliveryRoundId);
+                    if (matchedRound) {
+                        resolvedDeliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                    }
+                }
+            }
         }
 
         const updateData = {
@@ -201,6 +237,8 @@ export const updateUser = async (req, res, next) => {
             blockcredit: blockcredit !== undefined ? blockcredit : user.blockcredit,
             applevel: (applevel === '' || applevel === undefined) ? (applevel === '' ? null : user.applevel) : applevel,
             routeCategoryId: (routeCategoryId === '' || routeCategoryId === undefined) ? (routeCategoryId === '' ? null : user.routeCategoryId) : routeCategoryId,
+            deliveryRoundId: (deliveryRoundId === '' || deliveryRoundId === undefined || deliveryRoundId === 'none') ? (deliveryRoundId === 'none' || deliveryRoundId === '' ? null : user.deliveryRoundId) : deliveryRoundId,
+            deliveryRoundTiming: resolvedDeliveryRoundTiming !== undefined ? resolvedDeliveryRoundTiming : user.deliveryRoundTiming,
             status: status ?? user.status,
             kycverification: kycverification ?? user.kycverification,
         };

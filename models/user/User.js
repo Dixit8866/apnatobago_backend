@@ -90,6 +90,14 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(15, 10),
         allowNull: true,
     },
+    deliveryRoundId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    deliveryRoundTiming: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     deviceType: {
         type: DataTypes.STRING,
         allowNull: true,
