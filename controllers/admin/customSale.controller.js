@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, User, Volume, Godown, InventoryStock, InventoryTransaction, ProductPricing, AppSettings } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, InventoryStock, InventoryTransaction, AppSettings } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -83,11 +83,17 @@ export const createCustomSale = async (req, res) => {
                 price: itemPrice,
                 sellUnit,
                 variantInfo: {
-                    productName: (variant.product.name?.en || variant.product.name?.gu || variant.product.name?.HN || variant.product.name || 'Product'),
-                    volume: (variant.volumeRef?.name?.en || variant.volumeRef?.name?.gu || variant.volumeRef?.name?.HN || variant.volume || ''),
+                    productName: variant.product.name,
+                    volume: variant.volume,
+                    extra: variant.extra || '',
+                    extraName: variant.extra || '',
                     image: variant.image || variant.product.thumbnail,
-                    innerUnitLabel: variant.innerUnitRef?.name?.en || variant.innerUnitRef?.name?.gu || 'Pcs',
-                    baseUnitLabel: variant.baseUnitRef?.name?.en || variant.baseUnitRef?.name?.gu || 'Pack',
+                    innerUnitLabel: variant.innerUnitRef?.name
+                        ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel)
+                        : variant.innerUnitLabel || 'Pcs',
+                    baseUnitLabel: variant.baseUnitRef?.name
+                        ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
+                        : variant.baseUnitLabel || 'Pack',
                     sellingVolume: variant.sellingVolume,
                     baseUnitsPerPack: variant.baseUnitsPerPack || 1
                 }
