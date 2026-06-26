@@ -1,12 +1,12 @@
 import sequelize from './config/db.js';
+// Enable logging on the shared sequelize instance
+sequelize.options.logging = console.log;
+
 import { OrderPayment, Order, User, DeliveryBoy, BankSetting } from './models/index.js';
 
 async function testQuery() {
   try {
-    await sequelize.authenticate();
-    console.log('Database connected successfully.');
-
-    console.log('Running OrderPayment.findAndCountAll query...');
+    console.log('Running OrderPayment.findAndCountAll query with SQL logging on the cached instance...');
     const result = await OrderPayment.findAndCountAll({
         where: {},
         include: [
@@ -40,22 +40,7 @@ async function testQuery() {
         distinct: true
     });
 
-    console.log('Query executed successfully!');
-    console.log('Total records:', result.count);
-    console.log('Sample rows:', result.rows.length);
-
-    console.log('Running counts query...');
-    const [cashCount, onlineCount, creditCount, submittedCount, pendingSubmitCount, razorpayCount, bankAccountCount] = await Promise.all([
-        OrderPayment.count({ where: { paymentMethod: 'CASH' } }),
-        OrderPayment.count({ where: { paymentMethod: 'ONLINE' } }),
-        OrderPayment.count({ where: { paymentMethod: 'CREDIT' } }),
-        OrderPayment.count({ where: { isSubmitted: true } }),
-        OrderPayment.count({ where: { isSubmitted: false } }),
-        OrderPayment.count({ where: { paymentMethod: 'ONLINE', onlineType: 'Razorpay' } }),
-        OrderPayment.count({ where: { paymentMethod: 'ONLINE', onlineType: 'Bank Account' } })
-    ]);
-    console.log('Counts:', { cashCount, onlineCount, creditCount, submittedCount, pendingSubmitCount, razorpayCount, bankAccountCount });
-
+    console.log('Query finished.');
   } catch (err) {
     console.error('Error during query test:', err);
   } finally {

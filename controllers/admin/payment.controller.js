@@ -103,6 +103,7 @@ export const getAllPayments = async (req, res) => {
 
         responseData.statusCounts = {
             '': responseData.totalRecords, // All payments count
+            All: responseData.totalRecords, // Support 'All' tab key
             CASH: cashCount,
             ONLINE: onlineCount,
             CREDIT: creditCount,
