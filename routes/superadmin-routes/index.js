@@ -30,6 +30,7 @@ import reportRoutes from './report.routes.js';
 import routeCategoryRoutes from './routeCategory.routes.js';
 import bankSettingRoutes from './bankSetting.routes.js';
 import partyCallingRoutes from './partyCalling.routes.js';
+import paymentRoutes from './payment.routes.js';
 
 const router = express.Router();
 
@@ -64,5 +65,6 @@ router.use('/reports', reportRoutes);
 router.use('/route-categories', routeCategoryRoutes);
 router.use('/bank-settings', bankSettingRoutes);
 router.use('/party-calling', partyCallingRoutes);
+router.use('/payments', paymentRoutes);
 
 export default router;
