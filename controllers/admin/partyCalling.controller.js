@@ -11,22 +11,22 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
  */
 export const getDailyPartyCalls = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming } = req.query;
+        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
         
         const limitVal = parseInt(limit, 10) || 50;
         const pageVal = parseInt(page, 10) || 1;
 
-        // Get current date string in India timezone (YYYY-MM-DD)
-        const todayDateStr = new Intl.DateTimeFormat('en-CA', {
+        // Get date string in India timezone (YYYY-MM-DD). If date is provided, use it.
+        const callingDateStr = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Intl.DateTimeFormat('en-CA', {
             timeZone: 'Asia/Kolkata',
             year: 'numeric',
             month: '2-digit',
             day: '2-digit'
         }).format(new Date());
 
-        // Calculate start and end of today in India timezone (GMT+5:30)
-        const todayStart = new Date(`${todayDateStr}T00:00:00+05:30`);
-        const todayEnd = new Date(`${todayDateStr}T23:59:59.999+05:30`);
+        // Calculate start and end of selected date in India timezone (GMT+5:30)
+        const todayStart = new Date(`${callingDateStr}T00:00:00+05:30`);
+        const todayEnd = new Date(`${callingDateStr}T23:59:59.999+05:30`);
 
         // Build base search criteria
         const userWhere = {
@@ -71,7 +71,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
             {
                 model: PartyCalling,
                 as: 'calls',
-                where: { callingDate: todayDateStr },
+                where: { callingDate: callingDateStr },
                 required: false
             },
             {
@@ -173,7 +173,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
             tabCounts,
             routeCounts,
             timingCounts,
-            today: todayDateStr
+            today: callingDateStr
         });
     } catch (error) {
         next(error);
