@@ -46,6 +46,22 @@ const OrderPayment = sequelize.define('OrderPayment', {
     submittedAt: {
         type: DataTypes.DATE,
         allowNull: true,
+    },
+    bankSettingId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+            model: 'bank_settings',
+            key: 'id'
+        }
+    },
+    screenshot: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    onlineType: {
+        type: DataTypes.STRING, // 'Razorpay' | 'Bank Account'
+        allowNull: true,
     }
 }, {
     timestamps: true,

@@ -201,6 +201,10 @@ OrderAssignment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliv
 DeliveryBoy.hasMany(BankSetting, { foreignKey: 'deliveryBoyId', as: 'bankSettings' });
 BankSetting.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
 
+// BankSetting -> OrderPayment Associations
+BankSetting.hasMany(OrderPayment, { foreignKey: 'bankSettingId', as: 'payments' });
+OrderPayment.belongsTo(BankSetting, { foreignKey: 'bankSettingId', as: 'bankAccount' });
+
 Product.belongsTo(Product, { foreignKey: 'comboProduct1Id', as: 'comboProduct1' });
 Product.belongsTo(Product, { foreignKey: 'comboProduct2Id', as: 'comboProduct2' });
 
@@ -308,6 +312,15 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE party_callings ADD COLUMN IF NOT EXISTS "followupDateTime" TIMESTAMP WITH TIME ZONE');
         } catch (e) {
             console.log('[Migration Warning] party_callings table creation/update failed:', e.message);
+        }
+
+        try {
+            // Add bankSettingId, screenshot, and onlineType to order_payments table
+            await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "bankSettingId" UUID REFERENCES bank_settings(id) ON DELETE SET NULL ON UPDATE CASCADE');
+            await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "screenshot" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE order_payments ADD COLUMN IF NOT EXISTS "onlineType" VARCHAR(255)');
+        } catch (e) {
+            console.log('[Migration Warning] order_payments columns migration failed:', e.message);
         }
 
         try {

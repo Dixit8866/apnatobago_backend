@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { OrderPayment, Order, User, DeliveryBoy } from '../../models/index.js';
+import { OrderPayment, Order, User, DeliveryBoy, BankSetting } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -15,10 +15,18 @@ export const getAllPayments = async (req, res) => {
         const { status, search, date } = req.query;
         const where = {};
 
-        // Support tabs: CASH, ONLINE, CREDIT, Submitted, Pending
+        // Support tabs: CASH, ONLINE, CREDIT, Razorpay, Bank Account, Submitted, Pending
         if (status) {
-            if (status === 'CASH' || status === 'ONLINE' || status === 'CREDIT') {
+            if (status === 'CASH' || status === 'CREDIT') {
                 where.paymentMethod = status;
+            } else if (status === 'ONLINE') {
+                where.paymentMethod = 'ONLINE';
+            } else if (status === 'Razorpay') {
+                where.paymentMethod = 'ONLINE';
+                where.onlineType = 'Razorpay';
+            } else if (status === 'Bank Account') {
+                where.paymentMethod = 'ONLINE';
+                where.onlineType = 'Bank Account';
             } else if (status === 'Submitted') {
                 where.isSubmitted = true;
             } else if (status === 'Pending') {
@@ -66,6 +74,12 @@ export const getAllPayments = async (req, res) => {
                     model: DeliveryBoy,
                     as: 'deliveryBoy',
                     attributes: ['id', 'name', 'phone', 'vehicleNumber']
+                },
+                {
+                    model: BankSetting,
+                    as: 'bankAccount',
+                    attributes: ['id', 'bankName', 'accountName', 'accountNumber', 'branchName'],
+                    required: false
                 }
             ],
             limit,
@@ -75,12 +89,14 @@ export const getAllPayments = async (req, res) => {
         });
 
         // ── Calculate Status Counts for Tab Badges ──
-        const [cashCount, onlineCount, creditCount, submittedCount, pendingSubmitCount] = await Promise.all([
+        const [cashCount, onlineCount, creditCount, submittedCount, pendingSubmitCount, razorpayCount, bankAccountCount] = await Promise.all([
             OrderPayment.count({ where: { paymentMethod: 'CASH' } }),
             OrderPayment.count({ where: { paymentMethod: 'ONLINE' } }),
             OrderPayment.count({ where: { paymentMethod: 'CREDIT' } }),
             OrderPayment.count({ where: { isSubmitted: true } }),
-            OrderPayment.count({ where: { isSubmitted: false } })
+            OrderPayment.count({ where: { isSubmitted: false } }),
+            OrderPayment.count({ where: { paymentMethod: 'ONLINE', onlineType: 'Razorpay' } }),
+            OrderPayment.count({ where: { paymentMethod: 'ONLINE', onlineType: 'Bank Account' } })
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
@@ -91,7 +107,9 @@ export const getAllPayments = async (req, res) => {
             ONLINE: onlineCount,
             CREDIT: creditCount,
             Submitted: submittedCount,
-            Pending: pendingSubmitCount
+            Pending: pendingSubmitCount,
+            Razorpay: razorpayCount,
+            'Bank Account': bankAccountCount
         };
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payments fetched successfully.", responseData);
@@ -109,7 +127,7 @@ export const getAllPayments = async (req, res) => {
 export const updatePaymentSubmission = async (req, res) => {
     try {
         const { id } = req.params;
-        const { isSubmitted } = req.body;
+        const { isSubmitted, bankSettingId, screenshot, onlineType, transactionId, notes } = req.body;
 
         const payment = await OrderPayment.findByPk(id);
 
@@ -119,6 +137,12 @@ export const updatePaymentSubmission = async (req, res) => {
 
         payment.isSubmitted = isSubmitted !== undefined ? isSubmitted : true;
         payment.submittedAt = payment.isSubmitted ? new Date() : null;
+
+        if (bankSettingId !== undefined) payment.bankSettingId = bankSettingId || null;
+        if (screenshot !== undefined) payment.screenshot = screenshot || null;
+        if (onlineType !== undefined) payment.onlineType = onlineType || null;
+        if (transactionId !== undefined) payment.transactionId = transactionId || null;
+        if (notes !== undefined) payment.notes = notes || null;
 
         await payment.save();
 
