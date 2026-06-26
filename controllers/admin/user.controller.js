@@ -35,7 +35,8 @@ export const createUser = async (req, res, next) => {
         let resolvedDeliveryRoundTiming = null;
         if (deliveryRoundId && deliveryRoundId !== 'none') {
             const settings = await AppSettings.findOne();
-            if (settings && Array.isArray(settings.deliveryRoundSchedules)) {
+            let matched = false;
+            if (settings && Array.isArray(settings.deliveryRoundSchedules) && settings.deliveryRoundSchedules.length > 0) {
                 const normalizedSchedules = settings.deliveryRoundSchedules.map((round, index) => ({
                     id: round.id || `round_${index + 1}`,
                     ...round
@@ -43,6 +44,19 @@ export const createUser = async (req, res, next) => {
                 const matchedRound = normalizedSchedules.find(r => r.id === deliveryRoundId);
                 if (matchedRound) {
                     resolvedDeliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                    matched = true;
+                }
+            }
+            if (!matched) {
+                const morningStart = settings?.morningDeliveryStart || '08:00';
+                const morningEnd = settings?.morningDeliveryEnd || '13:00';
+                const eveningStart = settings?.eveningDeliveryStart || '15:00';
+                const eveningEnd = settings?.eveningDeliveryEnd || '17:00';
+
+                if (deliveryRoundId === 'morning_round_1') {
+                    resolvedDeliveryRoundTiming = `${morningStart} - ${morningEnd}`;
+                } else if (deliveryRoundId === 'evening_round_1') {
+                    resolvedDeliveryRoundTiming = `${eveningStart} - ${eveningEnd}`;
                 }
             }
         }
@@ -197,6 +211,7 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
     try {
+        console.log("[updateUser] Incoming request body:", req.body);
         const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
@@ -206,20 +221,40 @@ export const updateUser = async (req, res, next) => {
             if (existing) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Number already in use.');
         }
 
-        let resolvedDeliveryRoundTiming = undefined;
+        let finalDeliveryRoundId = undefined;
+        let finalDeliveryRoundTiming = undefined;
+
         if (deliveryRoundId !== undefined) {
             if (deliveryRoundId === '' || deliveryRoundId === null || deliveryRoundId === 'none') {
-                resolvedDeliveryRoundTiming = null;
+                finalDeliveryRoundId = null;
+                finalDeliveryRoundTiming = null;
             } else {
+                finalDeliveryRoundId = deliveryRoundId;
                 const settings = await AppSettings.findOne();
-                if (settings && Array.isArray(settings.deliveryRoundSchedules)) {
+                let matched = false;
+                if (settings && Array.isArray(settings.deliveryRoundSchedules) && settings.deliveryRoundSchedules.length > 0) {
                     const normalizedSchedules = settings.deliveryRoundSchedules.map((round, index) => ({
                         id: round.id || `round_${index + 1}`,
                         ...round
                     }));
                     const matchedRound = normalizedSchedules.find(r => r.id === deliveryRoundId);
                     if (matchedRound) {
-                        resolvedDeliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                        finalDeliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                        matched = true;
+                    }
+                }
+                if (!matched) {
+                    const morningStart = settings?.morningDeliveryStart || '08:00';
+                    const morningEnd = settings?.morningDeliveryEnd || '13:00';
+                    const eveningStart = settings?.eveningDeliveryStart || '15:00';
+                    const eveningEnd = settings?.eveningDeliveryEnd || '17:00';
+
+                    if (deliveryRoundId === 'morning_round_1') {
+                        finalDeliveryRoundTiming = `${morningStart} - ${morningEnd}`;
+                    } else if (deliveryRoundId === 'evening_round_1') {
+                        finalDeliveryRoundTiming = `${eveningStart} - ${eveningEnd}`;
+                    } else {
+                        finalDeliveryRoundTiming = null;
                     }
                 }
             }
@@ -237,8 +272,8 @@ export const updateUser = async (req, res, next) => {
             blockcredit: blockcredit !== undefined ? blockcredit : user.blockcredit,
             applevel: (applevel === '' || applevel === undefined) ? (applevel === '' ? null : user.applevel) : applevel,
             routeCategoryId: (routeCategoryId === '' || routeCategoryId === undefined) ? (routeCategoryId === '' ? null : user.routeCategoryId) : routeCategoryId,
-            deliveryRoundId: (deliveryRoundId === '' || deliveryRoundId === undefined || deliveryRoundId === 'none') ? (deliveryRoundId === 'none' || deliveryRoundId === '' ? null : user.deliveryRoundId) : deliveryRoundId,
-            deliveryRoundTiming: resolvedDeliveryRoundTiming !== undefined ? resolvedDeliveryRoundTiming : user.deliveryRoundTiming,
+            deliveryRoundId: finalDeliveryRoundId !== undefined ? finalDeliveryRoundId : user.deliveryRoundId,
+            deliveryRoundTiming: finalDeliveryRoundTiming !== undefined ? finalDeliveryRoundTiming : user.deliveryRoundTiming,
             status: status ?? user.status,
             kycverification: kycverification ?? user.kycverification,
         };
