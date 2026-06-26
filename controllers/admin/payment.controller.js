@@ -12,7 +12,7 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
  */
 export const getAllPayments = async (req, res) => {
     try {
-        const { status, search, date } = req.query;
+        const { status, search, date, fromDate, toDate } = req.query;
         const where = {};
 
         // Support tabs: CASH, ONLINE, CREDIT, Razorpay, Bank Account, Submitted, Pending
@@ -34,7 +34,20 @@ export const getAllPayments = async (req, res) => {
             }
         }
 
-        if (date) {
+        if (fromDate || toDate) {
+            const dateFilter = {};
+            if (fromDate) {
+                const start = new Date(fromDate);
+                start.setHours(0, 0, 0, 0);
+                dateFilter[Op.gte] = start;
+            }
+            if (toDate) {
+                const end = new Date(toDate);
+                end.setHours(23, 59, 59, 999);
+                dateFilter[Op.lte] = end;
+            }
+            where.createdAt = dateFilter;
+        } else if (date) {
             const startOfDay = new Date(date);
             startOfDay.setHours(0, 0, 0, 0);
             const endOfDay = new Date(date);
