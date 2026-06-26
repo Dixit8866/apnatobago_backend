@@ -2051,9 +2051,17 @@ export const submitBankPayment = async (req, res) => {
         const { bankSettingId, screenshot, transactionId, amount } = req.body;
         const userId = req.user.id;
 
-        // 1. Find the order
+        // 1. Find the order (Support both UUID primary key and human-readable orderId e.g. '1006')
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        const orderWhere = { userId };
+        if (isUUID) {
+            orderWhere.id = id;
+        } else {
+            orderWhere.orderId = id;
+        }
+
         const order = await Order.findOne({
-            where: { id, userId }
+            where: orderWhere
         });
 
         if (!order) {
