@@ -1300,13 +1300,7 @@ export const submitDeliveryBankPayment = async (req, res) => {
             }
         }
 
-        // 4. Validate screenshot presence
-        if (!finalScreenshot) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Payment screenshot is required (either as a file upload or a string URL).");
-        }
-
-        // 5. Create the OrderPayment record
+        // 4. Create the OrderPayment record (Screenshot is optional)
         const paymentAmount = amount ? parseFloat(amount) : parseFloat(order.totalAmount);
         
         const payment = await OrderPayment.create({
@@ -1316,18 +1310,18 @@ export const submitDeliveryBankPayment = async (req, res) => {
             paymentMethod: 'ONLINE',
             onlineType: 'Bank Account',
             bankSettingId,
-            screenshot: finalScreenshot,
+            screenshot: finalScreenshot || null,
             transactionId: transactionId || null,
             isSubmitted: false, // Unverified, waits for admin approval in the admin panel
             notes: 'Submitted via Delivery Boy App'
         }, { transaction: t });
 
-        // 6. Find the active assignment and complete it
+        // 5. Find the active assignment and complete it
         const assignment = await OrderAssignment.findOne({
             where: {
                 orderId: order.id,
                 deliveryBoyId,
-                status: 'Active'
+                status: { [Op.in]: ['Pending', 'Assigned'] }
             },
             transaction: t
         });
