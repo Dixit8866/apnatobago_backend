@@ -152,6 +152,7 @@ export const createProduct = async (req, res, next) => {
             isCombo,
             comboProduct1Id,
             comboProduct2Id,
+            keywords,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -217,6 +218,7 @@ export const createProduct = async (req, res, next) => {
                 comboProduct1Id: comboProduct1Id || null,
                 comboProduct2Id: comboProduct2Id || null,
                 position: maxPos + 1,
+                keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : [],
             },
             { transaction: t }
         );
@@ -353,6 +355,7 @@ export const getProducts = async (req, res, next) => {
                         { 'name.HN': { [Op.iLike]: `%${term}%` } },
                         { 'name.GU': { [Op.iLike]: `%${term}%` } },
                         { 'name.EN': { [Op.iLike]: `%${term}%` } },
+                        sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape('%' + term + '%')})`)
                     ]
                 }))
             }
@@ -614,6 +617,7 @@ export const updateProduct = async (req, res, next) => {
             isCombo,
             comboProduct1Id,
             comboProduct2Id,
+            keywords,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -740,6 +744,7 @@ export const updateProduct = async (req, res, next) => {
                 isCombo: isCombo !== undefined ? isCombo : product.isCombo,
                 comboProduct1Id: comboProduct1Id !== undefined ? comboProduct1Id : product.comboProduct1Id,
                 comboProduct2Id: comboProduct2Id !== undefined ? comboProduct2Id : product.comboProduct2Id,
+                keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : (product.keywords || []),
             },
             { transaction: t }
         );

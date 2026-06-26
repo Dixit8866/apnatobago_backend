@@ -443,7 +443,8 @@ export const searchCatalogue = async (req, res) => {
         const productWhere = {
             status: 'Active',
             [Op.or]: [
-                sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${searchLower}%` })
+                sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${searchLower}%` }),
+                sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape('%' + searchLower + '%')})`)
             ]
         };
 

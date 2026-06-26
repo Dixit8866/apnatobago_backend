@@ -72,6 +72,11 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        keywords: {
+            type: DataTypes.ARRAY(DataTypes.STRING),
+            allowNull: false,
+            defaultValue: [],
+        },
     },
     {
         timestamps: true,

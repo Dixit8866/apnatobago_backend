@@ -325,6 +325,11 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Products combo columns failed:', e.message); }
 
         try {
+            // Add keywords array to products table if missing
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "keywords" VARCHAR(255)[] DEFAULT \'{}\'');
+        } catch (e) { console.log('[Migration Warning] Products keywords column failed:', e.message); }
+
+        try {
             // Add createdBy to inventory_transactions
             await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255) DEFAULT \'System\'');
         } catch (e) { console.log('[Migration Warning] Inventory transaction createdBy column failed:', e.message); }
