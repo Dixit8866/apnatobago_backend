@@ -98,7 +98,7 @@ export const createUser = async (req, res, next) => {
 
 export const getAllUsers = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId } = req.query;
+        const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId, deliveryRoundTiming } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
         const searchWhere = {};
@@ -112,6 +112,7 @@ export const getAllUsers = async (req, res, next) => {
         }
         if (kycverification) searchWhere.kycverification = kycverification;
         if (routeCategoryId) searchWhere.routeCategoryId = routeCategoryId;
+        if (deliveryRoundTiming) searchWhere.deliveryRoundTiming = deliveryRoundTiming;
 
         const where = { ...searchWhere };
         if (status) where.status = status;
@@ -160,12 +161,34 @@ export const getAllUsers = async (req, res, next) => {
             });
         }
 
+        // Calculate user counts by deliveryRoundTiming for the currently active tab status, search and KYC status filters
+        const timingCountWhere = { ...where };
+        delete timingCountWhere.deliveryRoundTiming;
+        timingCountWhere.deliveryRoundTiming = { [Op.ne]: null };
+
+        const timingCountsRaw = await User.count({
+            where: timingCountWhere,
+            include,
+            distinct: true,
+            group: ['deliveryRoundTiming']
+        });
+
+        const timingCounts = {};
+        if (Array.isArray(timingCountsRaw)) {
+            timingCountsRaw.forEach(r => {
+                const timing = r.deliveryRoundTiming;
+                if (timing) {
+                    timingCounts[timing] = parseInt(r.count || 0, 10);
+                }
+            });
+        }
+
         if (req.query.paginate === 'false') {
             const users = await User.findAll({ 
                 where, 
                 attributes: SAFE_ATTRIBUTES, 
                 include,
-                order: [['createdAt', 'DESC']] 
+                order: [['createdAt', 'DESC']]
             });
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'Users fetched.', users);
         }
@@ -185,7 +208,8 @@ export const getAllUsers = async (req, res, next) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Users fetched.', {
             ...responseData,
             statusCounts,
-            routeCounts
+            routeCounts,
+            timingCounts
         });
     } catch (error) {
         next(error);
