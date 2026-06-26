@@ -10,6 +10,7 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { sendToDevice } from '../../services/notification.service.js';
+import { uploadToS3 } from '../../utils/aws.s3.js';
 
 /**
  * Generate a unique human-readable Order ID
@@ -2059,16 +2060,30 @@ export const submitBankPayment = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        // 2. Validate inputs
-        if (!screenshot) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Payment screenshot is required.");
-        }
-
+        // 2. Validate bank account selection
         if (!bankSettingId) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank account selection is required.");
         }
 
-        // 3. Create the OrderPayment record
+        let finalScreenshot = screenshot || null;
+
+        // 3. Extract file if uploaded via multipart/form-data (req.files or req.file)
+        const file = req.files?.image?.[0] || req.files?.screenshot?.[0] || req.file;
+        if (file) {
+            const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
+            if (uploadResult.success) {
+                finalScreenshot = uploadResult.url;
+            } else {
+                return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to upload payment screenshot to S3.");
+            }
+        }
+
+        // 4. Validate screenshot presence
+        if (!finalScreenshot) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Payment screenshot is required (either as a file upload or a string URL).");
+        }
+
+        // 5. Create the OrderPayment record
         const paymentAmount = amount ? parseFloat(amount) : parseFloat(order.totalAmount);
         
         const payment = await OrderPayment.create({
@@ -2077,7 +2092,7 @@ export const submitBankPayment = async (req, res) => {
             paymentMethod: 'ONLINE',
             onlineType: 'Bank Account',
             bankSettingId,
-            screenshot,
+            screenshot: finalScreenshot,
             transactionId: transactionId || null,
             isSubmitted: false, // Unverified, waits for admin approval in the admin panel
             notes: 'Submitted via Customer App'
