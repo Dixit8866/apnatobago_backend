@@ -1,4 +1,3 @@
-import express from 'express';
 import { 
     createOrder, 
     getOrders, 
@@ -8,7 +7,8 @@ import {
     updateOrder,
     getOrdersWithPaymentStatus,
     initializeRazorpayOrder,
-    verifyRazorpayPayment
+    verifyRazorpayPayment,
+    submitBankPayment
 } from '../../controllers/user/order.controller.js';
 import { protectUser } from '../../middlewares/userAuth.middleware.js';
 
@@ -28,5 +28,8 @@ router.put('/:id/cancel', cancelOrder);
 // Razorpay Payments
 router.post('/razorpay/initialize', initializeRazorpayOrder);
 router.post('/razorpay/verify', verifyRazorpayPayment);
+
+// Direct Bank Transfer Payment
+router.post('/:id/bank-payment', submitBankPayment);
 
 export default router;

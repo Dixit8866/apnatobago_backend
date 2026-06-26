@@ -2038,3 +2038,54 @@ export const updateOrder = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * @desc    Submit bank payment proof (screenshot) for an order
+ * @route   POST /api/user/orders/:id/bank-payment
+ * @access  Private (User)
+ */
+export const submitBankPayment = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { bankSettingId, screenshot, transactionId, amount } = req.body;
+        const userId = req.user.id;
+
+        // 1. Find the order
+        const order = await Order.findOne({
+            where: { id, userId }
+        });
+
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        // 2. Validate inputs
+        if (!screenshot) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Payment screenshot is required.");
+        }
+
+        if (!bankSettingId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank account selection is required.");
+        }
+
+        // 3. Create the OrderPayment record
+        const paymentAmount = amount ? parseFloat(amount) : parseFloat(order.totalAmount);
+        
+        const payment = await OrderPayment.create({
+            orderId: order.id,
+            amount: paymentAmount,
+            paymentMethod: 'ONLINE',
+            onlineType: 'Bank Account',
+            bankSettingId,
+            screenshot,
+            transactionId: transactionId || null,
+            isSubmitted: false, // Unverified, waits for admin approval in the admin panel
+            notes: 'Submitted via Customer App'
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Payment proof submitted successfully. Waiting for admin verification.", payment);
+    } catch (error) {
+        logger.error(`[User Submit Bank Payment Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
