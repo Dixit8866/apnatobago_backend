@@ -9,6 +9,7 @@ const router = express.Router();
 
 router.use('/auth', authRoutes);
 router.use('/orders', orderRoutes);
+router.use('/user/orders', orderRoutes); // Support Flutter team's custom concatenated path
 router.use('/payments', paymentRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/users', userRoutes);

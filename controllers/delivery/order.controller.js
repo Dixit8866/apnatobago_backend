@@ -7,6 +7,7 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import { getTodayRangeIST } from './dashboard.controller.js';
+import { uploadToS3 } from '../../utils/aws.s3.js';
 
 const sendDeliveredNotification = async (orderId) => {
     try {
@@ -1245,5 +1246,115 @@ export const restoreUserCreditFromPayment = async (orderId, paymentAmount, user,
         }
     } catch (error) {
         logger.error(`[Restore Credit Error]: ${error.message}`);
+    }
+};
+
+/**
+ * @desc    Delivery boy submits bank payment proof (screenshot) for an order
+ * @route   POST /api/delivery/user/orders/:id/bank-payment
+ * @access  Private (Delivery Boy)
+ */
+export const submitDeliveryBankPayment = async (req, res) => {
+    const t = await OrderAssignment.sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const { bankSettingId, screenshot, transactionId, amount } = req.body;
+        const deliveryBoyId = req.user.id; // Authenticated delivery boy
+
+        // 1. Find the order (Support both UUID primary key and human-readable orderId e.g. '1006')
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        const orderWhere = {};
+        if (isUUID) {
+            orderWhere.id = id;
+        } else {
+            orderWhere.orderId = id;
+        }
+
+        const order = await Order.findOne({
+            where: orderWhere,
+            transaction: t
+        });
+
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        // 2. Validate bank account selection
+        if (!bankSettingId) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank account selection is required.");
+        }
+
+        let finalScreenshot = screenshot || null;
+
+        // 3. Extract file if uploaded via multipart/form-data (req.files or req.file)
+        const file = req.files?.image?.[0] || req.files?.screenshot?.[0] || req.file;
+        if (file) {
+            const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
+            if (uploadResult.success) {
+                finalScreenshot = uploadResult.url;
+            } else {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to upload payment screenshot to S3.");
+            }
+        }
+
+        // 4. Validate screenshot presence
+        if (!finalScreenshot) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Payment screenshot is required (either as a file upload or a string URL).");
+        }
+
+        // 5. Create the OrderPayment record
+        const paymentAmount = amount ? parseFloat(amount) : parseFloat(order.totalAmount);
+        
+        const payment = await OrderPayment.create({
+            orderId: order.id,
+            deliveryBoyId,
+            amount: paymentAmount,
+            paymentMethod: 'ONLINE',
+            onlineType: 'Bank Account',
+            bankSettingId,
+            screenshot: finalScreenshot,
+            transactionId: transactionId || null,
+            isSubmitted: false, // Unverified, waits for admin approval in the admin panel
+            notes: 'Submitted via Delivery Boy App'
+        }, { transaction: t });
+
+        // 6. Find the active assignment and complete it
+        const assignment = await OrderAssignment.findOne({
+            where: {
+                orderId: order.id,
+                deliveryBoyId,
+                status: 'Active'
+            },
+            transaction: t
+        });
+
+        if (assignment) {
+            await assignment.update({
+                status: 'Completed',
+                notes: 'Settled via Direct Bank Transfer in Delivery Boy App'
+            }, { transaction: t });
+        }
+
+        // 7. Settle/Update the Order status to 'Payment Verify' since payment proof is submitted and needs verification
+        // Also set deliveredAt since the order has been delivered
+        await order.update({
+            orderStatus: 'Payment Verify',
+            deliveredAt: new Date()
+        }, { transaction: t });
+
+        await t.commit();
+
+        // 8. Trigger Delivered Push Notification
+        await sendDeliveredNotification(order.id);
+
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Payment proof submitted and order settled successfully. Waiting for admin verification.", payment);
+    } catch (error) {
+        if (t) await t.rollback();
+        logger.error(`[Delivery Submit Bank Payment Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

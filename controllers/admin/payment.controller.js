@@ -139,18 +139,23 @@ export const getAllPayments = async (req, res) => {
  * @access  Private (Admin)
  */
 export const updatePaymentSubmission = async (req, res) => {
+    const t = await OrderPayment.sequelize.transaction();
     try {
         const { id } = req.params;
         const { isSubmitted, bankSettingId, screenshot, onlineType, transactionId, notes } = req.body;
 
-        const payment = await OrderPayment.findByPk(id);
+        const payment = await OrderPayment.findByPk(id, { transaction: t });
 
         if (!payment) {
+            await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Payment transaction not found.");
         }
 
-        payment.isSubmitted = isSubmitted !== undefined ? isSubmitted : true;
-        payment.submittedAt = payment.isSubmitted ? new Date() : null;
+        const wasSubmitted = payment.isSubmitted;
+        const willBeSubmitted = isSubmitted !== undefined ? isSubmitted : true;
+
+        payment.isSubmitted = willBeSubmitted;
+        payment.submittedAt = willBeSubmitted ? new Date() : null;
 
         if (bankSettingId !== undefined) payment.bankSettingId = bankSettingId || null;
         if (screenshot !== undefined) payment.screenshot = screenshot || null;
@@ -158,10 +163,53 @@ export const updatePaymentSubmission = async (req, res) => {
         if (transactionId !== undefined) payment.transactionId = transactionId || null;
         if (notes !== undefined) payment.notes = notes || null;
 
-        await payment.save();
+        await payment.save({ transaction: t });
 
+        // If the payment is being verified now (transitioning from unverified to verified)
+        if (willBeSubmitted && !wasSubmitted) {
+            const order = await Order.findByPk(payment.orderId, { transaction: t });
+            if (order) {
+                const paymentAmt = parseFloat(payment.amount);
+                
+                // Deduct from order dueAmount and add to paidAmount
+                const currentDue = parseFloat(order.dueAmount);
+                const currentPaid = parseFloat(order.paidAmount);
+                
+                const newDue = Math.max(0, currentDue - paymentAmt);
+                const newPaid = currentPaid + Math.min(currentDue, paymentAmt);
+                
+                const paymentStatus = newDue <= 1e-7 ? 'Paid' : 'Pending';
+                
+                // If the order status is 'Payment Verify', update it
+                let orderStatus = order.orderStatus;
+                if (orderStatus === 'Payment Verify') {
+                    orderStatus = newDue <= 1e-7 ? 'Delivered' : 'Payment Collect';
+                }
+
+                await order.update({
+                    dueAmount: newDue,
+                    paidAmount: newPaid,
+                    paymentStatus,
+                    orderStatus
+                }, { transaction: t });
+
+                // Restore user credit if any credit was used for this order
+                if (order.userId) {
+                    const user = await User.findByPk(order.userId, { transaction: t });
+                    if (user) {
+                        // Dynamically import restoreUserCreditFromPayment to avoid circular dependencies
+                        const { restoreUserCreditFromPayment } = await import('../delivery/order.controller.js');
+                        await restoreUserCreditFromPayment(order.id, paymentAmt, user, t);
+                        await user.save({ transaction: t });
+                    }
+                }
+            }
+        }
+
+        await t.commit();
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment submission status updated successfully.", payment);
     } catch (error) {
+        if (t) await t.rollback();
         logger.error(`[Admin Update Payment Submission Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
