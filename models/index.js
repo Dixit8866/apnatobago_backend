@@ -304,8 +304,10 @@ const runManualMigrations = async () => {
                     CONSTRAINT unique_user_date UNIQUE ("userId", "callingDate")
                 )
             `);
+            // Add followupDateTime column if missing
+            await sequelize.query('ALTER TABLE party_callings ADD COLUMN IF NOT EXISTS "followupDateTime" TIMESTAMP WITH TIME ZONE');
         } catch (e) {
-            console.log('[Migration Warning] party_callings table creation failed:', e.message);
+            console.log('[Migration Warning] party_callings table creation/update failed:', e.message);
         }
 
         try {

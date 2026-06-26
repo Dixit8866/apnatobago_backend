@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import PartyCalling from '../../models/user/PartyCalling.js';
-import { BusinessProfile, RouteCategory, AppSettings } from '../../models/index.js';
+import { BusinessProfile, RouteCategory, AppSettings, Order } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 
@@ -24,9 +24,20 @@ export const getDailyPartyCalls = async (req, res, next) => {
             day: '2-digit'
         }).format(new Date());
 
+        // Calculate start and end of today in India timezone (GMT+5:30)
+        const todayStart = new Date(`${todayDateStr}T00:00:00+05:30`);
+        const todayEnd = new Date(`${todayDateStr}T23:59:59.999+05:30`);
+
         // Build base search criteria
         const userWhere = {
-            status: { [Op.ne]: 'Deleted' }
+            status: { [Op.ne]: 'Deleted' },
+            deliveryRoundId: {
+                [Op.and]: [
+                    { [Op.ne]: null },
+                    { [Op.ne]: '' },
+                    { [Op.ne]: 'none' }
+                ]
+            }
         };
 
         if (search) {
@@ -62,6 +73,18 @@ export const getDailyPartyCalls = async (req, res, next) => {
                 as: 'calls',
                 where: { callingDate: todayDateStr },
                 required: false
+            },
+            {
+                model: Order,
+                as: 'orders',
+                where: {
+                    createdAt: {
+                        [Op.gte]: todayStart,
+                        [Op.lte]: todayEnd
+                    },
+                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                },
+                required: false
             }
         ];
 
@@ -77,15 +100,27 @@ export const getDailyPartyCalls = async (req, res, next) => {
         // Map users to resolve their daily calling status
         const mappedUsers = users.map(user => {
             const call = user.calls && user.calls[0];
-            const resolvedStatus = call ? call.status : 'Pending Call';
+            const hasOrderToday = user.orders && user.orders.length > 0;
+
+            let resolvedStatus = 'Pending Call';
+            if (hasOrderToday) {
+                resolvedStatus = 'Order Complete';
+            } else if (call) {
+                resolvedStatus = call.status;
+            }
+
             const resolvedNotes = call ? call.notes : '';
             const resolvedCalledAt = call ? call.calledAt : null;
+            const resolvedFollowupDateTime = call ? call.followupDateTime : null;
 
             const userJson = user.toJSON();
             userJson.callingStatus = resolvedStatus;
             userJson.callingNotes = resolvedNotes;
             userJson.calledAt = resolvedCalledAt;
+            userJson.followupDateTime = resolvedFollowupDateTime;
+
             delete userJson.calls; // Clean up response payload
+            delete userJson.orders; // Clean up response payload
             return userJson;
         });
 
@@ -95,7 +130,8 @@ export const getDailyPartyCalls = async (req, res, next) => {
             'Pending Call': 0,
             'Re-Followup': 0,
             'order Coming': 0,
-            'Note Order': 0
+            'Note Order': 0,
+            'Order Complete': 0
         };
 
         mappedUsers.forEach(u => {
@@ -150,7 +186,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
  */
 export const logOrUpdateCall = async (req, res, next) => {
     try {
-        const { userId, status, notes } = req.body;
+        const { userId, status, notes, followupDateTime } = req.body;
         if (!userId || !status) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'UserId and status are required.');
         }
@@ -168,6 +204,8 @@ export const logOrUpdateCall = async (req, res, next) => {
             day: '2-digit'
         }).format(new Date());
 
+        const finalFollowup = status === 'Re-Followup' ? (followupDateTime || null) : null;
+
         // Find or create today's call log
         let [callRecord, created] = await PartyCalling.findOrCreate({
             where: { userId, callingDate: todayDateStr },
@@ -176,7 +214,8 @@ export const logOrUpdateCall = async (req, res, next) => {
                 callingDate: todayDateStr,
                 status,
                 notes: notes || null,
-                calledAt: new Date()
+                calledAt: new Date(),
+                followupDateTime: finalFollowup
             }
         });
 
@@ -185,7 +224,8 @@ export const logOrUpdateCall = async (req, res, next) => {
             await callRecord.update({
                 status,
                 notes: notes !== undefined ? notes : callRecord.notes,
-                calledAt: new Date()
+                calledAt: new Date(),
+                followupDateTime: finalFollowup
             });
         }
 

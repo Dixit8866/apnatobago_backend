@@ -24,13 +24,17 @@ const PartyCalling = sequelize.define('PartyCalling', {
     status: {
         type: DataTypes.STRING,
         allowNull: false,
-        defaultValue: 'Pending Call', // 'Pending Call' | 'Re-Followup' | 'order Coming' | 'Note Order'
+        defaultValue: 'Pending Call', // 'Pending Call' | 'Re-Followup' | 'order Coming' | 'Note Order' | 'Order Complete'
     },
     notes: {
         type: DataTypes.TEXT,
         allowNull: true,
     },
     calledAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+    },
+    followupDateTime: {
         type: DataTypes.DATE,
         allowNull: true,
     }
