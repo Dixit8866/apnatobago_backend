@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, User, Volume, Godown, InventoryStock, InventoryTransaction, ProductPricing } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, Godown, InventoryStock, InventoryTransaction, ProductPricing, AppSettings } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -33,7 +33,11 @@ export const createCustomSale = async (req, res) => {
             paidAmount: rawPaidAmount,
             deliveryCharge: rawDeliveryCharge,
             godownId,
-            notes
+            notes,
+            orderStatus,
+            deliveryMode,
+            deliveryRoundId,
+            deliveryRoundTiming
         } = req.body;
 
         if (!items || !Array.isArray(items) || items.length === 0) {
@@ -107,6 +111,24 @@ export const createCustomSale = async (req, res) => {
             }
         }
 
+        const status = orderStatus || 'Delivered';
+        const now = new Date();
+
+        let resolvedDeliveryRoundTiming = deliveryRoundTiming;
+        if (deliveryMode === 'Round' && deliveryRoundId) {
+            const settings = await AppSettings.findOne({ transaction: t });
+            if (settings && Array.isArray(settings.deliveryRoundSchedules)) {
+                const normalizedSchedules = settings.deliveryRoundSchedules.map((round, index) => ({
+                    id: round.id || `round_${index + 1}`,
+                    ...round
+                }));
+                const matchedRound = normalizedSchedules.find(r => r.id === deliveryRoundId);
+                if (matchedRound) {
+                    resolvedDeliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                }
+            }
+        }
+
         // 2. Create the Order
         const newSale = await Order.create({
             orderId: generateUniqueDirectSaleId(),
@@ -118,8 +140,14 @@ export const createCustomSale = async (req, res) => {
             dueAmount,
             paymentMethod: paymentMethod || 'Cash',
             paymentStatus,
-            orderStatus: 'Delivered', // Custom sales are usually delivered immediately
-            deliveredAt: new Date(),
+            orderStatus: status,
+            deliveryMode: deliveryMode || null,
+            deliveryRoundId: deliveryMode === 'Round' ? (deliveryRoundId || null) : null,
+            deliveryRoundTiming: deliveryMode === 'Round' ? (resolvedDeliveryRoundTiming || null) : null,
+            deliveredAt: status === 'Delivered' ? now : null,
+            shippingAt: (status === 'Shipping' || status === 'Delivered') ? now : null,
+            packedAt: (status === 'Packed' || status === 'Shipping' || status === 'Delivered') ? now : null,
+            packagingAt: (status === 'Packaging' || status === 'Packed' || status === 'Shipping' || status === 'Delivered') ? now : null,
             saleType: 'Direct',
             deliveryCharge,
             notes,

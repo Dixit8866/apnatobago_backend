@@ -92,7 +92,7 @@ const Order = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
             validate: {
-                isIn: [['Round', 'Express']]
+                isIn: [['Round', 'Express', 'Outlet']]
             }
         },
         deliveryCharge: {
