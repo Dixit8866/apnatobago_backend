@@ -21,6 +21,7 @@ import InventoryStock from './superadmin-models/InventoryStock.js';
 import InventoryTransaction from './superadmin-models/InventoryTransaction.js';
 import User from './user/User.js';
 import OTP from './user/Otp.js';
+import PartyCalling from './user/PartyCalling.js';
 import Vendor from './superadmin-models/Vendor.js';
 import VendorOrder from './superadmin-models/VendorOrder.js';
 import PurchaseBill from './superadmin-models/PurchaseBill.js';
@@ -156,9 +157,12 @@ PurchaseBill.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
 Admin.hasMany(PurchaseBill, { foreignKey: 'receivedBy', as: 'receivedBills' });
 PurchaseBill.belongsTo(Admin, { foreignKey: 'receivedBy', as: 'receiver' });
 
-// Cart Associations
 User.hasMany(Cart, { foreignKey: 'userId', as: 'cartItems' });
 Cart.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+// User -> PartyCalling Associations
+User.hasMany(PartyCalling, { foreignKey: 'userId', as: 'calls' });
+PartyCalling.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 Product.hasMany(Cart, { foreignKey: 'productId', as: 'cartItems' });
 Cart.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
@@ -284,6 +288,25 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deliveryRoundId" VARCHAR(255)');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deliveryRoundTiming" VARCHAR(255)');
         } catch (e) { console.log('[Migration Warning] Users delivery round/timing columns failed:', e.message); }
+
+        try {
+            // Create party_callings table manually if missing
+            await sequelize.query(`
+                CREATE TABLE IF NOT EXISTS party_callings (
+                    id UUID PRIMARY KEY,
+                    "userId" UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                    "callingDate" DATE NOT NULL,
+                    status VARCHAR(255) DEFAULT 'Pending Call',
+                    notes TEXT,
+                    "calledAt" TIMESTAMP WITH TIME ZONE,
+                    "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL,
+                    "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL,
+                    CONSTRAINT unique_user_date UNIQUE ("userId", "callingDate")
+                )
+            `);
+        } catch (e) {
+            console.log('[Migration Warning] party_callings table creation failed:', e.message);
+        }
 
         try {
             // Add routeCategoryId to orders table
@@ -412,6 +435,7 @@ export {
     InventoryTransaction,
     User,
     OTP,
+    PartyCalling,
     Vendor,
     VendorOrder,
     PurchaseBill,

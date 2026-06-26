@@ -29,6 +29,7 @@ import customSaleRoutes from './custom-sale.routes.js';
 import reportRoutes from './report.routes.js';
 import routeCategoryRoutes from './routeCategory.routes.js';
 import bankSettingRoutes from './bankSetting.routes.js';
+import partyCallingRoutes from './partyCalling.routes.js';
 
 const router = express.Router();
 
@@ -62,5 +63,6 @@ router.use('/custom-sales', customSaleRoutes);
 router.use('/reports', reportRoutes);
 router.use('/route-categories', routeCategoryRoutes);
 router.use('/bank-settings', bankSettingRoutes);
+router.use('/party-calling', partyCallingRoutes);
 
 export default router;
