@@ -302,7 +302,7 @@ export const getAllOrders = async (req, res) => {
                     {
                         model: ProductVariant,
                         as: 'variant',
-                        attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                        attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra'],
                         include: [
                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -328,7 +328,7 @@ export const getAllOrders = async (req, res) => {
                         attributes: ['id', 'name', 'thumbnail'],
                         include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
                     },
-                    { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'] }
+                    { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra'] }
                 ]
             });
 
@@ -1026,7 +1026,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'purchasePrice', 'baseUnitsPerPack'],
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'purchasePrice', 'baseUnitsPerPack', 'extra'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -1053,7 +1053,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId'],
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
