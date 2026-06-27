@@ -78,8 +78,10 @@ export const createDeliveryBoy = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Phone number already registered.");
         }
 
-        if (email) {
-            const existingEmail = await DeliveryBoy.findOne({ where: { email } });
+        const cleanEmail = (email && email.trim() !== '') ? email.trim() : null;
+
+        if (cleanEmail) {
+            const existingEmail = await DeliveryBoy.findOne({ where: { email: cleanEmail } });
             if (existingEmail) {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Email already registered.");
             }
@@ -88,7 +90,7 @@ export const createDeliveryBoy = async (req, res) => {
         const newBoy = await DeliveryBoy.create({
             name,
             phone,
-            email,
+            email: cleanEmail,
             password,
             address,
             vehicleNumber,
@@ -124,15 +126,17 @@ export const updateDeliveryBoy = async (req, res) => {
             if (existingPhone) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Phone number already in use.");
         }
 
-        if (email && email !== boy.email) {
-            const existingEmail = await DeliveryBoy.findOne({ where: { email } });
+        const cleanEmail = (email && email.trim() !== '') ? email.trim() : null;
+
+        if (cleanEmail && cleanEmail !== boy.email) {
+            const existingEmail = await DeliveryBoy.findOne({ where: { email: cleanEmail } });
             if (existingEmail) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Email already in use.");
         }
 
         await boy.update({
             name,
             phone,
-            email,
+            email: cleanEmail,
             password: password || boy.password,
             address,
             vehicleNumber,
