@@ -101,6 +101,7 @@ export const createDeliveryBoy = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Delivery boy created successfully.", newBoy);
     } catch (error) {
+        console.error(error);
         let errorMsg = error.message;
         if (error.name === 'SequelizeValidationError' && error.errors) {
             errorMsg = error.errors.map(e => `${e.path}: ${e.message}`).join(', ');
@@ -151,6 +152,7 @@ export const updateDeliveryBoy = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Delivery boy updated successfully.", boy);
     } catch (error) {
+        console.error(error);
         let errorMsg = error.message;
         if (error.name === 'SequelizeValidationError' && error.errors) {
             errorMsg = error.errors.map(e => `${e.path}: ${e.message}`).join(', ');
