@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { OrderPayment, Order, User, DeliveryBoy, BankSetting } from '../../models/index.js';
+import { OrderPayment, Order, User, DeliveryBoy, BankSetting, BusinessProfile } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -83,7 +83,14 @@ export const getAllPayments = async (req, res) => {
                         {
                             model: User,
                             as: 'user',
-                            attributes: ['id', 'fullname', 'number', 'city']
+                            attributes: ['id', 'fullname', 'number', 'city'],
+                            include: [
+                                {
+                                    model: BusinessProfile,
+                                    as: 'businessProfile',
+                                    attributes: ['id', 'shopName', 'shopAddress', 'gstNumber']
+                                }
+                            ]
                         }
                     ]
                 },
