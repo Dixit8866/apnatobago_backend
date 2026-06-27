@@ -101,8 +101,12 @@ export const createDeliveryBoy = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Delivery boy created successfully.", newBoy);
     } catch (error) {
-        logger.error(`[Create Delivery Boy Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+        let errorMsg = error.message;
+        if (error.name === 'SequelizeValidationError' && error.errors) {
+            errorMsg = error.errors.map(e => `${e.path}: ${e.message}`).join(', ');
+        }
+        logger.error(`[Create Delivery Boy Error]: ${errorMsg}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, errorMsg);
     }
 };
 
@@ -147,8 +151,12 @@ export const updateDeliveryBoy = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Delivery boy updated successfully.", boy);
     } catch (error) {
-        logger.error(`[Update Delivery Boy Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+        let errorMsg = error.message;
+        if (error.name === 'SequelizeValidationError' && error.errors) {
+            errorMsg = error.errors.map(e => `${e.path}: ${e.message}`).join(', ');
+        }
+        logger.error(`[Update Delivery Boy Error]: ${errorMsg}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, errorMsg);
     }
 };
 
