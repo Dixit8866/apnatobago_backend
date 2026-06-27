@@ -833,8 +833,8 @@ export const getOrders = async (req, res) => {
 
         const formattedResult = formatPaginatedResponse(result, page, limit);
 
-        if (formattedResult.items) {
-            formattedResult.items = await Promise.all(formattedResult.items.map(async o => {
+        if (formattedResult.data) {
+            formattedResult.data = await Promise.all(formattedResult.data.map(async o => {
                 let orderData = o.toJSON ? o.toJSON() : o;
                 orderData.totalAmount = roundTotal(orderData.totalAmount);
                 orderData.dueAmount = roundTotal(orderData.dueAmount);

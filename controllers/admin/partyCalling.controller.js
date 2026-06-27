@@ -49,14 +49,6 @@ export const getDailyPartyCalls = async (req, res, next) => {
             ];
         }
 
-        if (routeCategoryId) {
-            userWhere.routeCategoryId = routeCategoryId;
-        }
-
-        if (deliveryRoundTiming) {
-            userWhere.deliveryRoundTiming = deliveryRoundTiming;
-        }
-
         const include = [
             {
                 model: BusinessProfile,
@@ -124,9 +116,9 @@ export const getDailyPartyCalls = async (req, res, next) => {
             return userJson;
         });
 
-        // Calculate tab counts
+        // Compute tab counts (filtered by routeCategoryId and deliveryRoundTiming)
         const tabCounts = {
-            All: mappedUsers.length,
+            All: 0,
             'Pending Call': 0,
             'Re-Followup': 0,
             'order Coming': 0,
@@ -135,27 +127,46 @@ export const getDailyPartyCalls = async (req, res, next) => {
         };
 
         mappedUsers.forEach(u => {
-            if (tabCounts[u.callingStatus] !== undefined) {
-                tabCounts[u.callingStatus]++;
+            const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
+            const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
+            if (matchRoute && matchTiming) {
+                tabCounts.All++;
+                if (tabCounts[u.callingStatus] !== undefined) {
+                    tabCounts[u.callingStatus]++;
+                }
             }
         });
 
-        // Filter by selected status tab
-        const filteredUsers = status && status !== 'All'
-            ? mappedUsers.filter(u => u.callingStatus === status)
-            : mappedUsers;
-
-        // Calculate route & timing counts for the currently selected status tab
+        // Compute route counts (filtered by status tab and deliveryRoundTiming, but NOT routeCategoryId)
         const routeCounts = {};
-        const timingCounts = {};
+        mappedUsers.forEach(u => {
+            const matchStatus = !status || status === 'All' || u.callingStatus === status;
+            const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
+            if (matchStatus && matchTiming) {
+                if (u.routeCategoryId) {
+                    routeCounts[u.routeCategoryId] = (routeCounts[u.routeCategoryId] || 0) + 1;
+                }
+            }
+        });
 
-        filteredUsers.forEach(u => {
-            if (u.routeCategoryId) {
-                routeCounts[u.routeCategoryId] = (routeCounts[u.routeCategoryId] || 0) + 1;
+        // Compute timing counts (filtered by status tab and routeCategoryId, but NOT deliveryRoundTiming)
+        const timingCounts = {};
+        mappedUsers.forEach(u => {
+            const matchStatus = !status || status === 'All' || u.callingStatus === status;
+            const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
+            if (matchStatus && matchRoute) {
+                if (u.deliveryRoundTiming) {
+                    timingCounts[u.deliveryRoundTiming] = (timingCounts[u.deliveryRoundTiming] || 0) + 1;
+                }
             }
-            if (u.deliveryRoundTiming) {
-                timingCounts[u.deliveryRoundTiming] = (timingCounts[u.deliveryRoundTiming] || 0) + 1;
-            }
+        });
+
+        // Filter users to display (matching status, routeCategoryId, and deliveryRoundTiming)
+        const filteredUsers = mappedUsers.filter(u => {
+            const matchStatus = !status || status === 'All' || u.callingStatus === status;
+            const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
+            const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
+            return matchStatus && matchRoute && matchTiming;
         });
 
         // Perform in-memory pagination

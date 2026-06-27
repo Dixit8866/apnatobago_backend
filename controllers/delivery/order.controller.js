@@ -768,6 +768,16 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             // Reset to 0 so the loop below doesn't subtract it again from the dueAmount
             remainingOnline = 0;
         }
+        // ─── DIRECT BANK TRANSFER DOUBLE-COUNTING PREVENTION ──────────────────────
+        // Check if there is an existing, pending Direct Bank Transfer payment for this order
+        const existingBankPayment = await OrderPayment.findOne({
+            where: {
+                orderId: assignment.order.id,
+                paymentMethod: 'ONLINE',
+                onlineType: 'Bank Account'
+            },
+            transaction: t
+        });
         // ─────────────────────────────────────────────────────────────────────────────
 
         for (const order of ordersToSettle) {
@@ -776,6 +786,17 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let orderNotes = [];
             let paymentMethodsUsed = [];
+
+            // Apply existing bank transfer payment first to reduce due amount without creating a duplicate payment entry
+            if (order.id === assignment.order.id && existingBankPayment) {
+                const appliedAmt = Math.min(parseFloat(existingBankPayment.amount), due);
+                due -= appliedAmt;
+                order.paidAmount = parseFloat(order.paidAmount) + appliedAmt;
+                orderNotes.push(`Paid ${appliedAmt} via Direct Bank Transfer (Awaiting Verification)`);
+                paymentMethodsUsed.push('ONLINE');
+                remainingOnline = Math.max(0, remainingOnline - appliedAmt);
+                logger.info(`[Complete Order Settle]: Applied existing bank transfer payment of ${appliedAmt} to order ${order.id}.`);
+            }
 
             // If this is the current order and online was already applied, include it in methods and notes
             if (order.id === assignment.orderId && onlineAppliedToCurrent) {
