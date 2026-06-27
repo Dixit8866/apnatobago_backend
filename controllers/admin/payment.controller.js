@@ -12,8 +12,12 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
  */
 export const getAllPayments = async (req, res) => {
     try {
-        const { status, search, date, fromDate, toDate } = req.query;
+        const { status, search, date, fromDate, toDate, deliveryBoyId } = req.query;
         const where = {};
+
+        if (deliveryBoyId) {
+            where.deliveryBoyId = deliveryBoyId;
+        }
 
         // Support tabs: CASH, ONLINE, CREDIT, Razorpay, Bank Account, Submitted, Pending
         if (status) {
@@ -101,15 +105,20 @@ export const getAllPayments = async (req, res) => {
             distinct: true
         });
 
+        const baseCountWhere = {};
+        if (deliveryBoyId) {
+            baseCountWhere.deliveryBoyId = deliveryBoyId;
+        }
+
         // ── Calculate Status Counts for Tab Badges ──
         const [cashCount, onlineCount, creditCount, submittedCount, pendingSubmitCount, razorpayCount, bankAccountCount] = await Promise.all([
-            OrderPayment.count({ where: { paymentMethod: 'CASH' } }),
-            OrderPayment.count({ where: { paymentMethod: 'ONLINE' } }),
-            OrderPayment.count({ where: { paymentMethod: 'CREDIT' } }),
-            OrderPayment.count({ where: { isSubmitted: true } }),
-            OrderPayment.count({ where: { isSubmitted: false } }),
-            OrderPayment.count({ where: { paymentMethod: 'ONLINE', onlineType: 'Razorpay' } }),
-            OrderPayment.count({ where: { paymentMethod: 'ONLINE', onlineType: 'Bank Account' } })
+            OrderPayment.count({ where: { ...baseCountWhere, paymentMethod: 'CASH' } }),
+            OrderPayment.count({ where: { ...baseCountWhere, paymentMethod: 'ONLINE' } }),
+            OrderPayment.count({ where: { ...baseCountWhere, paymentMethod: 'CREDIT' } }),
+            OrderPayment.count({ where: { ...baseCountWhere, isSubmitted: true } }),
+            OrderPayment.count({ where: { ...baseCountWhere, isSubmitted: false } }),
+            OrderPayment.count({ where: { ...baseCountWhere, paymentMethod: 'ONLINE', onlineType: 'Razorpay' } }),
+            OrderPayment.count({ where: { ...baseCountWhere, paymentMethod: 'ONLINE', onlineType: 'Bank Account' } })
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
