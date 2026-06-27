@@ -72,18 +72,28 @@ export const createDeliveryBoy = async (req, res) => {
     try {
         const { name, phone, email, password, address, vehicleNumber, salary, profileImage, status } = req.body;
 
-        // Check if phone already exists
-        const existingBoy = await DeliveryBoy.findOne({ where: { phone } });
+        // Check if phone already exists (including soft-deleted)
+        const existingBoy = await DeliveryBoy.findOne({ where: { phone }, paranoid: false });
         if (existingBoy) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Phone number already registered.");
+            if (existingBoy.deletedAt) {
+                // Permanently destroy soft-deleted record so the phone number can be reused
+                await existingBoy.destroy({ force: true });
+            } else {
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Phone number already registered.");
+            }
         }
 
         const cleanEmail = (email && email.trim() !== '') ? email.trim() : null;
 
         if (cleanEmail) {
-            const existingEmail = await DeliveryBoy.findOne({ where: { email: cleanEmail } });
+            const existingEmail = await DeliveryBoy.findOne({ where: { email: cleanEmail }, paranoid: false });
             if (existingEmail) {
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Email already registered.");
+                if (existingEmail.deletedAt) {
+                    // Permanently destroy soft-deleted record so the email can be reused
+                    await existingEmail.destroy({ force: true });
+                } else {
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Email already registered.");
+                }
             }
         }
 
@@ -125,17 +135,29 @@ export const updateDeliveryBoy = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Delivery boy not found.");
         }
 
-        // Check unique constraints if phone/email changed
+        // Check unique constraints if phone/email changed (including soft-deleted)
         if (phone && phone !== boy.phone) {
-            const existingPhone = await DeliveryBoy.findOne({ where: { phone } });
-            if (existingPhone) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Phone number already in use.");
+            const existingPhone = await DeliveryBoy.findOne({ where: { phone }, paranoid: false });
+            if (existingPhone) {
+                if (existingPhone.deletedAt) {
+                    await existingPhone.destroy({ force: true });
+                } else {
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Phone number already in use.");
+                }
+            }
         }
 
         const cleanEmail = (email && email.trim() !== '') ? email.trim() : null;
 
         if (cleanEmail && cleanEmail !== boy.email) {
-            const existingEmail = await DeliveryBoy.findOne({ where: { email: cleanEmail } });
-            if (existingEmail) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Email already in use.");
+            const existingEmail = await DeliveryBoy.findOne({ where: { email: cleanEmail }, paranoid: false });
+            if (existingEmail) {
+                if (existingEmail.deletedAt) {
+                    await existingEmail.destroy({ force: true });
+                } else {
+                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Email already in use.");
+                }
+            }
         }
 
         await boy.update({
