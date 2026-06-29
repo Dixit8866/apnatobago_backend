@@ -153,6 +153,7 @@ export const createProduct = async (req, res, next) => {
             comboProduct1Id,
             comboProduct2Id,
             keywords,
+            boxNumber,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -219,6 +220,7 @@ export const createProduct = async (req, res, next) => {
                 comboProduct2Id: comboProduct2Id || null,
                 position: maxPos + 1,
                 keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : [],
+                boxNumber: boxNumber || null,
             },
             { transaction: t }
         );
@@ -618,6 +620,7 @@ export const updateProduct = async (req, res, next) => {
             comboProduct1Id,
             comboProduct2Id,
             keywords,
+            boxNumber,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -745,6 +748,7 @@ export const updateProduct = async (req, res, next) => {
                 comboProduct1Id: comboProduct1Id !== undefined ? comboProduct1Id : product.comboProduct1Id,
                 comboProduct2Id: comboProduct2Id !== undefined ? comboProduct2Id : product.comboProduct2Id,
                 keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : (product.keywords || []),
+                boxNumber: boxNumber !== undefined ? boxNumber : product.boxNumber,
             },
             { transaction: t }
         );

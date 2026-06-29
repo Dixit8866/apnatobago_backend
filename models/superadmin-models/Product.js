@@ -77,6 +77,11 @@ const Product = sequelize.define(
             allowNull: false,
             defaultValue: [],
         },
+        boxNumber: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,

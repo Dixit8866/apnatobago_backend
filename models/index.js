@@ -423,6 +423,10 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "branchName" VARCHAR(255)');
         } catch (e) { console.log('[Migration Warning] Bank settings columns failed:', e.message); }
 
+        try {
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "boxNumber" VARCHAR(255) DEFAULT null');
+        } catch (e) { console.log('[Migration Warning] Products boxNumber column failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);
