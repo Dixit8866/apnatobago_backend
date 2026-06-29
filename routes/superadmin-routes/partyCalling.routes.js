@@ -3,6 +3,7 @@ import * as partyCallingController from '../../controllers/admin/partyCalling.co
 
 const router = express.Router();
 
+router.get('/inactive', partyCallingController.getInactivePartyCalls);
 router.get('/', partyCallingController.getDailyPartyCalls);
 router.post('/log', partyCallingController.logOrUpdateCall);
 
