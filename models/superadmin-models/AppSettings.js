@@ -78,6 +78,14 @@ const AppSettings = sequelize.define('AppSettings', {
     eveningDeliveryEnd: {
         type: DataTypes.STRING,
         defaultValue: '17:00',
+    },
+    expressDeliveryStart: {
+        type: DataTypes.STRING,
+        defaultValue: '08:00',
+    },
+    expressDeliveryEnd: {
+        type: DataTypes.STRING,
+        defaultValue: '18:00',
     }
 }, {
     timestamps: true,

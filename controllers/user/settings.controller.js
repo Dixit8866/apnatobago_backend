@@ -29,7 +29,9 @@ export const getAppSettings = async (req, res) => {
                 morningDeliveryStart: '08:00',
                 morningDeliveryEnd: '13:00',
                 eveningDeliveryStart: '15:00',
-                eveningDeliveryEnd: '17:00'
+                eveningDeliveryEnd: '17:00',
+                expressDeliveryStart: '08:00',
+                expressDeliveryEnd: '18:00'
             });
         }
 

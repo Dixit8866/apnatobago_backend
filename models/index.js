@@ -404,6 +404,8 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "morningDeliveryEnd" VARCHAR(255) DEFAULT \'13:00\'');
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryStart" VARCHAR(255) DEFAULT \'15:00\'');
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "eveningDeliveryEnd" VARCHAR(255) DEFAULT \'17:00\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "expressDeliveryStart" VARCHAR(255) DEFAULT \'08:00\'');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "expressDeliveryEnd" VARCHAR(255) DEFAULT \'18:00\'');
         } catch (e) { console.log('[Migration Warning] App settings columns failed:', e.message); }
 
         try {
