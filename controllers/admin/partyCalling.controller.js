@@ -252,25 +252,34 @@ export const logOrUpdateCall = async (req, res, next) => {
  */
 export const getInactivePartyCalls = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, days = 2 } = req.query;
+        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
         
         const limitVal = parseInt(limit, 10) || 50;
         const pageVal = parseInt(page, 10) || 1;
-        const daysVal = parseInt(days, 10) || 2;
 
-        // Generate list of date strings for the last N days in India timezone
-        const dateList = [];
-        for (let i = 0; i < daysVal; i++) {
+        // Get today's date string in India timezone
+        const todayDateStr = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).format(new Date());
+
+        // Parse selected start date. Default to 2 days ago if not provided.
+        let startDateStr = date;
+        if (!startDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(startDateStr)) {
             const d = new Date();
-            d.setDate(d.getDate() - i);
-            const dateStr = new Intl.DateTimeFormat('en-CA', {
+            d.setDate(d.getDate() - 2);
+            startDateStr = new Intl.DateTimeFormat('en-CA', {
                 timeZone: 'Asia/Kolkata',
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit'
             }).format(d);
-            dateList.push(dateStr);
         }
+
+        const rangeStart = new Date(`${startDateStr}T00:00:00+05:30`);
+        const rangeEnd = new Date(`${todayDateStr}T23:59:59.999+05:30`);
 
         // Build base search criteria
         const userWhere = {
@@ -307,7 +316,19 @@ export const getInactivePartyCalls = async (req, res, next) => {
             {
                 model: PartyCalling,
                 as: 'calls',
-                where: { callingDate: { [Op.in]: dateList } },
+                where: { callingDate: todayDateStr },
+                required: false
+            },
+            {
+                model: Order,
+                as: 'orders',
+                where: {
+                    createdAt: {
+                        [Op.gte]: rangeStart,
+                        [Op.lte]: rangeEnd
+                    },
+                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                },
                 required: false
             }
         ];
@@ -321,24 +342,41 @@ export const getInactivePartyCalls = async (req, res, next) => {
             ]
         });
 
-        // Filter out users who have calls in the last N days
-        const inactiveUsers = users.filter(user => !user.calls || user.calls.length === 0);
+        // Filter out users who have placed orders in the date range
+        const inactiveUsers = users.filter(user => !user.orders || user.orders.length === 0);
 
-        // Map users to default status
+        // Map users to resolve their daily calling status
         const mappedUsers = inactiveUsers.map(user => {
+            const call = user.calls && user.calls[0];
+
+            let resolvedStatus = 'Pending Call';
+            if (call) {
+                resolvedStatus = call.status;
+            }
+
+            const resolvedNotes = call ? call.notes : '';
+            const resolvedCalledAt = call ? call.calledAt : null;
+            const resolvedFollowupDateTime = call ? call.followupDateTime : null;
+
             const userJson = user.toJSON();
-            userJson.callingStatus = 'Pending Call';
-            userJson.callingNotes = '';
-            userJson.calledAt = null;
-            userJson.followupDateTime = null;
+            userJson.callingStatus = resolvedStatus;
+            userJson.callingNotes = resolvedNotes;
+            userJson.calledAt = resolvedCalledAt;
+            userJson.followupDateTime = resolvedFollowupDateTime;
+
             delete userJson.calls;
+            delete userJson.orders;
             return userJson;
         });
 
         // Compute tab counts
         const tabCounts = {
             All: 0,
-            'Pending Call': 0
+            'Pending Call': 0,
+            'Re-Followup': 0,
+            'order Coming': 0,
+            'Note Order': 0,
+            'Order Complete': 0
         };
 
         mappedUsers.forEach(u => {
@@ -399,7 +437,8 @@ export const getInactivePartyCalls = async (req, res, next) => {
             tabCounts,
             routeCounts,
             timingCounts,
-            days: daysVal
+            startDate: startDateStr,
+            endDate: todayDateStr
         });
     } catch (error) {
         next(error);
