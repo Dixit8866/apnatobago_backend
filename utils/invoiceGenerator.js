@@ -8,6 +8,27 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const logoPath = path.join(__dirname, '..', 'assets', 'logo.png');
 
+const sortItemsByBoxNumber = (items) => {
+    return [...(items || [])].sort((a, b) => {
+        const boxA = a.product?.boxNumber || a.variantInfo?.boxNumber || a.boxNumber || '';
+        const boxB = b.product?.boxNumber || b.variantInfo?.boxNumber || b.boxNumber || '';
+
+        const numA = parseInt(boxA, 10);
+        const numB = parseInt(boxB, 10);
+
+        const isNumA = !isNaN(numA);
+        const isNumB = !isNaN(numB);
+
+        if (isNumA && isNumB) {
+            return numA - numB;
+        }
+        if (isNumA) return -1;
+        if (isNumB) return 1;
+
+        return boxA.localeCompare(boxB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+};
+
 /**
  * Generates a professional Sales Invoice PDF (A4 Compact Style)
  * @param {Object} order - Order object with items and user details
@@ -71,7 +92,7 @@ export const generateOrderInvoice = async (order) => {
             doc.text('TOTAL', doc.page.width - 85, tableY + 6, { width: 60, align: 'right' });
 
             let itemY = tableY + 22;
-            const items = order.items || [];
+            const items = sortItemsByBoxNumber(order.items || []);
             let subtotal = 0;
             
             items.forEach((it, idx) => {
@@ -389,7 +410,7 @@ export const generateDeliveryLabel = async (order) => {
         try {
             // Standard 80mm width = 226pt
             const pageWidth = 226;
-            const items = order.items || [];
+            const items = sortItemsByBoxNumber(order.items || []);
             const estimatedHeight = 350 + (items.length * 30);
             
             const doc = new PDFKitNative({ 
@@ -524,7 +545,7 @@ export const generateDeliveryLabel = async (order) => {
  * @returns {String} HTML String
  */
 export const generateDeliveryLabelHTML = (order) => {
-    const items = order.items || [];
+    const items = sortItemsByBoxNumber(order.items || []);
     const customerName = (order.customerName || order.user?.fullname || 'Guest').toUpperCase();
     const phone = order.customerNumber || order.user?.number || '-';
     const address = `${order.shippingAddress?.address || order.user?.address || '-'}, ${order.shippingAddress?.city || order.user?.city || ''}`;
