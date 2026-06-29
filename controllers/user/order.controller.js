@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn, Notification } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn, Notification, Admin } from '../../models/index.js';
 import { emitAdminNotification } from '../../socket.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import { roundTotal } from '../../utils/roundHelper.js';
@@ -28,6 +28,34 @@ const generateUniqueOrderId = async () => {
     const numericPart = Number(lastOrder.orderId.replace(/\D/g, ''));
     const nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
     return `${nextId}`;
+};
+
+const sendPushToAllAdmins = async (title, body, data = {}) => {
+    try {
+        const admins = await Admin.findAll({
+            where: { status: 'Active', fcmtoken: { [Op.ne]: null } },
+            attributes: ['fcmtoken']
+        });
+        const adminTokens = admins.flatMap(adm => {
+            const tokenVal = adm.fcmtoken;
+            if (!tokenVal) return [];
+            const trimmed = tokenVal.trim();
+            if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                try {
+                    return JSON.parse(trimmed);
+                } catch (e) {
+                    return [trimmed];
+                }
+            }
+            return [trimmed];
+        });
+
+        if (adminTokens.length > 0) {
+            await sendToDevice(adminTokens, title, body, null, data);
+        }
+    } catch (err) {
+        console.error('[Admin Push Notification Error]:', err);
+    }
 };
 
 /**
@@ -655,6 +683,13 @@ export const createOrder = async (req, res) => {
                 clickAction: `/sales/user-orders`
             });
             emitAdminNotification(adminNotify);
+            
+            // Send push notification to all active admins
+            const adminTitle = existingOrder ? 'Order Updated' : 'New Order Received';
+            const adminBody = existingOrder 
+                ? `User ${userData.fullname} has updated pending order #${targetOrder.orderId} to ₹${targetOrder.totalAmount}.`
+                : `User ${userData.fullname} has placed a new order #${targetOrder.orderId} of ₹${targetOrder.totalAmount}.`;
+            await sendPushToAllAdmins(adminTitle, adminBody, { type: 'order', id: String(targetOrder.id), orderId: String(targetOrder.id) });
         } catch (notifyErr) {
             console.error('[Admin Notification Error]:', notifyErr);
             logger.error(`[Admin Notification Error]: ${notifyErr.message}`);
@@ -1989,6 +2024,9 @@ export const updateOrder = async (req, res) => {
                 clickAction: `/sales/user-orders`
             });
             emitAdminNotification(adminNotify);
+            
+            // Send push notification to all active admins
+            await sendPushToAllAdmins('Order Updated by User!', `User ${userData.fullname} has updated pending order #${order.orderId} to ₹${newTotal}.`, { type: 'order', id: String(order.id), orderId: String(order.id) });
         } catch (notifyErr) {
             console.error('[Admin Notification Error]:', notifyErr);
         }

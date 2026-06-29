@@ -2,6 +2,7 @@ import Admin from '../../models/superadmin-models/Admin.js';
 import { generateToken } from '../../helpers/jwt.helper.js';
 import { setTokenCookie, clearTokenCookie } from '../../helpers/cookie.helper.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
+import { addFcmToken, removeFcmToken } from '../../utils/fcmHelper.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import APP_MESSAGES from '../../constants/messages.js';
 
@@ -26,23 +27,15 @@ export const registerAdmin = async (req, res, next) => {
             name,
             email,
             password,
+            role: 'staff',
         });
 
-        if (admin) {
-            const token = generateToken(admin.id);
-
-            // Set token securely in HTTP-Only Cookie
-            setTokenCookie(res, token);
-
-            return sendSuccessResponse(res, HTTP_STATUS.CREATED, APP_MESSAGES.USER_REGISTER_SUCCESS, {
-                id: admin.id,
-                name: admin.name,
-                email: admin.email,
-                token, // Optionally return token in body too (if desired for older apps)
-            });
-        } else {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, APP_MESSAGES.INVALID_USER_DATA);
-        }
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, APP_MESSAGES.REGISTER_SUCCESS, {
+            id: admin.id,
+            name: admin.name,
+            email: admin.email,
+            role: admin.role,
+        });
     } catch (error) {
         next(error); // Pass back to error middleware
     }
@@ -55,7 +48,7 @@ export const registerAdmin = async (req, res, next) => {
  */
 export const loginAdmin = async (req, res, next) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, fcmtoken } = req.body;
 
         const admin = await Admin.findOne({ where: { email } });
 
@@ -65,6 +58,11 @@ export const loginAdmin = async (req, res, next) => {
             // Set token securely in HTTP-Only Cookie
             setTokenCookie(res, token);
 
+            if (fcmtoken) {
+                admin.fcmtoken = addFcmToken(admin.fcmtoken, fcmtoken);
+                await admin.save();
+            }
+
             return sendSuccessResponse(res, HTTP_STATUS.OK, APP_MESSAGES.LOGIN_SUCCESS, {
                 id: admin.id,
                 name: admin.name,
@@ -73,6 +71,7 @@ export const loginAdmin = async (req, res, next) => {
                 phone: admin.phone,
                 profileImage: admin.profileImage,
                 permissions: admin.permissions || {},
+                fcmtoken: admin.fcmtoken,
                 token,
             });
         } else {
@@ -90,6 +89,14 @@ export const loginAdmin = async (req, res, next) => {
  */
 export const logoutAdmin = async (req, res, next) => {
     try {
+        const tokenToRemove = req.body.fcmtoken || req.query.fcmtoken;
+        if (tokenToRemove && req.user?.id) {
+            const admin = await Admin.findByPk(req.user.id);
+            if (admin) {
+                admin.fcmtoken = removeFcmToken(admin.fcmtoken, tokenToRemove);
+                await admin.save();
+            }
+        }
         clearTokenCookie(res);
         return sendSuccessResponse(res, HTTP_STATUS.OK, APP_MESSAGES.LOGOUT_SUCCESS);
     } catch (error) {
@@ -113,6 +120,34 @@ export const getAdminProfile = async (req, res, next) => {
         } else {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, APP_MESSAGES.USER_NOT_FOUND);
         }
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Update Admin FCM Token
+ * @route   PUT /api/auth/fcm-token
+ * @access  Private
+ */
+export const updateAdminFcmToken = async (req, res, next) => {
+    try {
+        const { fcmtoken } = req.body;
+        if (!fcmtoken) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide fcmtoken");
+        }
+
+        const admin = await Admin.findByPk(req.user.id);
+        if (!admin) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Admin not found");
+        }
+
+        admin.fcmtoken = addFcmToken(admin.fcmtoken, fcmtoken);
+        await admin.save();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "FCM token updated successfully", {
+            fcmtoken: admin.fcmtoken
+        });
     } catch (error) {
         next(error);
     }

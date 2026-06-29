@@ -1,9 +1,7 @@
 import jwt from 'jsonwebtoken';
-import User from '../../models/user/User.js';
-import OTP from '../../models/user/Otp.js';
-import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import Order from '../../models/user/Order.js';
+import { User, OTP, CustomLevel } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
+import { addFcmToken, removeFcmToken } from '../../utils/fcmHelper.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import APP_MESSAGES from '../../constants/messages.js';
 import logger from '../../logger/apiLogger.js';
@@ -202,7 +200,7 @@ export const registerUser = async (req, res) => {
             fullname,
             dialcode,
             number,
-            fcmtoken,
+            fcmtoken: fcmtoken ? JSON.stringify([fcmtoken.trim()]) : null,
             applevel: defaultAppLevel,
             showtabacco: false,
             creditline: 0,
@@ -283,7 +281,7 @@ export const loginUser = async (req, res) => {
         }
         
         if (fcmtoken) {
-            user.fcmtoken = fcmtoken;
+            user.fcmtoken = addFcmToken(user.fcmtoken, fcmtoken);
             await user.save();
         }
 
@@ -344,7 +342,15 @@ export const logoutUser = async (req, res) => {
         const user = await User.findByPk(req.user.id);
         if (user) {
             user.logintoken = null;
-            user.fcmtoken = null; 
+            const tokenToRemove = req.body.fcmtoken || req.query.fcmtoken;
+            if (tokenToRemove) {
+                user.fcmtoken = removeFcmToken(user.fcmtoken, tokenToRemove);
+            } else {
+                const trimmed = (user.fcmtoken || '').trim();
+                if (!trimmed.startsWith('[')) {
+                    user.fcmtoken = null;
+                }
+            }
             await user.save();
         }
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Logged out successfully");

@@ -427,6 +427,14 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "boxNumber" VARCHAR(255) DEFAULT null');
         } catch (e) { console.log('[Migration Warning] Products boxNumber column failed:', e.message); }
 
+        try {
+            await sequelize.query('ALTER TABLE users ALTER COLUMN "fcmtoken" TYPE TEXT');
+        } catch (e) { console.log('[Migration Warning] Alter users fcmtoken type failed:', e.message); }
+
+        try {
+            await sequelize.query('ALTER TABLE admins ADD COLUMN IF NOT EXISTS "fcmtoken" TEXT');
+        } catch (e) { console.log('[Migration Warning] Add admins fcmtoken column failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);

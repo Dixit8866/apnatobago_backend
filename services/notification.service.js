@@ -62,9 +62,36 @@ try {
 /**
  * Send notification to a specific FCM token
  */
-export const sendToDevice = async (token, title, body, imageUrl = null, data = {}) => {
-    console.log('[FCM Service] Attempting to send device notification...');
-    console.log(`[FCM Service] Token: ${token}`);
+export const sendToDevice = async (tokenInput, title, body, imageUrl = null, data = {}) => {
+    if (!tokenInput) {
+        return { success: false, error: 'No tokens provided' };
+    }
+
+    // Resolve tokens array
+    let tokens = [];
+    if (Array.isArray(tokenInput)) {
+        tokens = tokenInput;
+    } else if (typeof tokenInput === 'string') {
+        const trimmed = tokenInput.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            try {
+                tokens = JSON.parse(trimmed);
+            } catch (e) {
+                tokens = [trimmed];
+            }
+        } else {
+            tokens = [trimmed];
+        }
+    }
+
+    // Filter out invalid/empty tokens, and dedup
+    tokens = tokens.map(t => typeof t === 'string' ? t.trim() : '').filter(Boolean);
+    if (tokens.length === 0) {
+        return { success: false, error: 'No valid tokens provided' };
+    }
+
+    console.log('[FCM Service] Attempting to send device notifications...');
+    console.log(`[FCM Service] Tokens (${tokens.length}):`, tokens);
     console.log(`[FCM Service] Title: "${title}", Body: "${body}", Image: "${imageUrl}"`);
     console.log('[FCM Service] Custom Data:', JSON.stringify(data, null, 2));
 
@@ -109,42 +136,61 @@ export const sendToDevice = async (token, title, body, imageUrl = null, data = {
                 break;
         }
 
-        const message = {
-            token,
-            notification: {
-                title,
-                body,
-                ...(imageUrl && { image: imageUrl })
-            },
-            data: {
-                type: notificationType,
-                ...data,
-                action: actionValue,
-            },
-            android: {
-                notification: {
-                    ...(imageUrl && { image: imageUrl }),
-                    priority: 'high',
-                    sound: androidSound,
-                    channelId: androidChannelId
-                }
-            },
-            apns: {
-                payload: {
-                    aps: {
-                        contentAvailable: true,
-                        sound: apnsSound
+        const sendPromises = tokens.map(async (token) => {
+            try {
+                const message = {
+                    token,
+                    notification: {
+                        title,
+                        body,
+                        ...(imageUrl && { image: imageUrl })
+                    },
+                    data: {
+                        type: notificationType,
+                        ...data,
+                        action: actionValue,
+                    },
+                    android: {
+                        notification: {
+                            ...(imageUrl && { image: imageUrl }),
+                            priority: 'high',
+                            sound: androidSound,
+                            channelId: androidChannelId
+                        }
+                    },
+                    apns: {
+                        payload: {
+                            aps: {
+                                contentAvailable: true,
+                                sound: apnsSound
+                            }
+                        },
+                        fcm_options: {
+                            ...(imageUrl && { image: imageUrl })
+                        }
                     }
-                },
-                fcm_options: {
-                    ...(imageUrl && { image: imageUrl })
-                }
-            }
-        };
+                };
 
-        const response = await getMessaging(firebaseApp).send(message);
-        console.log('[FCM Service Success] Device notification sent successfully! MessageID:', response);
-        return { success: true, response };
+                const response = await getMessaging(firebaseApp).send(message);
+                console.log(`[FCM Service Success] Notification sent to token ${token.substring(0, 15)}... MessageID:`, response);
+                return { success: true, token };
+            } catch (err) {
+                console.error(`[FCM Service Error] Failed to send to token ${token.substring(0, 15)}... Error:`, err.message);
+                
+                const isBadToken = err.code === 'messaging/invalid-argument' || 
+                                   err.code === 'messaging/registration-token-not-registered' ||
+                                   err.message.includes('not-registered') ||
+                                   err.message.includes('invalid');
+                
+                return { success: false, token, isBadToken, error: err.message };
+            }
+        });
+
+        const results = await Promise.all(sendPromises);
+        return {
+            success: results.some(r => r.success),
+            results
+        };
     } catch (error) {
         console.error('[FCM Service Error] Exception during sendToDevice:', error);
         logger.error(`Error sending device notification: ${error.message}`);

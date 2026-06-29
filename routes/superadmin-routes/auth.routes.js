@@ -4,6 +4,7 @@ import {
     loginAdmin,
     logoutAdmin,
     getAdminProfile,
+    updateAdminFcmToken,
 } from '../../controllers/admin/auth.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { validateRegister } from '../../validators/auth.validator.js';
@@ -19,5 +20,6 @@ router.post('/register', validateRegister, registerAdmin);
 router.post('/login', loginAdmin);
 router.post('/logout', logoutAdmin); // ADDED: Logout API
 router.get('/profile', protect, getAdminProfile);
+router.put('/fcm-token', protect, updateAdminFcmToken);
 
 export default router;
