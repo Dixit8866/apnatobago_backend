@@ -86,6 +86,10 @@ const AppSettings = sequelize.define('AppSettings', {
     expressDeliveryEnd: {
         type: DataTypes.STRING,
         defaultValue: '18:00',
+    },
+    expressDeliverySchedules: {
+        type: DataTypes.JSONB,
+        defaultValue: [],
     }
 }, {
     timestamps: true,

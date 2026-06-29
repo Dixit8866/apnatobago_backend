@@ -31,7 +31,8 @@ export const getAppSettings = async (req, res) => {
                 eveningDeliveryStart: '15:00',
                 eveningDeliveryEnd: '17:00',
                 expressDeliveryStart: '08:00',
-                expressDeliveryEnd: '18:00'
+                expressDeliveryEnd: '18:00',
+                expressDeliverySchedules: []
             });
         }
 
@@ -41,6 +42,13 @@ export const getAppSettings = async (req, res) => {
         if (Array.isArray(settingsData.deliveryRoundSchedules)) {
             settingsData.deliveryRoundSchedules = settingsData.deliveryRoundSchedules.map((round, index) => ({
                 id: round.id || `round_${index + 1}`,
+                ...round
+            }));
+        }
+
+        if (Array.isArray(settingsData.expressDeliverySchedules)) {
+            settingsData.expressDeliverySchedules = settingsData.expressDeliverySchedules.map((round, index) => ({
+                id: round.id || `express_${index + 1}`,
                 ...round
             }));
         }
