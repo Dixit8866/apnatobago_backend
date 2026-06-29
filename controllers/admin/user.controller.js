@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -344,15 +344,32 @@ export const updateUser = async (req, res, next) => {
 };
 
 export const deleteUser = async (req, res, next) => {
+    const t = await User.sequelize.transaction();
     try {
-        const user = await User.findByPk(req.params.id);
-        if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
+        const user = await User.findByPk(req.params.id, { transaction: t });
+        if (!user) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
+        }
         
-        // Soft delete
-        user.status = 'Deleted';
-        await user.save();
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'User deleted successfully.');
+        // Delete associated records first to avoid foreign key issues
+        await BusinessProfile.destroy({ where: { userId: user.id }, transaction: t });
+        await Cart.destroy({ where: { userId: user.id }, transaction: t });
+        await Wishlist.destroy({ where: { userId: user.id }, transaction: t });
+        await PartyCalling.destroy({ where: { userId: user.id }, transaction: t });
+        await HelpSupport.destroy({ where: { userId: user.id }, transaction: t });
+        
+        // Dissociate orders and sales returns (setting userId to null)
+        await Order.update({ userId: null }, { where: { userId: user.id }, transaction: t });
+        await SalesReturn.update({ userId: null }, { where: { userId: user.id }, transaction: t });
+        
+        // Now delete the user itself
+        await user.destroy({ transaction: t });
+        
+        await t.commit();
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'User deleted completely from database.');
     } catch (error) {
+        await t.rollback();
         next(error);
     }
 };
