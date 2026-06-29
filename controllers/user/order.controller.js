@@ -44,6 +44,7 @@ export const createOrder = async (req, res) => {
             deliveryMode,
             deliveryRoundId,
             deliveryRoundTiming,
+            deliveryDate,
             totalAmount: frontendTotalAmount // Total sent from frontend for validation
         } = req.body;
 
@@ -378,13 +379,14 @@ export const createOrder = async (req, res) => {
             paymentStatus = 'Pending';
         }
 
-        // Check if there is an existing pending order for this user with matching delivery mode and round ID
+        // Check if there is an existing pending order for this user with matching delivery mode, round ID, and delivery date
         const existingOrder = await Order.findOne({
             where: { 
                 userId, 
                 orderStatus: 'Pending',
                 deliveryMode: deliveryMode || null,
-                deliveryRoundId: deliveryRoundId || null
+                deliveryRoundId: deliveryRoundId || null,
+                deliveryDate: deliveryDate || null
             },
             transaction: t
         });
@@ -471,7 +473,8 @@ export const createOrder = async (req, res) => {
                 deliveryCharge: mergedDeliveryCharge,
                 deliveryMode,
                 deliveryRoundId,
-                deliveryRoundTiming: resolvedDeliveryRoundTiming
+                deliveryRoundTiming: resolvedDeliveryRoundTiming,
+                deliveryDate: deliveryDate || null
             }, { transaction: t });
 
         } else {
@@ -489,6 +492,7 @@ export const createOrder = async (req, res) => {
                 deliveryCharge,
                 deliveryRoundId,
                 deliveryRoundTiming: resolvedDeliveryRoundTiming,
+                deliveryDate: deliveryDate || null,
                 routeCategoryId: userData.routeCategoryId || null
             }, { transaction: t });
 
