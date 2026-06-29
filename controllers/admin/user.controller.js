@@ -357,11 +357,11 @@ export const deleteUser = async (req, res, next) => {
         await Cart.destroy({ where: { userId: user.id }, transaction: t });
         await Wishlist.destroy({ where: { userId: user.id }, transaction: t });
         await PartyCalling.destroy({ where: { userId: user.id }, transaction: t });
-        await HelpSupport.destroy({ where: { userId: user.id }, transaction: t });
+        await HelpSupport.destroy({ where: { userId: user.id }, force: true, transaction: t });
+        await SalesReturn.destroy({ where: { userId: user.id }, force: true, transaction: t });
         
-        // Dissociate orders and sales returns (setting userId to null)
+        // Dissociate orders (setting userId to null)
         await Order.update({ userId: null }, { where: { userId: user.id }, transaction: t });
-        await SalesReturn.update({ userId: null }, { where: { userId: user.id }, transaction: t });
         
         // Now delete the user itself
         await user.destroy({ transaction: t });
