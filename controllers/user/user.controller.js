@@ -338,15 +338,19 @@ export const logoutUser = async (req, res) => {
         const user = await User.findByPk(req.user.id);
         if (user) {
             user.logintoken = null;
+            
             const tokenToRemove = req.body.fcmtoken || req.query.fcmtoken;
             if (tokenToRemove) {
-                user.fcmtoken = removeFcmToken(user.fcmtoken, tokenToRemove);
-            } else {
-                const trimmed = (user.fcmtoken || '').trim();
-                if (!trimmed.startsWith('[')) {
+                // Only clear the FCM token if it matches the one from the device logging out.
+                // This prevents logging out on one device from clearing an active session on another device.
+                if (user.fcmtoken === tokenToRemove.trim()) {
                     user.fcmtoken = null;
                 }
+            } else {
+                // If no specific token is provided, clear it.
+                user.fcmtoken = null;
             }
+            
             await user.save();
         }
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Logged out successfully");
