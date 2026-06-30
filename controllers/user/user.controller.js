@@ -340,18 +340,27 @@ export const getProfile = async (req, res) => {
  */
 export const logoutUser = async (req, res) => {
     try {
+        console.log(`[Logout Debug] Initiating logout for User ID: ${req.user?.id}`);
+        console.log(`[Logout Debug] Request Body:`, JSON.stringify(req.body));
+        console.log(`[Logout Debug] Request Query:`, JSON.stringify(req.query));
+
         const user = await User.findByPk(req.user.id);
         if (user) {
+            console.log(`[Logout Debug] User found in DB. Current FCM Tokens in DB: ${user.fcmtoken}`);
             user.logintoken = null;
             
             // Check all common casings of fcmtoken (fcmtoken, fcmToken, fcm_token)
             const tokenToRemove = req.body.fcmtoken || req.body.fcmToken || req.body.fcm_token || 
                                   req.query.fcmtoken || req.query.fcmToken || req.query.fcm_token;
+            
+            console.log(`[Logout Debug] Token to remove identified as: "${tokenToRemove}"`);
                                   
             if (tokenToRemove) {
-                // Remove only the specific FCM token that is logging out
+                const oldFcm = user.fcmtoken;
                 user.fcmtoken = removeFcmToken(user.fcmtoken, tokenToRemove);
+                console.log(`[Logout Debug] Specific token removal executed. Old: "${oldFcm}" | New: "${user.fcmtoken}"`);
             } else {
+                console.log(`[Logout Debug] No specific token provided. Evaluating existing tokens list...`);
                 // If no specific token is provided:
                 // Parse the existing tokens to see if there are multiple devices
                 let tokens = [];
@@ -368,17 +377,26 @@ export const logoutUser = async (req, res) => {
                     }
                 }
                 
+                console.log(`[Logout Debug] Parsed tokens count: ${tokens.length} | Tokens:`, tokens);
+                
                 // If there's only 1 token (or none), we can safely clear it.
                 // If there are multiple, we do not clear them to prevent breaking notifications on the other active devices.
                 if (tokens.length <= 1) {
                     user.fcmtoken = null;
+                    console.log(`[Logout Debug] 1 or 0 tokens found. Cleared FCM token field entirely (set to null).`);
+                } else {
+                    console.log(`[Logout Debug] Multiple tokens found and no specific tokenToRemove provided. Retaining existing tokens to avoid breaking other devices.`);
                 }
             }
             
             await user.save();
+            console.log(`[Logout Debug] User saved successfully. Final DB FCM token: ${user.fcmtoken}`);
+        } else {
+            console.log(`[Logout Debug] User not found for ID: ${req.user.id}`);
         }
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Logged out successfully");
     } catch (error) {
+        console.error(`[Logout Debug Error] Exception during logout:`, error);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, APP_MESSAGES.INTERNAL_SERVER_ERROR);
     }
 };
