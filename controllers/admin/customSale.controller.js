@@ -48,7 +48,19 @@ export const createCustomSale = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Godown ID is required for stock deduction.");
         }
 
+        // Pre-fetch user's applevel and routeCategoryId if userId is provided
+        let userAppLevel = null;
+        let resolvedRouteCategoryId = null;
+        if (userId) {
+            const userObj = await User.findByPk(userId, { transaction: t });
+            if (userObj) {
+                userAppLevel = userObj.applevel || null;
+                resolvedRouteCategoryId = userObj.routeCategoryId || null;
+            }
+        }
+
         let totalAmount = 0;
+        let totalDiscount = 0;
         const orderItemsData = [];
 
         // 1. Process Items and calculate total
@@ -69,18 +81,56 @@ export const createCustomSale = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant ${variantId} not found.`);
             }
 
-            const itemPrice = parseFloat(manualPrice || variant.purchasePrice || 0);
+            // Resolve regular selling price
+            const pricings = await ProductPricing.findAll({
+                where: { variantId },
+                order: [['minQty', 'ASC']],
+                transaction: t
+            });
+
+            let applicablePricing = null;
+            if (userAppLevel) {
+                applicablePricing = pricings.find(p =>
+                    p.customLevelId === userAppLevel &&
+                    parseFloat(quantity) >= Number(p.minQty) &&
+                    (p.maxQty === null || parseFloat(quantity) <= Number(p.maxQty))
+                );
+                if (!applicablePricing) {
+                    applicablePricing = pricings.find(p => p.customLevelId === userAppLevel);
+                }
+            }
+            if (!applicablePricing && pricings.length > 0) {
+                applicablePricing = pricings[0];
+            }
+
+            let rawPrice = 0;
+            if (applicablePricing) {
+                rawPrice = parseFloat(applicablePricing.price);
+            } else {
+                rawPrice = parseFloat(variant.purchasePrice) || 0;
+            }
+
+            const bUPP = Number(variant.baseUnitsPerPack || 1);
+            const sellUnit = item.sellUnit || 'Base';
+            const regularPrice = sellUnit === 'Inner' ? (rawPrice / bUPP) : rawPrice;
+
+            const itemPrice = parseFloat(manualPrice !== undefined && manualPrice !== null ? manualPrice : regularPrice);
             const itemSubtotal = itemPrice * parseFloat(quantity);
             totalAmount += itemSubtotal;
 
-            const sellUnit = item.sellUnit || 'Base';
-            const isLoose = sellUnit === 'Inner';
+            // Calculate discount (regularPrice - itemPrice)
+            let itemDiscount = 0;
+            if (itemPrice < regularPrice) {
+                itemDiscount = regularPrice - itemPrice;
+            }
+            totalDiscount += itemDiscount * parseFloat(quantity);
             
             orderItemsData.push({
                 productId: variant.productId,
                 variantId,
                 quantity,
                 price: itemPrice,
+                discount: itemDiscount,
                 sellUnit,
                 variantInfo: {
                     productName: variant.product.name,
@@ -109,14 +159,6 @@ export const createCustomSale = async (req, res) => {
         if (paidAmount >= grandTotalAmount) paymentStatus = 'Paid';
         else if (paidAmount > 0) paymentStatus = 'Partial';
 
-        let resolvedRouteCategoryId = null;
-        if (userId) {
-            const userObj = await User.findByPk(userId, { transaction: t });
-            if (userObj) {
-                resolvedRouteCategoryId = userObj.routeCategoryId || null;
-            }
-        }
-
         const status = orderStatus || 'Delivered';
         const now = new Date();
 
@@ -144,6 +186,7 @@ export const createCustomSale = async (req, res) => {
             totalAmount: grandTotalAmount,
             paidAmount,
             dueAmount,
+            discount: totalDiscount,
             paymentMethod: paymentMethod || 'Cash',
             paymentStatus,
             orderStatus: status,

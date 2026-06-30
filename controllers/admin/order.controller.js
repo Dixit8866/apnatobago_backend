@@ -107,7 +107,7 @@ export const downloadDeliveryLabel = async (req, res) => {
 export const getAllOrders = async (req, res) => {
     try {
         const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming } = req.query;
-        const where = { saleType: 'Online' }; // Strictly filter online user orders to exclude direct admin/POS sales
+        const where = {};
 
         // Pre-fetch settings to resolve any empty deliveryRoundTiming
         const appSettings = await AppSettings.findOne();
@@ -369,7 +369,7 @@ export const getAllOrders = async (req, res) => {
         }
 
         // ── Calculate Dynamic Status Counts for Tab Badges ────────────────────────
-        const countWhere = { saleType: 'Online' };
+        const countWhere = {};
         const countInclude = [];
 
         if (routeCategoryId) {

@@ -43,6 +43,10 @@ const OrderItem = sequelize.define(
                 isIn: [['Base', 'Inner']]
             }
         },
+        discount: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
+        },
     },
     {
         timestamps: true,

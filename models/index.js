@@ -435,6 +435,14 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE admins ADD COLUMN IF NOT EXISTS "fcmtoken" TEXT');
         } catch (e) { console.log('[Migration Warning] Add admins fcmtoken column failed:', e.message); }
 
+        try {
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "discount" DECIMAL(10, 2) DEFAULT 0');
+        } catch (e) { console.log('[Migration Warning] Add orders discount column failed:', e.message); }
+
+        try {
+            await sequelize.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS "discount" DECIMAL(10, 2) DEFAULT 0');
+        } catch (e) { console.log('[Migration Warning] Add order_items discount column failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);
