@@ -52,6 +52,7 @@ const User = sequelize.define('User', {
     applevel: {
         type: DataTypes.UUID,
         allowNull: true,
+        defaultValue: '6b0722c6-ee28-4058-b4de-a961d1b16da0',
     },
     routeCategoryId: {
         type: DataTypes.UUID,

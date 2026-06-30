@@ -24,12 +24,7 @@ export const createUser = async (req, res, next) => {
         // Handle Default App Level (Premium)
         let finalAppLevel = applevel;
         if (!finalAppLevel) {
-            const basicLevel = await CustomLevel.findOne({ 
-                where: { name: { [Op.iLike]: 'Premium' } } 
-            });
-            if (basicLevel) {
-                finalAppLevel = basicLevel.id;
-            }
+            finalAppLevel = '6b0722c6-ee28-4058-b4de-a961d1b16da0';
         }
 
         let resolvedDeliveryRoundTiming = null;

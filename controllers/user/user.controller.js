@@ -190,11 +190,7 @@ export const registerUser = async (req, res) => {
         }
 
         // Auto-assign Premium level to new users
-        let defaultAppLevel = null;
-        try {
-            const basicLevel = await CustomLevel.findOne({ where: { name: { [Op.iLike]: 'Premium' }, status: 'Active' } });
-            if (basicLevel) defaultAppLevel = basicLevel.id;
-        } catch (_) { /* silent — don't block registration if level fetch fails */ }
+        const defaultAppLevel = '6b0722c6-ee28-4058-b4de-a961d1b16da0';
 
         const user = await User.create({
             fullname,
