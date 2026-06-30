@@ -329,6 +329,11 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Orders routeCategoryId column failed:', e.message); }
 
         try {
+            // Add isMerged to orders table
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "isMerged" BOOLEAN DEFAULT false');
+        } catch (e) { console.log('[Migration Warning] Orders isMerged column failed:', e.message); }
+
+        try {
             // Add deviceType and version to users table
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deviceType" VARCHAR(255)');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "version" VARCHAR(255)');

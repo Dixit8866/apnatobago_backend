@@ -135,6 +135,10 @@ const Order = sequelize.define(
             type: DataTypes.DECIMAL(10, 2),
             defaultValue: 0,
         },
+        isMerged: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false,
+        },
     },
     {
         timestamps: true,

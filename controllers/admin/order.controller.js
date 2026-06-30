@@ -1445,76 +1445,103 @@ export const deleteOrderItem = async (req, res) => {
 export const mergeOrders = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { sourceOrderId, targetOrderId } = req.body;
+        const { sourceOrderId, sourceOrderIds, targetOrderId, targetStatus } = req.body;
 
-        if (!sourceOrderId || !targetOrderId) {
+        const resolvedSourceOrderIds = sourceOrderIds || (sourceOrderId ? [sourceOrderId] : []);
+
+        if (resolvedSourceOrderIds.length === 0 || !targetOrderId) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Source and Target Order IDs are required.");
         }
 
-        if (sourceOrderId === targetOrderId) {
+        if (resolvedSourceOrderIds.includes(targetOrderId)) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot merge an order into itself.");
         }
 
-        // Fetch source and target orders
-        const sourceOrder = await Order.findByPk(sourceOrderId, {
-            include: [{ model: OrderItem, as: 'items' }],
-            transaction: t
-        });
-
+        // Fetch target order
         const targetOrder = await Order.findByPk(targetOrderId, {
             include: [{ model: OrderItem, as: 'items' }],
             transaction: t
         });
 
-        if (!sourceOrder || !targetOrder) {
+        if (!targetOrder) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "One or both orders not found.");
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Target order not found.");
         }
 
-        // Verify they belong to the same customer
-        const sameUser = sourceOrder.userId && targetOrder.userId && sourceOrder.userId === targetOrder.userId;
-        const sameGuest = !sourceOrder.userId && !targetOrder.userId && 
-                          sourceOrder.customerName === targetOrder.customerName && 
-                          sourceOrder.customerNumber === targetOrder.customerNumber;
+        let combinedNotes = [targetOrder.notes];
+        let newPaidAmount = Number(targetOrder.paidAmount || 0);
 
-        if (!sameUser && !sameGuest) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Orders must belong to the same customer to be merged.");
-        }
-
-        // Verify status is mergeable (Pending, Packaging, Packed)
+        // Verify status of target is mergeable (Pending, Packaging, Packed)
         const allowedStatuses = ['Pending', 'Packaging', 'Packed'];
-        if (!allowedStatuses.includes(sourceOrder.orderStatus) || !allowedStatuses.includes(targetOrder.orderStatus)) {
+        if (!allowedStatuses.includes(targetOrder.orderStatus)) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Only orders in Pending, Packaging, or Packed status can be merged.");
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Target order must be in Pending, Packaging, or Packed status.");
         }
 
-        // Merge Items
-        for (const sourceItem of sourceOrder.items) {
-            const { variantId, quantity, price, sellUnit, productId, variantInfo, discount } = sourceItem;
+        // Loop through each source order and merge it
+        for (const sId of resolvedSourceOrderIds) {
+            const sourceOrder = await Order.findByPk(sId, {
+                include: [{ model: OrderItem, as: 'items' }],
+                transaction: t
+            });
 
-            // Check if item already exists in target order
-            const targetItem = targetOrder.items.find(
-                item => item.variantId === variantId && item.sellUnit === sellUnit
-            );
-
-            if (targetItem) {
-                const newQty = Number(targetItem.quantity) + Number(quantity);
-                const newDiscount = Number(targetItem.discount || 0) + Number(discount || 0);
-                
-                // Calculate weighted average price to preserve exact amount
-                const newPrice = ((Number(targetItem.price) * Number(targetItem.quantity)) + 
-                                  (Number(price) * Number(quantity))) / newQty;
-
-                await targetItem.update({
-                    quantity: newQty,
-                    price: newPrice.toFixed(2),
-                    discount: newDiscount.toFixed(2)
-                }, { transaction: t });
-            } else {
-                // Change orderId of the source item to target order
-                await sourceItem.update({ orderId: targetOrder.id }, { transaction: t });
+            if (!sourceOrder) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Source order ${sId} not found.`);
             }
+
+            // Verify they belong to the same customer
+            const sameUser = sourceOrder.userId && targetOrder.userId && sourceOrder.userId === targetOrder.userId;
+            const sameGuest = !sourceOrder.userId && !targetOrder.userId && 
+                              sourceOrder.customerName === targetOrder.customerName && 
+                              sourceOrder.customerNumber === targetOrder.customerNumber;
+
+            if (!sameUser && !sameGuest) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Orders must belong to the same customer to be merged.");
+            }
+
+            if (!allowedStatuses.includes(sourceOrder.orderStatus)) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Only orders in Pending, Packaging, or Packed status can be merged.");
+            }
+
+            // Merge Items
+            for (const sourceItem of sourceOrder.items) {
+                const { variantId, quantity, price, sellUnit, productId, variantInfo, discount } = sourceItem;
+
+                // Check if item already exists in target order
+                const targetItem = targetOrder.items.find(
+                    item => item.variantId === variantId && item.sellUnit === sellUnit
+                );
+
+                if (targetItem) {
+                    const newQty = Number(targetItem.quantity) + Number(quantity);
+                    const newDiscount = Number(targetItem.discount || 0) + Number(discount || 0);
+                    
+                    // Calculate weighted average price to preserve exact amount
+                    const newPrice = ((Number(targetItem.price) * Number(targetItem.quantity)) + 
+                                      (Number(price) * Number(quantity))) / newQty;
+
+                    await targetItem.update({
+                        quantity: newQty,
+                        price: newPrice.toFixed(2),
+                        discount: newDiscount.toFixed(2)
+                    }, { transaction: t });
+                } else {
+                    // Change orderId of the source item to target order
+                    await sourceItem.update({ orderId: targetOrder.id }, { transaction: t });
+                }
+            }
+
+            // Combine paid amount and notes
+            newPaidAmount += Number(sourceOrder.paidAmount || 0);
+            if (sourceOrder.notes) {
+                combinedNotes.push(sourceOrder.notes);
+            }
+
+            // Delete the source order
+            await sourceOrder.destroy({ transaction: t });
         }
 
         // Recalculate Target Order Totals
@@ -1535,7 +1562,7 @@ export const mergeOrders = async (req, res) => {
         let newDeliveryCharge = 0;
         
         // Use target order's delivery mode
-        const deliveryMode = targetOrder.deliveryMode || sourceOrder.deliveryMode || 'Outlet';
+        const deliveryMode = targetOrder.deliveryMode || 'Outlet';
         
         if (settings && newSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
             if (deliveryMode === 'Express') newDeliveryCharge = parseFloat(settings.expressDeliveryCharge || 0);
@@ -1543,14 +1570,13 @@ export const mergeOrders = async (req, res) => {
         }
 
         const newTotalAmount = roundTotal(newSubtotal + newDeliveryCharge);
-        const newPaidAmount = Number(targetOrder.paidAmount || 0) + Number(sourceOrder.paidAmount || 0);
         const newDueAmount = Math.max(0, newTotalAmount - newPaidAmount);
 
-        // Update target order status
-        const hierarchy = { 'Pending': 1, 'Packaging': 2, 'Packed': 3 };
-        const valA = hierarchy[targetOrder.orderStatus] || 0;
-        const valB = hierarchy[sourceOrder.orderStatus] || 0;
-        const mergedStatus = valA >= valB ? targetOrder.orderStatus : sourceOrder.orderStatus;
+        // Update target order status to targetStatus if provided, otherwise keep target status
+        let mergedStatus = targetOrder.orderStatus;
+        if (targetStatus && allowedStatuses.includes(targetStatus)) {
+            mergedStatus = targetStatus;
+        }
 
         // Update target order
         await targetOrder.update({
@@ -1560,11 +1586,9 @@ export const mergeOrders = async (req, res) => {
             discount: newTotalDiscount,
             deliveryCharge: newDeliveryCharge,
             orderStatus: mergedStatus,
-            notes: [targetOrder.notes, sourceOrder.notes].filter(Boolean).join('\n')
+            isMerged: true,
+            notes: combinedNotes.filter(Boolean).join('\n')
         }, { transaction: t });
-
-        // Delete the source order
-        await sourceOrder.destroy({ transaction: t });
 
         await t.commit();
         return sendSuccessResponse(res, HTTP_STATUS.OK, `Orders merged successfully into ${targetOrder.orderId}.`, targetOrder);
