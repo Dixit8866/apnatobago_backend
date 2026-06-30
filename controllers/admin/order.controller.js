@@ -3,6 +3,7 @@ import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignmen
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
+import sequelize from '../../config/db.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML } from '../../utils/invoiceGenerator.js';
 import { sendToDevice } from '../../services/notification.service.js';
