@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, User, Volume, InventoryStock, InventoryTransaction, AppSettings } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, ProductPricing, User, Volume, InventoryStock, InventoryTransaction, AppSettings } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
