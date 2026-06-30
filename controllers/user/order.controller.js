@@ -64,6 +64,7 @@ const sendPushToAllAdmins = async (title, body, data = {}) => {
  * @access  Private
  */
 export const createOrder = async (req, res) => {
+    logger.info(`[Create Order] Started. Body: ${JSON.stringify(req.body)}, User: ${req.user?.id}`);
     const t = await sequelize.transaction();
     try {
         const {
@@ -81,6 +82,7 @@ export const createOrder = async (req, res) => {
 
         // Fetch User and target Godown at the beginning for stock validation
         const userData = await User.findByPk(userId, { transaction: t });
+        logger.info(`[Create Order] User data fetched: ${userData ? userData.fullname : 'None'}`);
         if (!userData) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
@@ -407,6 +409,7 @@ export const createOrder = async (req, res) => {
             paymentStatus = 'Pending';
         }
 
+        logger.info(`[Create Order] Calculated subtotal: ${calculatedSubtotal}. Checking for existing pending order.`);
         // Check if there is an existing pending order for this user with matching delivery mode, round ID, and delivery date
         const existingOrder = await Order.findOne({
             where: { 
@@ -422,6 +425,7 @@ export const createOrder = async (req, res) => {
         let targetOrder = null;
 
         if (existingOrder) {
+            logger.info(`[Create Order] Found existing pending order: ${existingOrder.id}. Merging items.`);
             targetOrder = existingOrder;
 
             // Merge items into the existing order
@@ -494,6 +498,7 @@ export const createOrder = async (req, res) => {
 
             const mergedTotal = roundTotal(mergedSubtotal + mergedDeliveryCharge);
 
+            logger.info(`[Create Order] Updating existing order: ${existingOrder.id} with total: ${mergedTotal}`);
             // Update the existing order details
             await existingOrder.update({
                 totalAmount: mergedTotal,
@@ -506,6 +511,7 @@ export const createOrder = async (req, res) => {
             }, { transaction: t });
 
         } else {
+            logger.info(`[Create Order] Creating new order. totalAmount: ${finalTotal}, paymentMethod: ${paymentMethod}`);
             // Create a new Order
             const newOrder = await Order.create({
                 orderId: await generateUniqueOrderId(),
@@ -526,6 +532,7 @@ export const createOrder = async (req, res) => {
 
             targetOrder = newOrder;
 
+            logger.info(`[Create Order] New order created: ${newOrder.id}. Creating order items.`);
             // Create Order Items
             const finalOrderItems = orderItemsData.map(item => ({
                 ...item,
@@ -535,9 +542,11 @@ export const createOrder = async (req, res) => {
             await OrderItem.bulkCreate(finalOrderItems, { transaction: t });
         }
 
+        logger.info(`[Create Order] Order saved. Clearing cart for user: ${userId}`);
         // 7. Clear Cart
         await Cart.destroy({ where: { userId }, transaction: t });
 
+        logger.info(`[Create Order] Cart cleared. Deducting stock from Godown: ${targetGodownId}`);
         // 8. Deduct Stock from Inventory
         if (targetGodownId) {
             for (const item of orderItemsData) {
@@ -669,7 +678,9 @@ export const createOrder = async (req, res) => {
             logger.error(`[Stock Deduction]: No Godown found to deduct stock for Order #${targetOrder.orderId}`);
         }
 
+        logger.info(`[Create Order] Stock deducted successfully. Committing transaction.`);
         await t.commit();
+        logger.info(`[Create Order] Transaction committed successfully.`);
 
         // 9. Trigger Admin Notification (Real-time)
         try {
@@ -720,13 +731,19 @@ export const createOrder = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, existingOrder ? "Order updated successfully." : "Order placed successfully.", targetOrder);
     } catch (error) {
-        if (t) await t.rollback();
-        if (error.name === 'SequelizeValidationError') {
-            const details = error.errors.map(e => `${e.path}: ${e.message}`).join(', ');
-            logger.error(`[Create Order Validation Error]: ${details}`);
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Validation error: ${details}`, error.errors);
+        logger.error(`[Create Order Error Catch]: ${error.message}`);
+        logger.error(error.stack || error);
+        if (error.errors) {
+            logger.error(`[Create Order Detailed Errors]: ${JSON.stringify(error.errors)}`);
         }
-        logger.error(`[Create Order Error]: ${error.message}`);
+        if (t) {
+            try {
+                await t.rollback();
+                logger.info(`[Create Order] Transaction rolled back.`);
+            } catch (rollbackErr) {
+                logger.error(`[Create Order] Rollback failed: ${rollbackErr.message}`);
+            }
+        }
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
