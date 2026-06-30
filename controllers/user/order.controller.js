@@ -721,6 +721,11 @@ export const createOrder = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, existingOrder ? "Order updated successfully." : "Order placed successfully.", targetOrder);
     } catch (error) {
         if (t) await t.rollback();
+        if (error.name === 'SequelizeValidationError') {
+            const details = error.errors.map(e => `${e.path}: ${e.message}`).join(', ');
+            logger.error(`[Create Order Validation Error]: ${details}`);
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Validation error: ${details}`, error.errors);
+        }
         logger.error(`[Create Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
