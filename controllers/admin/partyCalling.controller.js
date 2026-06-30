@@ -80,9 +80,26 @@ export const getDailyPartyCalls = async (req, res, next) => {
             }
         ];
 
-        // Fetch all matching users (without offset/limit yet to compute accurate in-memory tab counts)
+        // Fetch all matching users (without offset/limit yet to compute accurate in-memory tab counts) with their last order date
         const users = await User.findAll({
             where: userWhere,
+            attributes: {
+                include: [
+                    [
+                        User.sequelize.literal(`(
+                            SELECT "createdAt"
+                            FROM "orders" AS "order"
+                            WHERE
+                                "order"."userId" = "User".id
+                                AND "order"."orderStatus" NOT IN ('Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel')
+                                AND "order"."deletedAt" IS NULL
+                            ORDER BY "order"."createdAt" DESC
+                            LIMIT 1
+                        )`),
+                        'lastOrderDate'
+                    ]
+                ]
+            },
             include,
             order: [
                 ['fullname', 'ASC']
@@ -265,17 +282,15 @@ export const getInactivePartyCalls = async (req, res, next) => {
             day: '2-digit'
         }).format(new Date());
 
-        // Parse selected start date. Default to 2 days ago if not provided.
+        // Parse selected start date. Default to today if not provided.
         let startDateStr = date;
         if (!startDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(startDateStr)) {
-            const d = new Date();
-            d.setDate(d.getDate() - 2);
             startDateStr = new Intl.DateTimeFormat('en-CA', {
                 timeZone: 'Asia/Kolkata',
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit'
-            }).format(d);
+            }).format(new Date());
         }
 
         const rangeStart = new Date(`${startDateStr}T00:00:00+05:30`);
@@ -333,9 +348,26 @@ export const getInactivePartyCalls = async (req, res, next) => {
             }
         ];
 
-        // Fetch all matching users
+        // Fetch all matching users with their last order date
         const users = await User.findAll({
             where: userWhere,
+            attributes: {
+                include: [
+                    [
+                        User.sequelize.literal(`(
+                            SELECT "createdAt"
+                            FROM "orders" AS "order"
+                            WHERE
+                                "order"."userId" = "User".id
+                                AND "order"."orderStatus" NOT IN ('Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel')
+                                AND "order"."deletedAt" IS NULL
+                            ORDER BY "order"."createdAt" DESC
+                            LIMIT 1
+                        )`),
+                        'lastOrderDate'
+                    ]
+                ]
+            },
             include,
             order: [
                 ['fullname', 'ASC']
