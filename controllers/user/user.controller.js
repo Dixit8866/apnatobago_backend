@@ -35,13 +35,13 @@ const sendSMS = async (fullNumber, otp) => {
     try {
         // Clean number (remove '+' if present)
         const cleanNumber = fullNumber.replace('+', '');
-        
+
         // DLT Approved Template: {#var#} is your mobile verification code. Regards, {#var#} Call: {#var#} Team MRSTXI
         // We must fill all 3 variables exactly
         const companyName = "MRSTXI";
         const supportContact = "MRSTXI"; // You can replace this with a support number later
         const text = `${otp} is your mobile verification code. Regards, ${companyName} Call: ${supportContact} Team MRSTXI`;
-        
+
         const smsParams = {
             APIKey: process.env.SMS_API_KEY || 'isGOxtla5EKjl6skCtuFqQ',
             senderid: process.env.SMS_SENDER_ID || 'MRSTXI',
@@ -60,7 +60,7 @@ const sendSMS = async (fullNumber, otp) => {
         const fullUrl = `${baseURL}?${urlParams}`;
 
         const response = await axios.get(fullUrl);
-        
+
         return true;
     } catch (smsError) {
         console.error(`[SMS Error] Failed to send SMS:`, smsError.message);
@@ -85,13 +85,13 @@ export const sendOtp = async (req, res) => {
         const user = await User.findOne({ where: { number } });
         let fullNumber = number;
         if (user && user.dialcode) {
-             // Avoid double dialcode (if number already starts with dialcode)
-             const pureDialcode = user.dialcode.replace('+', '');
-             if (number.startsWith(pureDialcode)) {
-                 fullNumber = number;
-             } else {
-                 fullNumber = `${pureDialcode}${number}`;
-             }
+            // Avoid double dialcode (if number already starts with dialcode)
+            const pureDialcode = user.dialcode.replace('+', '');
+            if (number.startsWith(pureDialcode)) {
+                fullNumber = number;
+            } else {
+                fullNumber = `${pureDialcode}${number}`;
+            }
         }
 
         let otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -128,12 +128,12 @@ export const verifyOtp = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number and OTP");
         }
 
-        const otpRecord = await OTP.findOne({ 
-            where: { 
-                number, 
+        const otpRecord = await OTP.findOne({
+            where: {
+                number,
                 otp,
                 expiresAt: { [Op.gt]: new Date() }
-            } 
+            }
         });
 
         if (!otpRecord) {
@@ -146,11 +146,11 @@ export const verifyOtp = async (req, res) => {
         }
 
         user.status = 'Active';
-        
+
         if (fcmtoken) {
             user.fcmtoken = addFcmToken(user.fcmtoken, fcmtoken);
         }
-        
+
         // Resolve FCM token to store in the JWT payload
         let fcmtokenToJWT = fcmtoken;
         if (!fcmtokenToJWT && user.fcmtoken) {
@@ -163,7 +163,7 @@ export const verifyOtp = async (req, res) => {
                 fcmtokenToJWT = user.fcmtoken;
             }
         }
-        
+
         const token = generateToken(user.id, fcmtokenToJWT);
         user.logintoken = token;
         await user.save();
@@ -231,7 +231,7 @@ export const registerUser = async (req, res) => {
         if (user) {
             const pureDialcode = dialcode.replace('+', '');
             const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
-            
+
             let otp = Math.floor(100000 + Math.random() * 900000).toString();
             const isTest = isTestNumber(number);
             if (isTest) {
@@ -240,7 +240,7 @@ export const registerUser = async (req, res) => {
             const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
             await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-            
+
             if (!isTest) {
                 await sendSMS(fullNumber, otp);
             }
@@ -285,7 +285,7 @@ export const loginUser = async (req, res) => {
 
         const pureDialcode = (dialcode || user.dialcode || '+91').replace('+', '');
         const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
-        
+
         let otp = Math.floor(100000 + Math.random() * 900000).toString();
         const isTest = isTestNumber(number);
         if (isTest) {
@@ -293,11 +293,11 @@ export const loginUser = async (req, res) => {
         }
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-        
+
         if (!isTest) {
             await sendSMS(fullNumber, otp);
         }
-        
+
         if (fcmtoken) {
             user.fcmtoken = addFcmToken(user.fcmtoken, fcmtoken);
             await user.save();
@@ -325,7 +325,7 @@ export const getProfile = async (req, res) => {
 
         // Sum the dueAmount for all orders of this user
         const totalDueAmount = await Order.sum('dueAmount', {
-            where: { 
+            where: {
                 userId: req.user.id,
                 orderStatus: { [Op.ne]: 'Cancelled' }
             }
@@ -361,15 +361,17 @@ export const logoutUser = async (req, res) => {
         console.log(`[Logout Debug] Request Body:`, JSON.stringify(req.body));
         console.log(`[Logout Debug] Request Query:`, JSON.stringify(req.query));
 
+        console.log(req, "===req")
+
         const user = await User.findByPk(req.user.id);
         if (user) {
             console.log(`[Logout Debug] User found in DB. Current FCM Tokens in DB: ${user.fcmtoken}`);
             user.logintoken = null;
-            
+
             // Check all common casings of fcmtoken (fcmtoken, fcmToken, fcm_token)
-            let tokenToRemove = req.body.fcmtoken || req.body.fcmToken || req.body.fcm_token || 
-                                req.query.fcmtoken || req.query.fcmToken || req.query.fcm_token;
-            
+            let tokenToRemove = req.body.fcmtoken || req.body.fcmToken || req.body.fcm_token ||
+                req.query.fcmtoken || req.query.fcmToken || req.query.fcm_token;
+
             // Fallback: If no token is passed in the request body/query, retrieve it from the JWT payload
             if (!tokenToRemove) {
                 const authHeader = req.headers.authorization;
@@ -386,9 +388,9 @@ export const logoutUser = async (req, res) => {
                     }
                 }
             }
-            
+
             console.log(`[Logout Debug] Token to remove identified as: "${tokenToRemove}"`);
-                                  
+
             if (tokenToRemove) {
                 const oldFcm = user.fcmtoken;
                 user.fcmtoken = removeFcmToken(user.fcmtoken, tokenToRemove);
@@ -410,9 +412,9 @@ export const logoutUser = async (req, res) => {
                         tokens = [trimmed];
                     }
                 }
-                
+
                 console.log(`[Logout Debug] Parsed tokens count: ${tokens.length} | Tokens:`, tokens);
-                
+
                 // If there's only 1 token (or none), we can safely clear it.
                 // If there are multiple, we do not clear them to prevent breaking notifications on the other active devices.
                 if (tokens.length <= 1) {
@@ -422,7 +424,7 @@ export const logoutUser = async (req, res) => {
                     console.log(`[Logout Debug] Multiple tokens found and no specific tokenToRemove provided. Retaining existing tokens to avoid breaking other devices.`);
                 }
             }
-            
+
             await user.save();
             console.log(`[Logout Debug] User saved successfully. Final DB FCM token: ${user.fcmtoken}`);
         } else {
@@ -460,7 +462,7 @@ export const editProfile = async (req, res) => {
     try {
         const { fullname, email, dialcode, number, city, postcode, orderReminder, reminderTime } = req.body;
         const user = await User.findByPk(req.user.id);
-        
+
         if (!user) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
         }
@@ -481,11 +483,11 @@ export const editProfile = async (req, res) => {
         user.email = email !== undefined ? email : user.email;
         user.city = city !== undefined ? city : user.city;
         user.postcode = postcode !== undefined ? postcode : user.postcode;
-        
+
         if (orderReminder !== undefined) {
             user.orderReminder = orderReminder;
         }
-        
+
         if (reminderTime !== undefined) {
             user.reminderTime = reminderTime;
         }
@@ -498,7 +500,7 @@ export const editProfile = async (req, res) => {
 
         // Sum the dueAmount for all orders of this user so editProfile has it too!
         const totalDueAmount = await Order.sum('dueAmount', {
-            where: { 
+            where: {
                 userId: req.user.id,
                 orderStatus: { [Op.ne]: 'Cancelled' }
             }
@@ -544,7 +546,7 @@ export const forgotPassword = async (req, res) => {
 
         const pureDialcode = (user.dialcode || '+91').replace('+', '');
         const fullNumber = number.startsWith(pureDialcode) ? number : `${pureDialcode}${number}`;
-        
+
         let otp = Math.floor(100000 + Math.random() * 900000).toString();
         const isTest = isTestNumber(number);
         if (isTest) {
@@ -553,7 +555,7 @@ export const forgotPassword = async (req, res) => {
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await OTP.upsert({ number, otp, expiresAt }, { where: { number } });
-        
+
         if (!isTest) {
             await sendSMS(fullNumber, otp);
         }
@@ -573,7 +575,7 @@ export const forgotPassword = async (req, res) => {
 export const resetPassword = async (req, res) => {
     try {
         const { number, newPassword, confirmPassword } = req.body;
-        
+
         if (!number || !newPassword || !confirmPassword) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
         }
@@ -589,7 +591,7 @@ export const resetPassword = async (req, res) => {
 
         user.password = newPassword;
         // Reset logintoken to force logout everywhere
-        user.logintoken = null; 
+        user.logintoken = null;
         await user.save();
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Password reset successfully");
@@ -607,7 +609,7 @@ export const resetPassword = async (req, res) => {
 export const changePassword = async (req, res) => {
     try {
         const { oldPassword, newPassword, confirmPassword } = req.body;
-        
+
         if (!oldPassword || !newPassword || !confirmPassword) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields");
         }
