@@ -1436,3 +1436,189 @@ export const deleteOrderItem = async (req, res) => {
     }
 };
 
+/**
+ * @desc    Merge two orders of the same customer
+ * @route   POST /api/admin/orders/merge
+ * @access  Private (Admin)
+ */
+export const mergeOrders = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { sourceOrderId, targetOrderId } = req.body;
+
+        if (!sourceOrderId || !targetOrderId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Source and Target Order IDs are required.");
+        }
+
+        if (sourceOrderId === targetOrderId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot merge an order into itself.");
+        }
+
+        // Fetch source and target orders
+        const sourceOrder = await Order.findByPk(sourceOrderId, {
+            include: [{ model: OrderItem, as: 'items' }],
+            transaction: t
+        });
+
+        const targetOrder = await Order.findByPk(targetOrderId, {
+            include: [{ model: OrderItem, as: 'items' }],
+            transaction: t
+        });
+
+        if (!sourceOrder || !targetOrder) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "One or both orders not found.");
+        }
+
+        // Verify they belong to the same customer
+        const sameUser = sourceOrder.userId && targetOrder.userId && sourceOrder.userId === targetOrder.userId;
+        const sameGuest = !sourceOrder.userId && !targetOrder.userId && 
+                          sourceOrder.customerName === targetOrder.customerName && 
+                          sourceOrder.customerNumber === targetOrder.customerNumber;
+
+        if (!sameUser && !sameGuest) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Orders must belong to the same customer to be merged.");
+        }
+
+        // Verify status is mergeable (Pending, Packaging, Packed)
+        const allowedStatuses = ['Pending', 'Packaging', 'Packed'];
+        if (!allowedStatuses.includes(sourceOrder.orderStatus) || !allowedStatuses.includes(targetOrder.orderStatus)) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Only orders in Pending, Packaging, or Packed status can be merged.");
+        }
+
+        // Merge Items
+        for (const sourceItem of sourceOrder.items) {
+            const { variantId, quantity, price, sellUnit, productId, variantInfo, discount } = sourceItem;
+
+            // Check if item already exists in target order
+            const targetItem = targetOrder.items.find(
+                item => item.variantId === variantId && item.sellUnit === sellUnit
+            );
+
+            if (targetItem) {
+                const newQty = Number(targetItem.quantity) + Number(quantity);
+                const newDiscount = Number(targetItem.discount || 0) + Number(discount || 0);
+                
+                // Calculate weighted average price to preserve exact amount
+                const newPrice = ((Number(targetItem.price) * Number(targetItem.quantity)) + 
+                                  (Number(price) * Number(quantity))) / newQty;
+
+                await targetItem.update({
+                    quantity: newQty,
+                    price: newPrice.toFixed(2),
+                    discount: newDiscount.toFixed(2)
+                }, { transaction: t });
+            } else {
+                // Change orderId of the source item to target order
+                await sourceItem.update({ orderId: targetOrder.id }, { transaction: t });
+            }
+        }
+
+        // Recalculate Target Order Totals
+        const updatedTargetItems = await OrderItem.findAll({
+            where: { orderId: targetOrder.id },
+            transaction: t
+        });
+
+        let newSubtotal = 0;
+        let newTotalDiscount = 0;
+        for (const item of updatedTargetItems) {
+            newSubtotal += Number(item.price) * Number(item.quantity);
+            newTotalDiscount += Number(item.discount || 0) * Number(item.quantity);
+        }
+
+        // Fetch settings for delivery charge recalculation
+        const settings = await AppSettings.findOne({ transaction: t });
+        let newDeliveryCharge = 0;
+        
+        // Use target order's delivery mode
+        const deliveryMode = targetOrder.deliveryMode || sourceOrder.deliveryMode || 'Outlet';
+        
+        if (settings && newSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
+            if (deliveryMode === 'Express') newDeliveryCharge = parseFloat(settings.expressDeliveryCharge || 0);
+            else if (deliveryMode === 'Round') newDeliveryCharge = parseFloat(settings.deliveryOnRoundCharge || 0);
+        }
+
+        const newTotalAmount = roundTotal(newSubtotal + newDeliveryCharge);
+        const newPaidAmount = Number(targetOrder.paidAmount || 0) + Number(sourceOrder.paidAmount || 0);
+        const newDueAmount = Math.max(0, newTotalAmount - newPaidAmount);
+
+        // Update target order status
+        const hierarchy = { 'Pending': 1, 'Packaging': 2, 'Packed': 3 };
+        const valA = hierarchy[targetOrder.orderStatus] || 0;
+        const valB = hierarchy[sourceOrder.orderStatus] || 0;
+        const mergedStatus = valA >= valB ? targetOrder.orderStatus : sourceOrder.orderStatus;
+
+        // Update target order
+        await targetOrder.update({
+            totalAmount: newTotalAmount,
+            paidAmount: newPaidAmount,
+            dueAmount: newDueAmount,
+            discount: newTotalDiscount,
+            deliveryCharge: newDeliveryCharge,
+            orderStatus: mergedStatus,
+            notes: [targetOrder.notes, sourceOrder.notes].filter(Boolean).join('\n')
+        }, { transaction: t });
+
+        // Delete the source order
+        await sourceOrder.destroy({ transaction: t });
+
+        await t.commit();
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `Orders merged successfully into ${targetOrder.orderId}.`, targetOrder);
+    } catch (error) {
+        if (t) await t.rollback();
+        logger.error(`[Merge Orders Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get all other orders for the same customer that can be merged
+ * @route   GET /api/admin/orders/:id/mergeable
+ * @access  Private (Admin)
+ */
+export const getMergeableOrders = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const order = await Order.findByPk(id);
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const where = {
+            id: { [Op.ne]: id },
+            orderStatus: { [Op.in]: ['Pending', 'Packaging', 'Packed'] }
+        };
+
+        if (order.userId) {
+            where.userId = order.userId;
+        } else {
+            where.userId = null;
+            where.customerName = order.customerName;
+            where.customerNumber = order.customerNumber;
+        }
+
+        const mergeableOrders = await Order.findAll({
+            where,
+            include: [
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name'] },
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] }
+                    ]
+                }
+            ],
+            order: [['createdAt', 'DESC']]
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Mergeable orders fetched successfully.", mergeableOrders);
+    } catch (error) {
+        logger.error(`[Get Mergeable Orders Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+

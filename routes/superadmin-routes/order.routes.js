@@ -9,7 +9,9 @@ import {
     bulkVerifyPayments,
     updateOrderItem,
     addOrderItem,
-    deleteOrderItem
+    deleteOrderItem,
+    mergeOrders,
+    getMergeableOrders
 } from '../../controllers/admin/order.controller.js';
 import { getSalesReturns, approveSalesReturn } from '../../controllers/common/salesReturn.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
@@ -18,6 +20,8 @@ const router = express.Router();
 
 // Define specific routes first with individual protect middleware to prevent route clashing with public /:id wildcard
 router.get('/sales-returns', protect, getSalesReturns);
+router.post('/merge', protect, mergeOrders);
+router.get('/:id/mergeable', protect, getMergeableOrders);
 
 // Public route for order invoice / details view
 router.get('/:id', getOrderDetails);
