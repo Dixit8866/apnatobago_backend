@@ -118,7 +118,7 @@ export const sendOtp = async (req, res) => {
  */
 export const verifyOtp = async (req, res) => {
     try {
-        const { number, otp } = req.body;
+        const { number, otp, fcmtoken } = req.body;
 
         if (!number || !otp) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide phone number and OTP");
@@ -144,6 +144,11 @@ export const verifyOtp = async (req, res) => {
         user.status = 'Active';
         const token = generateToken(user.id);
         user.logintoken = token;
+        
+        if (fcmtoken) {
+            user.fcmtoken = addFcmToken(user.fcmtoken, fcmtoken);
+        }
+        
         await user.save();
 
         await OTP.destroy({ where: { number } });
@@ -339,7 +344,10 @@ export const logoutUser = async (req, res) => {
         if (user) {
             user.logintoken = null;
             
-            const tokenToRemove = req.body.fcmtoken || req.query.fcmtoken;
+            // Check all common casings of fcmtoken (fcmtoken, fcmToken, fcm_token)
+            const tokenToRemove = req.body.fcmtoken || req.body.fcmToken || req.body.fcm_token || 
+                                  req.query.fcmtoken || req.query.fcmToken || req.query.fcm_token;
+                                  
             if (tokenToRemove) {
                 // Remove only the specific FCM token that is logging out
                 user.fcmtoken = removeFcmToken(user.fcmtoken, tokenToRemove);
@@ -583,7 +591,7 @@ export const changePassword = async (req, res) => {
  */
 export const updateDeviceInfo = async (req, res) => {
     try {
-        const { userId, deviceType, version } = req.body;
+        const { userId, deviceType, version, fcmtoken } = req.body;
 
         if (!userId) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide userId");
@@ -599,6 +607,9 @@ export const updateDeviceInfo = async (req, res) => {
         }
         if (version !== undefined) {
             user.version = version;
+        }
+        if (fcmtoken) {
+            user.fcmtoken = addFcmToken(user.fcmtoken, fcmtoken);
         }
 
         await user.save();
