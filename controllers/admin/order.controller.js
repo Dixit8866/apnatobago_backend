@@ -530,8 +530,8 @@ export const getAllOrders = async (req, res) => {
                 const roundId = r.deliveryRoundId;
                 let timing = r.deliveryRoundTiming;
                 
-                // If timing label is empty in DB, try to resolve it from normalizedSchedules using roundId
-                if (!timing && roundId) {
+                // Always resolve and normalize timing from normalizedSchedules if roundId is present
+                if (roundId) {
                     const matchedRound = normalizedSchedules.find(s => s.id === roundId);
                     if (matchedRound) {
                         timing = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
@@ -540,6 +540,18 @@ export const getAllOrders = async (req, res) => {
                 
                 if (timing) {
                     timingCounts[timing] = (timingCounts[timing] || 0) + parseInt(r.count || 0, 10);
+                }
+            });
+        }
+
+        // Normalize deliveryRoundTiming in the fetched orders list before returning
+        if (result && Array.isArray(result.rows)) {
+            result.rows.forEach(order => {
+                if (order.deliveryRoundId) {
+                    const matchedRound = normalizedSchedules.find(s => s.id === order.deliveryRoundId);
+                    if (matchedRound) {
+                        order.deliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                    }
                 }
             });
         }

@@ -12,6 +12,14 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
 export const getDailyPartyCalls = async (req, res, next) => {
     try {
         const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
+
+        const appSettings = await AppSettings.findOne();
+        const schedules = appSettings?.deliveryRoundSchedules || [];
+        const normalizedSchedules = schedules.map((round, index) => ({
+            id: round.id || `round_${index + 1}`,
+            time: round.time || `${round.start || ''} - ${round.end || ''}`,
+            ...round
+        }));
         
         const limitVal = parseInt(limit, 10) || 50;
         const pageVal = parseInt(page, 10) || 1;
@@ -127,6 +135,14 @@ export const getDailyPartyCalls = async (req, res, next) => {
             userJson.callingNotes = resolvedNotes;
             userJson.calledAt = resolvedCalledAt;
             userJson.followupDateTime = resolvedFollowupDateTime;
+
+            // Normalize deliveryRoundTiming based on deliveryRoundId
+            if (userJson.deliveryRoundId) {
+                const matchedRound = normalizedSchedules.find(s => s.id === userJson.deliveryRoundId);
+                if (matchedRound) {
+                    userJson.deliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                }
+            }
 
             delete userJson.calls; // Clean up response payload
             delete userJson.orders; // Clean up response payload
@@ -270,6 +286,14 @@ export const logOrUpdateCall = async (req, res, next) => {
 export const getInactivePartyCalls = async (req, res, next) => {
     try {
         const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
+
+        const appSettings = await AppSettings.findOne();
+        const schedules = appSettings?.deliveryRoundSchedules || [];
+        const normalizedSchedules = schedules.map((round, index) => ({
+            id: round.id || `round_${index + 1}`,
+            time: round.time || `${round.start || ''} - ${round.end || ''}`,
+            ...round
+        }));
         
         const limitVal = parseInt(limit, 10) || 50;
         const pageVal = parseInt(page, 10) || 1;
@@ -395,6 +419,14 @@ export const getInactivePartyCalls = async (req, res, next) => {
             userJson.callingNotes = resolvedNotes;
             userJson.calledAt = resolvedCalledAt;
             userJson.followupDateTime = resolvedFollowupDateTime;
+
+            // Normalize deliveryRoundTiming based on deliveryRoundId
+            if (userJson.deliveryRoundId) {
+                const matchedRound = normalizedSchedules.find(s => s.id === userJson.deliveryRoundId);
+                if (matchedRound) {
+                    userJson.deliveryRoundTiming = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
+                }
+            }
 
             delete userJson.calls;
             delete userJson.orders;
