@@ -11,8 +11,12 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Token Generation
-const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
+const generateToken = (id, fcmtoken = null) => {
+    const payload = { id };
+    if (fcmtoken) {
+        payload.fcmtoken = fcmtoken;
+    }
+    return jwt.sign(payload, process.env.JWT_SECRET, {
         expiresIn: '365d',
     });
 };
@@ -142,13 +146,26 @@ export const verifyOtp = async (req, res) => {
         }
 
         user.status = 'Active';
-        const token = generateToken(user.id);
-        user.logintoken = token;
         
         if (fcmtoken) {
             user.fcmtoken = addFcmToken(user.fcmtoken, fcmtoken);
         }
         
+        // Resolve FCM token to store in the JWT payload
+        let fcmtokenToJWT = fcmtoken;
+        if (!fcmtokenToJWT && user.fcmtoken) {
+            try {
+                const tokens = JSON.parse(user.fcmtoken);
+                if (Array.isArray(tokens) && tokens.length > 0) {
+                    fcmtokenToJWT = tokens[tokens.length - 1];
+                }
+            } catch (e) {
+                fcmtokenToJWT = user.fcmtoken;
+            }
+        }
+        
+        const token = generateToken(user.id, fcmtokenToJWT);
+        user.logintoken = token;
         await user.save();
 
         await OTP.destroy({ where: { number } });
@@ -228,7 +245,7 @@ export const registerUser = async (req, res) => {
                 await sendSMS(fullNumber, otp);
             }
 
-            const token = generateToken(user.id);
+            const token = generateToken(user.id, fcmtoken);
             user.logintoken = token;
             await user.save();
 
@@ -350,8 +367,25 @@ export const logoutUser = async (req, res) => {
             user.logintoken = null;
             
             // Check all common casings of fcmtoken (fcmtoken, fcmToken, fcm_token)
-            const tokenToRemove = req.body.fcmtoken || req.body.fcmToken || req.body.fcm_token || 
-                                  req.query.fcmtoken || req.query.fcmToken || req.query.fcm_token;
+            let tokenToRemove = req.body.fcmtoken || req.body.fcmToken || req.body.fcm_token || 
+                                req.query.fcmtoken || req.query.fcmToken || req.query.fcm_token;
+            
+            // Fallback: If no token is passed in the request body/query, retrieve it from the JWT payload
+            if (!tokenToRemove) {
+                const authHeader = req.headers.authorization;
+                if (authHeader && authHeader.startsWith('Bearer ')) {
+                    const jwtToken = authHeader.split(' ')[1];
+                    try {
+                        const decoded = jwt.verify(jwtToken, process.env.JWT_SECRET);
+                        if (decoded && decoded.fcmtoken) {
+                            tokenToRemove = decoded.fcmtoken;
+                            console.log(`[Logout Debug] Retrieved tokenToRemove from JWT payload: "${tokenToRemove}"`);
+                        }
+                    } catch (err) {
+                        console.error(`[Logout Debug] Failed to decode JWT in logout:`, err.message);
+                    }
+                }
+            }
             
             console.log(`[Logout Debug] Token to remove identified as: "${tokenToRemove}"`);
                                   
