@@ -13,21 +13,37 @@ import { sendToDevice } from '../../services/notification.service.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
 
 /**
- * Generate a unique human-readable Order ID
+ * Generate a unique human-readable Order ID (100% bulletproof with uniqueness check)
  */
 const generateUniqueOrderId = async () => {
+    let nextId = 1001;
     const lastOrder = await Order.findOne({
         order: [['createdAt', 'DESC']],
-        attributes: ['orderId']
+        attributes: ['orderId'],
+        paranoid: false
     });
 
-    if (!lastOrder || !lastOrder.orderId) {
-        return '1001';
+    if (lastOrder && lastOrder.orderId) {
+        const numericPart = Number(lastOrder.orderId.replace(/\D/g, ''));
+        nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
     }
 
-    const numericPart = Number(lastOrder.orderId.replace(/\D/g, ''));
-    const nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
-    return `${nextId}`;
+    // Ensure it is absolutely unique (including soft-deleted ones)
+    let unique = false;
+    while (!unique) {
+        const existing = await Order.findOne({
+            where: { orderId: String(nextId) },
+            paranoid: false,
+            attributes: ['id']
+        });
+        if (!existing) {
+            unique = true;
+        } else {
+            nextId++;
+        }
+    }
+
+    return String(nextId);
 };
 
 const sendPushToAllAdmins = async (title, body, data = {}) => {
