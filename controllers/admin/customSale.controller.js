@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, ProductPricing, User, Volume, InventoryStock, InventoryTransaction, AppSettings } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, ProductPricing, User, Volume, InventoryStock, InventoryTransaction, AppSettings, OrderPayment } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -31,6 +31,7 @@ export const createCustomSale = async (req, res) => {
             items, 
             paymentMethod, 
             paidAmount: rawPaidAmount,
+            payments,
             deliveryCharge: rawDeliveryCharge,
             godownId,
             notes,
@@ -152,12 +153,40 @@ export const createCustomSale = async (req, res) => {
 
         const deliveryCharge = parseFloat(rawDeliveryCharge || 0);
         const grandTotalAmount = roundTotal(totalAmount + deliveryCharge);
-        const paidAmount = parseFloat(rawPaidAmount || 0);
+
+        // Resolve multiple payments
+        let resolvedPayments = payments;
+        let paidAmount = 0;
+
+        if (Array.isArray(resolvedPayments) && resolvedPayments.length > 0) {
+            paidAmount = resolvedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        } else {
+            const rawPaid = parseFloat(rawPaidAmount || 0);
+            paidAmount = rawPaid;
+            resolvedPayments = [];
+            if (rawPaid > 0) {
+                const isBank = paymentMethod !== 'Cash' && paymentMethod !== 'Credit' && paymentMethod;
+                resolvedPayments.push({
+                    method: isBank ? 'Bank Account' : 'Cash',
+                    bankSettingId: isBank ? paymentMethod : null,
+                    amount: rawPaid
+                });
+            }
+        }
+
         const dueAmount = Math.max(0, grandTotalAmount - paidAmount);
         
         let paymentStatus = 'Pending';
         if (paidAmount >= grandTotalAmount) paymentStatus = 'Paid';
         else if (paidAmount > 0) paymentStatus = 'Partial';
+
+        let orderPaymentMethod = 'Cash';
+        if (resolvedPayments.length > 0) {
+            const methods = [...new Set(resolvedPayments.map(p => p.method))];
+            orderPaymentMethod = methods.join(', ');
+        } else {
+            orderPaymentMethod = paymentMethod || 'Cash';
+        }
 
         const status = orderStatus || 'Delivered';
         const now = new Date();
@@ -187,7 +216,7 @@ export const createCustomSale = async (req, res) => {
             paidAmount,
             dueAmount,
             discount: totalDiscount,
-            paymentMethod: paymentMethod || 'Cash',
+            paymentMethod: orderPaymentMethod,
             paymentStatus,
             orderStatus: status,
             deliveryMode: deliveryMode || null,
@@ -258,6 +287,23 @@ export const createCustomSale = async (req, res) => {
                 // For direct sales, we might allow negative stock or just log a warning
                 logger.warn(`[Direct Sale Stock Warning]: Order #${newSale.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId}`);
             }
+        }
+
+        // 5. Create Order Payment Records
+        if (resolvedPayments && resolvedPayments.length > 0) {
+            const paymentRecords = resolvedPayments.map(p => {
+                const isBank = p.method === 'Bank Account' || (p.bankSettingId && p.bankSettingId !== 'Cash');
+                return {
+                    orderId: newSale.id,
+                    amount: parseFloat(p.amount || 0),
+                    paymentMethod: isBank ? 'ONLINE' : 'CASH',
+                    bankSettingId: isBank ? p.bankSettingId : null,
+                    onlineType: isBank ? 'Bank Account' : null,
+                    isSubmitted: true,
+                    submittedAt: now
+                };
+            });
+            await OrderPayment.bulkCreate(paymentRecords, { transaction: t });
         }
 
         await t.commit();

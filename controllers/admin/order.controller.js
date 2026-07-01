@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -1071,7 +1071,14 @@ export const getOrderDetails = async (req, res) => {
                 {
                     model: OrderPayment,
                     as: 'payments',
-                    attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt']
+                    attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'bankSettingId'],
+                    include: [
+                        {
+                            model: BankSetting,
+                            as: 'bankAccount',
+                            attributes: ['id', 'bankName', 'accountName', 'accountNumber']
+                        }
+                    ]
                 },
                 {
                     model: SalesReturn,
