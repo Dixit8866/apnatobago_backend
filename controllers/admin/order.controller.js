@@ -8,6 +8,22 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML } from '../../utils/invoiceGenerator.js';
 import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
+
+const getStatusLabel = (status) => {
+    switch (status) {
+        case 'Pending': return 'Pending (બાકી)';
+        case 'Packaging': return 'Packaging (પેકેજિંગ)';
+        case 'Packed': return 'Packed (પેક થયેલ)';
+        case 'Shipping': return 'Shipping (રવાના કરેલ)';
+        case 'Delivered': return 'Delivered (આપેલ)';
+        case 'Cancelled':
+        case 'Admin Cancel':
+        case 'User Cancel':
+        case 'Delivery Boy Cancel':
+            return 'Cancelled (રદ કરેલ)';
+        default: return status;
+    }
+};
 // ... (rest of imports)
 
 const adjustOrderPayments = (order) => {
@@ -771,13 +787,14 @@ export const updateOrderStatus = async (req, res) => {
 
         await order.save();
 
-        // Trigger Shipping Push Notification if status changed to Shipping
-        if (orderStatus === 'Shipping' && prevStatus !== 'Shipping') {
+        // Trigger Push Notification on status change
+        if (orderStatus && orderStatus !== prevStatus) {
             try {
                 const user = await User.findByPk(order.userId);
                 if (user && user.fcmtoken) {
-                    const title = 'Order Shipped!';
-                    const body = `Hey ${user.fullname}, your order #${order.orderId} is in shipping!`;
+                    const statusLabel = getStatusLabel(orderStatus);
+                    const title = `Order Status: ${statusLabel}`;
+                    const body = `Hey ${user.fullname || 'Customer'}, your order #${order.orderId} status has been updated to ${statusLabel}.`;
                     await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
                     await Notification.create({
                         title,
@@ -789,8 +806,7 @@ export const updateOrderStatus = async (req, res) => {
                     });
                 }
             } catch (pushErr) {
-                console.error('[Shipping Push Notification Error]:', pushErr);
-                logger.error(`[Shipping Push Notification Error]: ${pushErr.message}`);
+                console.error('[Update Order Status Push Error]:', pushErr);
             }
         }
 
@@ -924,32 +940,30 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             }
         }
 
-        // Trigger Shipping Push Notifications for bulk update if status is Shipping
-        if (orderStatus === 'Shipping') {
-            try {
-                const updatedOrders = await Order.findAll({
-                    where: { id: orderIds },
-                    include: [{ model: User, as: 'user' }]
-                });
-                for (const order of updatedOrders) {
-                    if (order.user && order.user.fcmtoken) {
-                        const title = 'Order Shipped!';
-                        const body = `Hey ${order.user.fullname}, your order #${order.orderId} is in shipping!`;
-                        await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
-                        await Notification.create({
-                            title,
-                            body,
-                            type: 'ORDER',
-                            target: String(order.userId),
-                            status: 'SENT',
-                            clickAction: String(order.id)
-                        });
-                    }
+        // Trigger Push Notifications for bulk status update
+        try {
+            const updatedOrders = await Order.findAll({
+                where: { id: orderIds },
+                include: [{ model: User, as: 'user' }]
+            });
+            for (const order of updatedOrders) {
+                if (order.user && order.user.fcmtoken) {
+                    const statusLabel = getStatusLabel(orderStatus);
+                    const title = `Order Status: ${statusLabel}`;
+                    const body = `Hey ${order.user.fullname || 'Customer'}, your order #${order.orderId} status has been updated to ${statusLabel}.`;
+                    await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                    await Notification.create({
+                        title,
+                        body,
+                        type: 'ORDER',
+                        target: String(order.userId),
+                        status: 'SENT',
+                        clickAction: String(order.id)
+                    });
                 }
-            } catch (pushErr) {
-                console.error('[Bulk Shipping Push Notification Error]:', pushErr);
-                logger.error(`[Bulk Shipping Push Notification Error]: ${pushErr.message}`);
             }
+        } catch (pushErr) {
+            console.error('[Bulk Update Status Push Error]:', pushErr);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders status updated successfully.");
@@ -1281,6 +1295,26 @@ export const updateOrderItem = async (req, res) => {
 
         await order.save();
 
+        // Trigger Push Notification for item update
+        try {
+            const user = await User.findByPk(order.userId);
+            if (user && user.fcmtoken) {
+                const title = 'Order Updated!';
+                const body = `Hey ${user.fullname || 'Customer'}, items or prices have been updated in your order #${order.orderId}.`;
+                await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                await Notification.create({
+                    title,
+                    body,
+                    type: 'ORDER',
+                    target: String(order.userId),
+                    status: 'SENT',
+                    clickAction: String(order.id)
+                });
+            }
+        } catch (pushErr) {
+            console.error('[Update Order Item Push Error]:', pushErr);
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order item updated successfully.", order);
     } catch (error) {
         logger.error(`[Admin Update Order Item Error]: ${error.message}`);
@@ -1379,6 +1413,26 @@ export const addOrderItem = async (req, res) => {
 
         await order.save();
 
+        // Trigger Push Notification for item addition
+        try {
+            const user = await User.findByPk(order.userId);
+            if (user && user.fcmtoken) {
+                const title = 'Order Updated!';
+                const body = `Hey ${user.fullname || 'Customer'}, new items have been added to your order #${order.orderId}.`;
+                await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                await Notification.create({
+                    title,
+                    body,
+                    type: 'ORDER',
+                    target: String(order.userId),
+                    status: 'SENT',
+                    clickAction: String(order.id)
+                });
+            }
+        } catch (pushErr) {
+            console.error('[Add Order Item Push Error]:', pushErr);
+        }
+
         logger.info(`[Admin Add Order Item]: Added variant ${variantId} to order ${id}`);
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Item added to order successfully.", { item: newItem, order });
     } catch (error) {
@@ -1441,6 +1495,26 @@ export const deleteOrderItem = async (req, res) => {
         else order.paymentStatus = 'Pending';
 
         await order.save();
+
+        // Trigger Push Notification for item deletion
+        try {
+            const user = await User.findByPk(order.userId);
+            if (user && user.fcmtoken) {
+                const title = 'Order Updated!';
+                const body = `Hey ${user.fullname || 'Customer'}, an item was removed or updated in your order #${order.orderId}.`;
+                await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
+                await Notification.create({
+                    title,
+                    body,
+                    type: 'ORDER',
+                    target: String(order.userId),
+                    status: 'SENT',
+                    clickAction: String(order.id)
+                });
+            }
+        } catch (pushErr) {
+            console.error('[Delete Order Item Push Error]:', pushErr);
+        }
 
         logger.info(`[Admin Delete Order Item]: Removed item ${itemId} from order ${id}`);
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Item removed from order successfully.", order);
@@ -1604,6 +1678,27 @@ export const mergeOrders = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+
+        // Trigger Push Notification for order merge
+        try {
+            const user = await User.findByPk(targetOrder.userId);
+            if (user && user.fcmtoken) {
+                const title = 'Orders Merged!';
+                const body = `Hey ${user.fullname || 'Customer'}, your orders have been merged into order #${targetOrder.orderId}.`;
+                await sendToDevice(user.fcmtoken, title, body, null, { type: 'order', id: String(targetOrder.id), orderId: String(targetOrder.id) });
+                await Notification.create({
+                    title,
+                    body,
+                    type: 'ORDER',
+                    target: String(targetOrder.userId),
+                    status: 'SENT',
+                    clickAction: String(targetOrder.id)
+                });
+            }
+        } catch (pushErr) {
+            console.error('[Merge Orders Push Error]:', pushErr);
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, `Orders merged successfully into ${targetOrder.orderId}.`, targetOrder);
     } catch (error) {
         if (t) await t.rollback();
