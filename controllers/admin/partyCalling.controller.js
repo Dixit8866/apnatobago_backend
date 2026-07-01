@@ -53,7 +53,8 @@ export const getDailyPartyCalls = async (req, res, next) => {
                 { fullname: { [Op.iLike]: `%${search}%` } },
                 { number: { [Op.iLike]: `%${search}%` } },
                 { email: { [Op.iLike]: `%${search}%` } },
-                { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } }
+                { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } }
             ];
         }
 
@@ -61,7 +62,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
             {
                 model: BusinessProfile,
                 as: 'businessProfile',
-                attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
             },
             {
                 model: RouteCategory,
@@ -337,7 +338,8 @@ export const getInactivePartyCalls = async (req, res, next) => {
                 { fullname: { [Op.iLike]: `%${search}%` } },
                 { number: { [Op.iLike]: `%${search}%` } },
                 { email: { [Op.iLike]: `%${search}%` } },
-                { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } }
+                { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } }
             ];
         }
 
@@ -345,7 +347,7 @@ export const getInactivePartyCalls = async (req, res, next) => {
             {
                 model: BusinessProfile,
                 as: 'businessProfile',
-                attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
             },
             {
                 model: RouteCategory,

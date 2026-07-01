@@ -131,6 +131,7 @@ export const getAllOrders = async (req, res) => {
                 { '$user.number$': { [Op.iLike]: `%${search}%` } },
                 { '$user.city$': { [Op.iLike]: `%${search}%` } },
                 { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } },
                 { '$assignment.deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
                 { '$assignment.deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } }
             ];
@@ -269,7 +270,7 @@ export const getAllOrders = async (req, res) => {
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
                         }
                     ]
                 },
@@ -1022,7 +1023,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
                         }
                     ]
                 },

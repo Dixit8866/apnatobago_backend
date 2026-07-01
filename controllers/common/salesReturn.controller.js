@@ -368,6 +368,7 @@ export const getSalesReturns = async (req, res) => {
                 { '$order.orderId$': { [Op.iLike]: `%${search}%` } },
                 { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
                 { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } },
                 { '$product.name$': { [Op.iLike]: `%${search}%` } },
                 { '$deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
                 { reason: { [Op.iLike]: `%${search}%` } }
@@ -393,7 +394,7 @@ export const getSalesReturns = async (req, res) => {
                         {
                             model: User.sequelize.models.BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
                         }
                     ]
                 },

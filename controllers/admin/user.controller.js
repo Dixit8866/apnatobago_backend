@@ -10,7 +10,7 @@ const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
 export const createUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude } = req.body;
 
         if (!fullname || !number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Fullname, number, and password are required.');
@@ -68,15 +68,18 @@ export const createUser = async (req, res, next) => {
             status: status || 'Active',
             kycverification: kycverification || 'pending',
             orderReminder: true,
-            reminderTime: '09:00 PM'
+            reminderTime: '09:00 PM',
+            latitude: (latitude === '' || latitude === undefined || latitude === null) ? null : parseFloat(latitude),
+            longitude: (longitude === '' || longitude === undefined || longitude === null) ? null : parseFloat(longitude),
         });
 
         // Handle Business Profile if provided
-        const { shopName, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
+        const { shopName, shopNameAlt, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
         if (shopName || shopAddress) {
             await BusinessProfile.create({
                 userId: user.id,
                 shopName: shopName || fullname,
+                shopNameAlt: shopNameAlt || '',
                 gstNumber,
                 shopAddress: shopAddress || city || '',
                 city: businessCity || city || '',
@@ -102,7 +105,8 @@ export const getAllUsers = async (req, res, next) => {
                 { fullname: { [Op.iLike]: `%${search}%` } },
                 { number: { [Op.iLike]: `%${search}%` } },
                 { email: { [Op.iLike]: `%${search}%` } },
-                { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } }
+                { '$businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } }
             ];
         }
         if (kycverification) searchWhere.kycverification = kycverification;
@@ -116,7 +120,7 @@ export const getAllUsers = async (req, res, next) => {
             {
                 model: BusinessProfile,
                 as: 'businessProfile',
-                attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
             },
             {
                 model: RouteCategory,
@@ -231,7 +235,7 @@ export const getUserById = async (req, res, next) => {
 export const updateUser = async (req, res, next) => {
     try {
         console.log("[updateUser] Incoming request body:", req.body);
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
@@ -295,18 +299,21 @@ export const updateUser = async (req, res, next) => {
             deliveryRoundTiming: finalDeliveryRoundTiming !== undefined ? finalDeliveryRoundTiming : user.deliveryRoundTiming,
             status: status ?? user.status,
             kycverification: kycverification ?? user.kycverification,
+            latitude: (latitude === '' || latitude === undefined) ? (latitude === '' ? null : user.latitude) : (latitude === null ? null : parseFloat(latitude)),
+            longitude: (longitude === '' || longitude === undefined) ? (longitude === '' ? null : user.longitude) : (longitude === null ? null : parseFloat(longitude)),
         };
         if (password) updateData.password = password;
 
         await user.update(updateData);
 
         // Handle Business Profile update
-        const { shopName, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
-        if (shopName || shopAddress || gstNumber || businessCity || businessPostcode) {
+        const { shopName, shopNameAlt, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
+        if (shopName || shopNameAlt || shopAddress || gstNumber || businessCity || businessPostcode) {
             const [profile, created] = await BusinessProfile.findOrCreate({
                 where: { userId: user.id },
                 defaults: {
                     shopName: shopName || user.fullname,
+                    shopNameAlt: shopNameAlt || '',
                     gstNumber,
                     shopAddress: shopAddress || user.city || '',
                     city: businessCity || user.city || '',
@@ -317,6 +324,7 @@ export const updateUser = async (req, res, next) => {
             if (!created) {
                 await profile.update({
                     shopName: shopName ?? profile.shopName,
+                    shopNameAlt: shopNameAlt ?? profile.shopNameAlt,
                     gstNumber: gstNumber ?? profile.gstNumber,
                     shopAddress: shopAddress ?? profile.shopAddress,
                     city: businessCity ?? profile.city,

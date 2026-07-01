@@ -26,6 +26,10 @@ const BusinessProfile = sequelize.define(
             type: DataTypes.STRING,
             allowNull: false,
         },
+        shopNameAlt: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
         gstNumber: {
             type: DataTypes.STRING,
             allowNull: true,
