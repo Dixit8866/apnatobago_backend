@@ -21,11 +21,13 @@ export const getDashboardStats = async (req, res) => {
             };
         }
 
+        const cancelledStatuses = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
+
         // 1. Total Sales
         const totalSales = await Order.sum('totalAmount', { 
             where: { 
                 ...dateFilter,
-                orderStatus: { [Op.ne]: 'Cancelled' }
+                orderStatus: { [Op.notIn]: cancelledStatuses }
             } 
         }) || 0;
 
@@ -34,7 +36,7 @@ export const getDashboardStats = async (req, res) => {
 
         // 3. Payment Bifurcation
         const paymentStats = await Order.findAll({
-            where: { ...dateFilter, orderStatus: { [Op.ne]: 'Cancelled' } },
+            where: { ...dateFilter, orderStatus: { [Op.notIn]: cancelledStatuses } },
             attributes: [
                 'paymentMethod',
                 [fn('SUM', col('totalAmount')), 'total']
@@ -43,19 +45,17 @@ export const getDashboardStats = async (req, res) => {
         });
 
         // 4. Total Outstanding (Money yet to be received)
-        const totalOutstanding = await Order.sum('totalAmount', {
+        const totalOutstanding = await Order.sum('dueAmount', {
             where: {
-                paymentStatus: 'Pending',
-                orderStatus: { [Op.ne]: 'Cancelled' }
+                orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
 
         // 5. Total Received (Money already collected)
-        const totalReceived = await Order.sum('totalAmount', {
+        const totalReceived = await Order.sum('paidAmount', {
             where: {
                 ...dateFilter,
-                paymentStatus: 'Paid',
-                orderStatus: { [Op.ne]: 'Cancelled' }
+                orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
 

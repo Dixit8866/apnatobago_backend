@@ -1292,6 +1292,11 @@ export const cancelOrder = async (req, res) => {
 
         order.orderStatus = 'User Cancel';
         order.dueAmount = 0;
+        if (order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial') {
+            order.paymentStatus = 'Refunded';
+        } else {
+            order.paymentStatus = 'Failed';
+        }
         order.notes = order.notes ? `${order.notes}\n[Customer Cancelled]` : `[Customer Cancelled]`;
         await order.save();
 

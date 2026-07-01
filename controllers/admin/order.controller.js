@@ -783,6 +783,11 @@ export const updateOrderStatus = async (req, res) => {
 
         if (order.orderStatus === 'Cancelled' || order.orderStatus === 'Admin Cancel' || order.orderStatus === 'User Cancel' || order.orderStatus === 'Delivery Boy Cancel') {
             order.dueAmount = 0;
+            if (order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial') {
+                order.paymentStatus = 'Refunded';
+            } else {
+                order.paymentStatus = 'Failed';
+            }
         }
 
         await order.save();
@@ -879,9 +884,21 @@ export const bulkUpdateOrderStatus = async (req, res) => {
         );
 
         // If cancelling, process each order: for shipped orders create SalesReturn (pending), otherwise restore inventory
-        if (orderStatus === 'Cancelled') {
+        if (orderStatus === 'Cancelled' || orderStatus === 'Admin Cancel') {
             const OrderAssignment = Order.sequelize.models.OrderAssignment;
             for (const cancelOrder of ordersToCancel) {
+                // Set paymentStatus and dueAmount correctly for this order
+                const orderRecord = await Order.findByPk(cancelOrder.id);
+                if (orderRecord) {
+                    orderRecord.dueAmount = 0;
+                    if (orderRecord.paymentStatus === 'Paid' || orderRecord.paymentStatus === 'Partial') {
+                        orderRecord.paymentStatus = 'Refunded';
+                    } else {
+                        orderRecord.paymentStatus = 'Failed';
+                    }
+                    await orderRecord.save();
+                }
+
                 if (!cancelOrder.items || cancelOrder.items.length === 0) continue;
 
                 if (cancelOrder.orderStatus === 'Shipping') {
