@@ -53,6 +53,10 @@ export const getAppSettings = async (req, res) => {
             }));
         }
 
+        // Append server-side UTC timestamp so mobile apps can rely on server time
+        // instead of the user's device clock (prevents issues when users change phone time).
+        settingsData.serverUtcTime = new Date().toISOString();
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", settingsData);
     } catch (error) {
         logger.error(`[Get App Settings Error]: ${error.message}`);

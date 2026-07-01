@@ -31,6 +31,7 @@ import routeCategoryRoutes from './routeCategory.routes.js';
 import bankSettingRoutes from './bankSetting.routes.js';
 import partyCallingRoutes from './partyCalling.routes.js';
 import paymentRoutes from './payment.routes.js';
+import adminRoleRoutes from './adminRole.routes.js';
 
 const router = express.Router();
 
@@ -66,5 +67,6 @@ router.use('/route-categories', routeCategoryRoutes);
 router.use('/bank-settings', bankSettingRoutes);
 router.use('/party-calling', partyCallingRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/admin-roles', adminRoleRoutes);
 
 export default router;
