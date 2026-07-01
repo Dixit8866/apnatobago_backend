@@ -454,6 +454,36 @@ const runManualMigrations = async () => {
     }
 };
 
+// ─── Realtime Database Hooks ───────────────────────────────────────────────
+import { emitAdminNotification } from '../socket.js';
+
+const attachRealtimeHooks = (model, typeName) => {
+    const handler = () => {
+        try {
+            emitAdminNotification({
+                type: typeName,
+                title: `${typeName} Changed`,
+                message: `Realtime update for ${typeName}`
+            });
+        } catch (err) {
+            console.error(`[Realtime Hook Error for ${typeName}]:`, err.message);
+        }
+    };
+
+    model.addHook('afterCreate', handler);
+    model.addHook('afterUpdate', handler);
+    model.addHook('afterDestroy', handler);
+    model.addHook('afterBulkCreate', handler);
+    model.addHook('afterBulkUpdate', handler);
+    model.addHook('afterBulkDestroy', handler);
+};
+
+attachRealtimeHooks(Order, 'ORDER');
+attachRealtimeHooks(PurchaseBill, 'PURCHASE');
+attachRealtimeHooks(HelpSupport, 'HELP_SUPPORT');
+attachRealtimeHooks(InventoryStock, 'INVENTORY');
+attachRealtimeHooks(SalesReturn, 'SALES_RETURN');
+
 // Run migrations (Non-blocking)
 runManualMigrations();
 
