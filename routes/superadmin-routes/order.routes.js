@@ -13,7 +13,7 @@ import {
     mergeOrders,
     getMergeableOrders
 } from '../../controllers/admin/order.controller.js';
-import { getSalesReturns, approveSalesReturn } from '../../controllers/common/salesReturn.controller.js';
+import { getSalesReturns, approveSalesReturn, approveAllSalesReturnByOrder } from '../../controllers/common/salesReturn.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
@@ -30,6 +30,7 @@ router.get('/:id', getOrderDetails);
 router.use(protect);
 
 router.put('/sales-returns/:id/approve', approveSalesReturn);
+router.put('/sales-returns/approve-all/:orderId', protect, approveAllSalesReturnByOrder);
 router.get('/', getAllOrders);
 router.get('/:id/invoice', downloadInvoice);
 router.get('/:id/delivery-label', downloadDeliveryLabel);

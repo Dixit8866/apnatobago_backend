@@ -433,3 +433,143 @@ export const getSalesReturns = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+/**
+ * @desc    Approve ALL pending Sales Returns for a specific Order (Admin)
+ * @route   PUT /api/admin/orders/sales-returns/approve-all/:orderId
+ * @access  Private (Admin)
+ */
+export const approveAllSalesReturnByOrder = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { orderId } = req.params;
+
+        // Find all PENDING returns for this order
+        const pendingReturns = await SalesReturn.findAll({
+            where: { orderId, status: 'Pending' },
+            transaction: t
+        });
+
+        if (!pendingReturns.length) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "No pending sales returns found for this order.");
+        }
+
+        const order = await Order.findByPk(orderId, { transaction: t });
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Associated order not found.");
+        }
+
+        const actorName = req.user?.fullname || req.user?.name || 'Admin';
+        const approvedIds = [];
+
+        for (const salesReturn of pendingReturns) {
+            const variant = await ProductVariant.findByPk(salesReturn.variantId, { transaction: t });
+            if (!variant) continue;
+
+            const returnQty = parseFloat(salesReturn.quantity);
+            const bUPP = Number(variant.baseUnitsPerPack || 1);
+            const isInner = salesReturn.reason && salesReturn.reason.startsWith('[Inner]');
+            const baseUnitsToRestore = Math.round(isInner ? returnQty : returnQty * bUPP);
+
+            // Find the SALE transaction for precise stock restoration
+            const saleTxn = await InventoryTransaction.findOne({
+                where: {
+                    productId: salesReturn.productId,
+                    variantId: variant.id,
+                    type: 'SALE',
+                    note: { [Op.like]: `%${order.orderId}%` }
+                },
+                order: [['createdAt', 'DESC']],
+                transaction: t
+            });
+
+            let targetStock = null;
+            if (saleTxn) {
+                targetStock = await InventoryStock.findOne({
+                    where: { id: saleTxn.stockId },
+                    transaction: t
+                });
+                if (targetStock) {
+                    await targetStock.update({
+                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
+                    }, { transaction: t });
+                }
+            }
+
+            if (!targetStock) {
+                let targetGodownId = null;
+                if (order.userId) {
+                    const user = await User.findByPk(order.userId, { transaction: t });
+                    if (user && user.postcode) {
+                        const godown = await Godown.findOne({
+                            where: { pincodes: { [Op.contains]: [user.postcode] } },
+                            transaction: t
+                        });
+                        if (godown) targetGodownId = godown.id;
+                    }
+                }
+                if (!targetGodownId) {
+                    const godown = await Godown.findOne({ transaction: t });
+                    if (godown) targetGodownId = godown.id;
+                }
+
+                if (!targetGodownId) continue; // Skip if no godown found
+
+                targetStock = await InventoryStock.findOne({
+                    where: { productId: salesReturn.productId, variantId: variant.id, godownId: targetGodownId },
+                    transaction: t
+                });
+
+                if (targetStock) {
+                    await targetStock.update({
+                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
+                    }, { transaction: t });
+                } else {
+                    targetStock = await InventoryStock.create({
+                        productId: salesReturn.productId,
+                        variantId: variant.id,
+                        godownId: targetGodownId,
+                        primaryUnitId: variant.baseUnitLabel || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
+                        totalBaseUnits: baseUnitsToRestore,
+                        status: 'Active'
+                    }, { transaction: t });
+                }
+            }
+
+            // Log inventory transaction
+            await InventoryTransaction.create({
+                stockId: targetStock.id,
+                productId: salesReturn.productId,
+                variantId: variant.id,
+                godownId: targetStock.godownId,
+                type: 'SALES_RETURN',
+                primaryUnitId: targetStock.primaryUnitId,
+                secondaryUnitId: targetStock.secondaryUnitId,
+                secondaryPerPrimary: targetStock.secondaryPerPrimary,
+                totalQtyBaseUnits: baseUnitsToRestore,
+                balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
+                note: `Sales Return Approved (Bulk) for Order #${order.orderId}`,
+                createdBy: actorName
+            }, { transaction: t });
+
+            // Update return status
+            salesReturn.status = 'Approved';
+            salesReturn.reason = salesReturn.reason ? salesReturn.reason.replace(/^\[Inner\]\s*|^\[Base\]\s*/, '') : salesReturn.reason;
+            await salesReturn.save({ transaction: t });
+            approvedIds.push(salesReturn.id);
+        }
+
+        await t.commit();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `${approvedIds.length} sales return(s) approved successfully and inventory updated.`, {
+            approvedCount: approvedIds.length,
+            approvedIds
+        });
+
+    } catch (error) {
+        if (t) await t.rollback();
+        logger.error(`[Approve All Sales Returns Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
