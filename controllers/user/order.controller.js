@@ -1411,6 +1411,29 @@ export const cancelOrder = async (req, res) => {
             );
         }
 
+        // Emit Admin Notification (Real-time)
+        try {
+            const userData = await User.findByPk(userId);
+            const userFullname = userData ? userData.fullname : 'Customer';
+
+            const adminNotify = await AdminNotification.create({
+                title: 'Order Cancelled!',
+                message: `User ${userFullname} has cancelled order #${order.orderId} of ₹${order.totalAmount}.`,
+                type: 'ORDER',
+                referenceId: order.id,
+                clickAction: `/sales/user-orders`
+            });
+            emitAdminNotification(adminNotify);
+
+            await sendPushToAllAdmins(
+                'Order Cancelled By User',
+                `User ${userFullname} has cancelled order #${order.orderId} of ₹${order.totalAmount}.`,
+                { type: 'order', id: String(order.id), orderId: String(order.id) }
+            );
+        } catch (notifyErr) {
+            logger.error(`[Cancel Order Notification Error]: ${notifyErr.message}`);
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order cancelled successfully.", order);
     } catch (error) {
         logger.error(`[Cancel Order Error]: ${error.message}`);
