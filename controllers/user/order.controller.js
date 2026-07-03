@@ -18,13 +18,18 @@ import { uploadToS3 } from '../../utils/aws.s3.js';
 const generateUniqueOrderId = async () => {
     let nextId = 1001;
     const lastOrder = await Order.findOne({
+        where: {
+            orderId: {
+                [Op.regexp]: '^[0-9]+$'
+            }
+        },
         order: [['createdAt', 'DESC']],
         attributes: ['orderId'],
         paranoid: false
     });
 
     if (lastOrder && lastOrder.orderId) {
-        const numericPart = Number(lastOrder.orderId.replace(/\D/g, ''));
+        const numericPart = Number(lastOrder.orderId);
         nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
     }
 
@@ -702,22 +707,22 @@ export const createOrder = async (req, res) => {
         // 9. Trigger Admin Notification (Real-time)
         try {
             const adminNotify = await AdminNotification.create({
-                title: existingOrder ? 'Order Updated!' : 'New Order Received!',
+                title: existingOrder ? 'Order Merged!' : 'New Order Received!',
                 message: existingOrder 
                     ? `User ${userData.fullname} has updated pending order #${targetOrder.orderId} to ₹${targetOrder.totalAmount}.`
                     : `User ${userData.fullname} has placed a new order #${targetOrder.orderId} of ₹${targetOrder.totalAmount}.`,
-                type: 'ORDER',
+                type: existingOrder ? 'ORDER_MERGE' : 'ORDER',
                 referenceId: targetOrder.id,
                 clickAction: `/sales/user-orders`
             });
             emitAdminNotification(adminNotify);
             
             // Send push notification to all active admins
-            const adminTitle = existingOrder ? 'Order Updated' : 'New Order Received';
+            const adminTitle = existingOrder ? 'Order Merged' : 'New Order Received';
             const adminBody = existingOrder 
                 ? `User ${userData.fullname} has updated pending order #${targetOrder.orderId} to ₹${targetOrder.totalAmount}.`
                 : `User ${userData.fullname} has placed a new order #${targetOrder.orderId} of ₹${targetOrder.totalAmount}.`;
-            await sendPushToAllAdmins(adminTitle, adminBody, { type: 'order', id: String(targetOrder.id), orderId: String(targetOrder.id) });
+            await sendPushToAllAdmins(adminTitle, adminBody, { type: existingOrder ? 'order_merge' : 'order', id: String(targetOrder.id), orderId: String(targetOrder.id) });
         } catch (notifyErr) {
             console.error('[Admin Notification Error]:', notifyErr);
             logger.error(`[Admin Notification Error]: ${notifyErr.message}`);
@@ -1423,13 +1428,13 @@ export const cancelOrder = async (req, res) => {
                 referenceId: order.id,
                 clickAction: `/sales/user-orders`
             });
-            emitAdminNotification(adminNotify);
+            // emitAdminNotification(adminNotify); // Commented out to prevent sound/alert in admin dashboard
 
-            await sendPushToAllAdmins(
-                'Order Cancelled By User',
-                `User ${userFullname} has cancelled order #${order.orderId} of ₹${order.totalAmount}.`,
-                { type: 'order', id: String(order.id), orderId: String(order.id) }
-            );
+            // await sendPushToAllAdmins(
+            //     'Order Cancelled By User',
+            //     `User ${userFullname} has cancelled order #${order.orderId} of ₹${order.totalAmount}.`,
+            //     { type: 'order', id: String(order.id), orderId: String(order.id) }
+            // );
         } catch (notifyErr) {
             logger.error(`[Cancel Order Notification Error]: ${notifyErr.message}`);
         }

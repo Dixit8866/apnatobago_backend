@@ -139,6 +139,10 @@ const Order = sequelize.define(
             type: DataTypes.BOOLEAN,
             defaultValue: false,
         },
+        createdByAdminId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,

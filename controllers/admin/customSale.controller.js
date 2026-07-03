@@ -10,10 +10,40 @@ import { roundTotal } from '../../utils/roundHelper.js';
 /**
  * Generate a unique human-readable Order ID for Direct Sales
  */
-const generateUniqueDirectSaleId = () => {
-    const timestamp = Date.now().toString().slice(-6);
-    const random = Math.floor(1000 + Math.random() * 9000);
-    return `DIR-${timestamp}${random}`;
+const generateUniqueDirectSaleId = async () => {
+    let nextId = 1001;
+    const lastOrder = await Order.findOne({
+        where: {
+            orderId: {
+                [Op.regexp]: '^[0-9]+$'
+            }
+        },
+        order: [['createdAt', 'DESC']],
+        attributes: ['orderId'],
+        paranoid: false
+    });
+
+    if (lastOrder && lastOrder.orderId) {
+        const numericPart = Number(lastOrder.orderId);
+        nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
+    }
+
+    // Ensure it is absolutely unique (including soft-deleted ones)
+    let unique = false;
+    while (!unique) {
+        const existing = await Order.findOne({
+            where: { orderId: String(nextId) },
+            paranoid: false,
+            attributes: ['id']
+        });
+        if (!existing) {
+            unique = true;
+        } else {
+            nextId++;
+        }
+    }
+
+    return String(nextId);
 };
 
 /**
@@ -208,7 +238,7 @@ export const createCustomSale = async (req, res) => {
 
         // 2. Create the Order
         const newSale = await Order.create({
-            orderId: generateUniqueDirectSaleId(),
+            orderId: await generateUniqueDirectSaleId(),
             userId: userId || null,
             customerName: userId ? null : customerName,
             customerNumber: userId ? null : customerNumber,
@@ -228,6 +258,7 @@ export const createCustomSale = async (req, res) => {
             packagingAt: (status === 'Packaging' || status === 'Packed' || status === 'Shipping' || status === 'Delivered') ? now : null,
             saleType: 'Direct',
             deliveryCharge,
+            createdByAdminId: req.user?.id,
             notes,
             routeCategoryId: resolvedRouteCategoryId
         }, { transaction: t });

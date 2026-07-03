@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -297,6 +297,12 @@ export const getAllOrders = async (req, res) => {
                     as: 'assignment',
                     required: false,
                     include: [{ model: DeliveryBoy, as: 'deliveryBoy', required: false, attributes: ['id', 'name', 'phone'] }]
+                },
+                {
+                    model: Admin,
+                    as: 'creator',
+                    required: false,
+                    attributes: ['id', 'name', 'role']
                 }
             ],
             limit,
@@ -1116,6 +1122,12 @@ export const getOrderDetails = async (req, res) => {
                             ]
                         }
                     ]
+                },
+                {
+                    model: Admin,
+                    as: 'creator',
+                    required: false,
+                    attributes: ['id', 'name', 'role']
                 }
             ]
         });

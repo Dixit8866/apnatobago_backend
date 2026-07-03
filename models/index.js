@@ -46,6 +46,10 @@ import AdminRole from './superadmin-models/AdminRole.js';
 Order.hasMany(OrderPayment, { foreignKey: 'orderId', as: 'payments' });
 OrderPayment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 
+// Order -> Admin (Created By Admin association)
+Order.belongsTo(Admin, { foreignKey: 'createdByAdminId', as: 'creator' });
+Admin.hasMany(Order, { foreignKey: 'createdByAdminId', as: 'createdOrders' });
+
 // DeliveryBoy -> OrderPayment
 DeliveryBoy.hasMany(OrderPayment, { foreignKey: 'deliveryBoyId', as: 'collectedPayments' });
 OrderPayment.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
