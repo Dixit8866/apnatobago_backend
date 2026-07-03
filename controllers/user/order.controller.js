@@ -1,5 +1,5 @@
 import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn, Notification, Admin } from '../../models/index.js';
-import { emitAdminNotification } from '../../socket.js';
+import { emitAdminNotification, getIO } from '../../socket.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -10,7 +10,6 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { sendToDevice } from '../../services/notification.service.js';
-import { uploadToS3 } from '../../utils/aws.s3.js';
 
 /**
  * Generate a unique human-readable Order ID (100% bulletproof with uniqueness check)
@@ -1418,18 +1417,14 @@ export const cancelOrder = async (req, res) => {
 
         // Emit Admin Notification (Real-time)
         try {
-            const userData = await User.findByPk(userId);
-            const userFullname = userData ? userData.fullname : 'Customer';
-
-            // Emit a transient socket event so the admin panel table refreshes,
-            // but DO NOT save it to database or send push notifications.
-            emitAdminNotification({
-                type: 'ORDER_CANCEL',
-                title: 'Order Cancelled!',
-                message: `User ${userFullname} has cancelled order #${order.orderId} of ₹${order.totalAmount}.`
-            });
+            // Emit a direct socket event so the admin panel table refreshes,
+            // without sending any notification to the admin dropdown or playing a sound.
+            const io = getIO();
+            if (io) {
+                io.to('admin_notifications').emit('order_updated', { id: order.id, status: 'Cancelled' });
+            }
         } catch (notifyErr) {
-            logger.error(`[Cancel Order Notification Error]: ${notifyErr.message}`);
+            logger.error(`[Cancel Order Socket Error]: ${notifyErr.message}`);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order cancelled successfully.", order);
@@ -2145,4 +2140,4 @@ export const updateOrder = async (req, res) => {
         logger.error(`[Update Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
-};
+};
