@@ -479,11 +479,11 @@ const attachRealtimeHooks = (model, typeName) => {
     model.addHook('afterBulkDestroy', handler);
 };
 
-attachRealtimeHooks(Order, 'ORDER');
-attachRealtimeHooks(PurchaseBill, 'PURCHASE');
-attachRealtimeHooks(HelpSupport, 'HELP_SUPPORT');
-attachRealtimeHooks(InventoryStock, 'INVENTORY');
-attachRealtimeHooks(SalesReturn, 'SALES_RETURN');
+// attachRealtimeHooks(Order, 'ORDER');
+// attachRealtimeHooks(PurchaseBill, 'PURCHASE');
+// attachRealtimeHooks(HelpSupport, 'HELP_SUPPORT');
+// attachRealtimeHooks(InventoryStock, 'INVENTORY');
+// attachRealtimeHooks(SalesReturn, 'SALES_RETURN');
 
 // Run migrations (Non-blocking)
 runManualMigrations();

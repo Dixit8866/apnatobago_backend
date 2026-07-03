@@ -1112,4 +1112,22 @@ export const updateProductPrices = async (req, res, next) => {
     }
 };
 
+export const updateProductBoxNumber = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { boxNumber } = req.body;
+
+        const product = await Product.findByPk(id);
+        if (!product) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
+        }
+
+        await product.update({ boxNumber: boxNumber || null });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product Box Number updated successfully.', product);
+    } catch (error) {
+        next(error);
+    }
+};
+
 

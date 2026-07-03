@@ -196,7 +196,19 @@ export const getProducts = async (req, res) => {
             where: whereClause,
             distinct: true,
             order: [
+                [
+                    sequelize.literal(`(
+                        SELECT COALESCE(SUM("oi"."quantity"), 0)
+                        FROM "order_items" AS "oi"
+                        INNER JOIN "orders" AS "o" ON "oi"."orderId" = "o"."id"
+                        WHERE "oi"."productId" = "Product".id
+                          AND "o"."orderStatus" NOT IN ('Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel')
+                          AND "o"."deletedAt" IS NULL
+                    )`),
+                    'DESC'
+                ],
                 ['position', 'ASC'],
+                ['id', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
             ],
@@ -461,7 +473,19 @@ export const searchCatalogue = async (req, res) => {
             where: productWhere,
             limit: 20,
             order: [
+                [
+                    sequelize.literal(`(
+                        SELECT COALESCE(SUM("oi"."quantity"), 0)
+                        FROM "order_items" AS "oi"
+                        INNER JOIN "orders" AS "o" ON "oi"."orderId" = "o"."id"
+                        WHERE "oi"."productId" = "Product".id
+                          AND "o"."orderStatus" NOT IN ('Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel')
+                          AND "o"."deletedAt" IS NULL
+                    )`),
+                    'DESC'
+                ],
                 ['position', 'ASC'],
+                ['id', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
             ],

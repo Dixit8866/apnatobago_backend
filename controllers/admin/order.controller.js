@@ -281,11 +281,13 @@ export const getAllOrders = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
+                    required: false,
                     attributes: ['id', 'fullname', 'number', 'city'],
                     include: [
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
+                            required: false,
                             attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
                         }
                     ]
@@ -293,7 +295,8 @@ export const getAllOrders = async (req, res) => {
                 {
                     model: OrderAssignment,
                     as: 'assignment',
-                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone'] }]
+                    required: false,
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', required: false, attributes: ['id', 'name', 'phone'] }]
                 }
             ],
             limit,

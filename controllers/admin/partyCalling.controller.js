@@ -79,10 +79,17 @@ export const getDailyPartyCalls = async (req, res, next) => {
                 model: Order,
                 as: 'orders',
                 where: {
-                    createdAt: {
-                        [Op.gte]: todayStart,
-                        [Op.lte]: todayEnd
-                    },
+                    [Op.or]: [
+                        {
+                            createdAt: {
+                                [Op.gte]: todayStart,
+                                [Op.lte]: todayEnd
+                            }
+                        },
+                        {
+                            deliveryDate: callingDateStr
+                        }
+                    ],
                     orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
                 },
                 required: false
@@ -364,10 +371,19 @@ export const getInactivePartyCalls = async (req, res, next) => {
                 model: Order,
                 as: 'orders',
                 where: {
-                    createdAt: {
-                        [Op.gte]: rangeStart,
-                        [Op.lte]: rangeEnd
-                    },
+                    [Op.or]: [
+                        {
+                            createdAt: {
+                                [Op.gte]: rangeStart,
+                                [Op.lte]: rangeEnd
+                            }
+                        },
+                        {
+                            deliveryDate: {
+                                [Op.between]: [startDateStr, todayDateStr]
+                            }
+                        }
+                    ],
                     orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
                 },
                 required: false

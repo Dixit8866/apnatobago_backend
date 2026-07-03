@@ -523,7 +523,8 @@ export const createOrder = async (req, res) => {
                 deliveryMode,
                 deliveryRoundId,
                 deliveryRoundTiming: resolvedDeliveryRoundTiming,
-                deliveryDate: deliveryDate || null
+                deliveryDate: deliveryDate || null,
+                isMerged: true
             }, { transaction: t });
 
         } else {

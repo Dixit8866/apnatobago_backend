@@ -9,6 +9,7 @@ import {
     reorderProducts,
     moveProductToTop,
     updateProductPrices,
+    updateProductBoxNumber,
 } from '../../controllers/admin/product.controller.js';
 
 const router = express.Router();
@@ -18,6 +19,7 @@ router.get('/', protect, admin, getProducts);
 router.get('/:id', protect, admin, getProductById);
 router.put('/update-prices', protect, admin, updateProductPrices);
 router.put('/:id', protect, admin, updateProduct);
+router.put('/:id/box-number', protect, admin, updateProductBoxNumber);
 router.delete('/:id', protect, admin, deleteProduct);
 router.post('/reorder', protect, admin, reorderProducts);
 router.post('/:id/move-to-top', protect, admin, moveProductToTop);
