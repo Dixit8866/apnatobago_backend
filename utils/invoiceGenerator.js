@@ -140,7 +140,8 @@ export const generateOrderInvoice = async (order) => {
                         .replace(/ડંડા/g, 'બોક્સ')
                         .replace(/dando/gi, 'box')
                         .replace(/danda/gi, 'box');
-                    const bUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 1);
+                    const dbUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 0);
+                    const bUPP = (dbUPP && dbUPP !== 1) ? dbUPP : 20;
                     const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
                     const multiplier = bUPP * sVol;
 
@@ -512,7 +513,8 @@ export const generateDeliveryLabel = async (order) => {
                 let unitLabel = '';
 
                 if (isDando && sellUnit !== 'Inner') {
-                    const bUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 1);
+                    const dbUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 0);
+                    const bUPP = (dbUPP && dbUPP !== 1) ? dbUPP : 20;
                     const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
                     const multiplier = bUPP * sVol;
 
@@ -619,7 +621,8 @@ export const generateDeliveryLabelHTML = (order) => {
         let unitLabel = '';
 
         if (isDando && sellUnit !== 'Inner') {
-            const bUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 1);
+            const dbUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 0);
+            const bUPP = (dbUPP && dbUPP !== 1) ? dbUPP : 20;
             const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
             const multiplier = bUPP * sVol;
 

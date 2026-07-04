@@ -387,7 +387,7 @@ export const getAllOrders = async (req, res) => {
                     {
                         model: ProductVariant,
                         as: 'variant',
-                        attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra'],
+                        attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'],
                         include: [
                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -413,7 +413,7 @@ export const getAllOrders = async (req, res) => {
                         attributes: ['id', 'name', 'thumbnail'],
                         include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
                     },
-                    { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra'] }
+                    { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'] }
                 ]
             });
 
@@ -1135,7 +1135,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'purchasePrice', 'baseUnitsPerPack', 'extra'],
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'purchasePrice', 'baseUnitsPerPack', 'sellingVolume', 'extra'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -1169,7 +1169,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra'],
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'],
                             include: [
                                 { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -1348,7 +1348,8 @@ export const updateOrderItem = async (req, res) => {
                 baseUnitLabel: variant.baseUnitRef?.name
                     ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
                     : variant.baseUnitLabel,
-                sellingVolume: variant.sellingVolume
+                sellingVolume: variant.sellingVolume,
+                baseUnitsPerPack: variant.baseUnitsPerPack
             };
         }
 
@@ -1464,7 +1465,8 @@ export const addOrderItem = async (req, res) => {
             baseUnitLabel: variant.baseUnitRef?.name
                 ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
                 : variant.baseUnitLabel,
-            sellingVolume: variant.sellingVolume
+            sellingVolume: variant.sellingVolume,
+            baseUnitsPerPack: variant.baseUnitsPerPack
         };
 
         // Create the new order item
