@@ -124,7 +124,11 @@ export const downloadDeliveryLabel = async (req, res) => {
 export const getAllOrders = async (req, res) => {
     try {
         const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming } = req.query;
-        const where = {};
+        const baseWhere = {};
+        let searchClause = null;
+        let dateClause = null;
+        let routeClause = null;
+        let timingClause = null;
 
         // Pre-fetch settings to resolve any empty deliveryRoundTiming
         const appSettings = await AppSettings.findOne();
@@ -135,22 +139,24 @@ export const getAllOrders = async (req, res) => {
         }));
 
         if (userId) {
-            where.userId = userId;
+            baseWhere.userId = userId;
         }
 
         if (search) {
-            where[Op.or] = [
-                { orderId: { [Op.iLike]: `%${search}%` } },
-                { customerName: { [Op.iLike]: `%${search}%` } },
-                { customerNumber: { [Op.iLike]: `%${search}%` } },
-                { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
-                { '$user.number$': { [Op.iLike]: `%${search}%` } },
-                { '$user.city$': { [Op.iLike]: `%${search}%` } },
-                { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
-                { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } },
-                { '$assignment.deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
-                { '$assignment.deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } }
-            ];
+            searchClause = {
+                [Op.or]: [
+                    { orderId: { [Op.iLike]: `%${search}%` } },
+                    { customerName: { [Op.iLike]: `%${search}%` } },
+                    { customerNumber: { [Op.iLike]: `%${search}%` } },
+                    { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
+                    { '$user.number$': { [Op.iLike]: `%${search}%` } },
+                    { '$user.city$': { [Op.iLike]: `%${search}%` } },
+                    { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                    { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } },
+                    { '$assignment.deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
+                    { '$assignment.deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } }
+                ]
+            };
         }
 
         // Helper to get today's 24-hour date range in India Standard Time (IST)
@@ -176,25 +182,27 @@ export const getAllOrders = async (req, res) => {
         // Apply status filter
         if (status && status !== 'All') {
             if (status === 'Delivered') {
-                where.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+                baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
                 // Restrict Delivered/Payment Collect/Payment Verify to today by default unless filtered
                 if (!startDate && !endDate && !date) {
-                    where[Op.or] = [
-                        { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
-                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
-                    ];
+                    dateClause = {
+                        [Op.or]: [
+                            { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                            { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
+                        ]
+                    };
                 }
             } else if (status === 'Cancelled') {
-                where.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
+                baseWhere.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
                 // Restrict Cancelled orders to today by default unless filtered
                 if (!startDate && !endDate && !date) {
-                    where.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+                    dateClause = { updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } };
                 }
             } else if (status === 'Pending Due Order') {
-                where.paymentStatus = { [Op.ne]: 'Paid' };
-                where.orderStatus = { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
+                baseWhere.paymentStatus = { [Op.ne]: 'Paid' };
+                baseWhere.orderStatus = { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
             } else {
-                where.orderStatus = status;
+                baseWhere.orderStatus = status;
             }
         }
 
@@ -205,12 +213,14 @@ export const getAllOrders = async (req, res) => {
             const endOfDate = new Date(endDate);
             endOfDate.setHours(23, 59, 59, 999);
             if (dateFilterField === 'deliveredAt') {
-                where[Op.or] = [
-                    { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
-                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } }
-                ];
+                dateClause = {
+                    [Op.or]: [
+                        { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
+                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } }
+                    ]
+                };
             } else {
-                where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
+                dateClause = { [dateFilterField]: { [Op.between]: [startOfDate, endOfDate] } };
             }
         } else if (startDate) {
             const startOfDate = new Date(startDate);
@@ -218,12 +228,14 @@ export const getAllOrders = async (req, res) => {
             const endOfDate = new Date(startDate);
             endOfDate.setHours(23, 59, 59, 999);
             if (dateFilterField === 'deliveredAt') {
-                where[Op.or] = [
-                    { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
-                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } }
-                ];
+                dateClause = {
+                    [Op.or]: [
+                        { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
+                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } }
+                    ]
+                };
             } else {
-                where[dateFilterField] = { [Op.between]: [startOfDate, endOfDate] };
+                dateClause = { [dateFilterField]: { [Op.between]: [startOfDate, endOfDate] } };
             }
         } else if (date) {
             const startOfDay = new Date(date);
@@ -231,46 +243,92 @@ export const getAllOrders = async (req, res) => {
             const endOfDay = new Date(date);
             endOfDay.setHours(23, 59, 59, 999);
             if (dateFilterField === 'deliveredAt') {
-                where[Op.or] = [
-                    { deliveredAt: { [Op.between]: [startOfDay, endOfDay] } },
-                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfDay, endOfDay] } }
-                ];
+                dateClause = {
+                    [Op.or]: [
+                        { deliveredAt: { [Op.between]: [startOfDay, endOfDay] } },
+                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfDay, endOfDay] } }
+                    ]
+                };
             } else {
-                where[dateFilterField] = { [Op.between]: [startOfDay, endOfDay] };
+                dateClause = { [dateFilterField]: { [Op.between]: [startOfDay, endOfDay] } };
             }
         }
 
         // Apply delivery boy filter
         if (deliveryBoyId) {
-            where['$assignment.deliveryBoyId$'] = deliveryBoyId;
+            baseWhere['$assignment.deliveryBoyId$'] = deliveryBoyId;
         }
 
         // Apply route category filter
         if (routeCategoryId) {
-            where.routeCategoryId = routeCategoryId;
+            routeClause = { routeCategoryId };
         }
 
         // Apply delivery timing filter (Express or a specific Round timing slot)
         if (deliveryTiming) {
             if (deliveryTiming === 'Express') {
-                where.deliveryMode = 'Express';
+                timingClause = { deliveryMode: 'Express' };
             } else {
-                where.deliveryMode = 'Round';
                 // Find all round IDs that match this timing label in settings
                 const matchingRoundIds = normalizedSchedules
                     .filter(r => (r.time || `${r.start || ''} - ${r.end || ''}`) === deliveryTiming)
                     .map(r => r.id);
 
                 if (matchingRoundIds.length > 0) {
-                    where[Op.or] = [
-                        { deliveryRoundTiming: deliveryTiming },
-                        { deliveryRoundId: { [Op.in]: matchingRoundIds } }
-                    ];
+                    timingClause = {
+                        deliveryMode: 'Round',
+                        [Op.or]: [
+                            { deliveryRoundTiming: deliveryTiming },
+                            { deliveryRoundId: { [Op.in]: matchingRoundIds } }
+                        ]
+                    };
                 } else {
-                    where.deliveryRoundTiming = deliveryTiming;
+                    timingClause = {
+                        deliveryMode: 'Round',
+                        deliveryRoundTiming: deliveryTiming
+                    };
                 }
             }
         }
+
+        const buildWhereClause = ({ includeRoute, includeTiming }) => {
+            const clause = { ...baseWhere };
+            const andClauses = [];
+
+            if (dateClause) {
+                if (dateClause[Op.or]) {
+                    andClauses.push({ [Op.or]: dateClause[Op.or] });
+                } else {
+                    Object.assign(clause, dateClause);
+                }
+            }
+
+            if (searchClause) {
+                andClauses.push(searchClause);
+            }
+
+            if (includeRoute && routeClause) {
+                Object.assign(clause, routeClause);
+            }
+
+            if (includeTiming && timingClause) {
+                if (timingClause[Op.or]) {
+                    const { [Op.or]: timingOr, ...timingRest } = timingClause;
+                    Object.assign(clause, timingRest);
+                    andClauses.push({ [Op.or]: timingOr });
+                } else {
+                    Object.assign(clause, timingClause);
+                }
+            }
+
+            if (andClauses.length > 0) {
+                clause[Op.and] = andClauses;
+            }
+
+            return clause;
+        };
+
+        const where = buildWhereClause({ includeRoute: true, includeTiming: true });
 
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
@@ -494,8 +552,7 @@ export const getAllOrders = async (req, res) => {
         ]);
 
         // Calculate dynamic order counts by routeCategory for the currently active tab status and date filter
-        const routeCountWhere = { ...where };
-        delete routeCountWhere.routeCategoryId;
+        const routeCountWhere = buildWhereClause({ includeRoute: false, includeTiming: true });
         routeCountWhere.routeCategoryId = { [Op.ne]: null };
 
         const routeCountInclude = [];
@@ -524,9 +581,7 @@ export const getAllOrders = async (req, res) => {
 
         // Calculate timing counts — distribution of delivery modes/timings for the current status+route+date filter
         // (excluding the timing filter itself, so all slots show their counts)
-        const timingBaseWhere = { ...where };
-        delete timingBaseWhere.deliveryMode;
-        delete timingBaseWhere.deliveryRoundTiming;
+        const timingBaseWhere = buildWhereClause({ includeRoute: true, includeTiming: false });
 
         const timingCountsInclude = [];
         if (deliveryBoyId) {

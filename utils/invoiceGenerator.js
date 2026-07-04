@@ -127,7 +127,25 @@ export const generateOrderInvoice = async (order) => {
                 // Determine unit label (pcs vs carton)
                 const sellUnit = it.sellUnit || 'Base';
                 const vInfo = it.variantInfo || {};
-                const rawLabel = sellUnit === 'Inner' ? (vInfo.innerUnitLabel || 'Pcs') : (vInfo.baseUnitLabel || 'Carton');
+                const baseUnitId = it.variant?.baseUnitLabel || vInfo.baseUnitLabel;
+                const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6';
+
+                let displayQuantity = Number(it.quantity);
+                let displayPrice = Number(it.price);
+                let rawLabel = '';
+
+                if (isDando && sellUnit !== 'Inner') {
+                    const bUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 1);
+                    const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
+                    const multiplier = bUPP * sVol;
+
+                    displayQuantity = displayQuantity * multiplier;
+                    displayPrice = displayPrice / multiplier;
+                    rawLabel = vInfo.innerUnitLabel || 'Box';
+                } else {
+                    rawLabel = sellUnit === 'Inner' ? (vInfo.innerUnitLabel || 'Pcs') : (vInfo.baseUnitLabel || 'Carton');
+                }
+
                 let unitLabel = '';
                 if (typeof rawLabel === 'object') {
                     unitLabel = rawLabel.en || rawLabel.EN || rawLabel.eng || rawLabel.ENG || rawLabel.gu || rawLabel.GU || rawLabel.guj || rawLabel.GUJ || Object.values(rawLabel)[0] || '';
@@ -136,8 +154,8 @@ export const generateOrderInvoice = async (order) => {
                 }
                 
                 doc.font('Helvetica').text(`${nameStr} (${volStr})`, 60, itemY, { width: width - 250 });
-                doc.text(`₹${Number(it.price).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
-                doc.text(`${it.quantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
+                doc.text(`₹${Number(displayPrice).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
+                doc.text(`${displayQuantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
                 doc.font('Helvetica-Bold').text(`₹${(it.price * it.quantity).toFixed(2)}`, doc.page.width - 85, itemY, { width: 60, align: 'right' });
                 
                 subtotal += it.price * it.quantity;
@@ -482,10 +500,25 @@ export const generateDeliveryLabel = async (order) => {
             items.forEach((it) => {
                 const sellUnit = it.sellUnit || 'Base';
                 const vInfo = it.variantInfo || {};
-                const unitLabel = sellUnit === 'Inner' ? getLabel(vInfo.innerUnitLabel || 'Pcs') : getLabel(vInfo.baseUnitLabel || 'Pack');
+                const baseUnitId = it.variant?.baseUnitLabel || vInfo.baseUnitLabel;
+                const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6';
+
+                let displayQuantity = Number(it.quantity);
+                let unitLabel = '';
+
+                if (isDando && sellUnit !== 'Inner') {
+                    const bUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 1);
+                    const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
+                    const multiplier = bUPP * sVol;
+
+                    displayQuantity = displayQuantity * multiplier;
+                    unitLabel = getLabel(vInfo.innerUnitLabel || 'Box');
+                } else {
+                    unitLabel = sellUnit === 'Inner' ? getLabel(vInfo.innerUnitLabel || 'Pcs') : getLabel(vInfo.baseUnitLabel || 'Pack');
+                }
                 
                 // Qty & Unit
-                doc.fillColor('#000000').fontSize(9).font('Helvetica-Bold').text(Math.round(it.quantity), 20, currentY);
+                doc.fillColor('#000000').fontSize(9).font('Helvetica-Bold').text(Math.round(displayQuantity), 20, currentY);
                 doc.fontSize(6).font('Helvetica').fillColor('#64748b').text(unitLabel, 20, currentY + 9);
                 
                 // Item Name
@@ -567,7 +600,23 @@ export const generateDeliveryLabelHTML = (order) => {
             return val;
         };
 
-        const unitLabel = sellUnit === 'Inner' ? getLabel(vInfo.innerUnitLabel || 'Pcs') : getLabel(vInfo.baseUnitLabel || 'Pack');
+        const baseUnitId = it.variant?.baseUnitLabel || vInfo.baseUnitLabel;
+        const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6';
+
+        let displayQuantity = Number(it.quantity);
+        let unitLabel = '';
+
+        if (isDando && sellUnit !== 'Inner') {
+            const bUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 1);
+            const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
+            const multiplier = bUPP * sVol;
+
+            displayQuantity = displayQuantity * multiplier;
+            unitLabel = getLabel(vInfo.innerUnitLabel || 'Box');
+        } else {
+            unitLabel = sellUnit === 'Inner' ? getLabel(vInfo.innerUnitLabel || 'Pcs') : getLabel(vInfo.baseUnitLabel || 'Pack');
+        }
+
         const pName = getLabel(vInfo.productName || 'Product');
         const vol = getLabel(vInfo.volume || '');
         const sub = (it.price * it.quantity).toFixed(0);
@@ -583,7 +632,7 @@ export const generateDeliveryLabelHTML = (order) => {
                     <span class="item-price">₹${sub}</span>
                 </div>
                 <div class="item-sub">
-                    <span class="item-qty">${Math.round(it.quantity)} ${unitLabel}</span>
+                    <span class="item-qty">${Math.round(displayQuantity)} ${unitLabel}</span>
                     <span class="item-vol">${displayVol}</span>
                 </div>
             </div>
