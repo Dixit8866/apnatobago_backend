@@ -134,8 +134,11 @@ export const generateOrderInvoice = async (order) => {
                 let displayPrice = Number(it.price);
                 let rawLabel = '';
 
-                if (isDando && sellUnit !== 'Inner') {
+                if (isDando) {
                     volStr = '';
+                }
+
+                if (isDando && sellUnit !== 'Inner') {
                     const dbUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 0);
                     const bUPP = (dbUPP && dbUPP !== 1) ? dbUPP : 20;
                     const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
@@ -529,7 +532,7 @@ export const generateDeliveryLabel = async (order) => {
                 const pName = vInfo.productName || 'Product';
                 const name = getLabel(pName);
                 let vol = getLabel(vInfo.volume || '');
-                if (isDando && sellUnit !== 'Inner') {
+                if (isDando) {
                     vol = '';
                 }
                 const displayName = vol ? `(${vol}) ${name}` : name;
@@ -627,7 +630,7 @@ export const generateDeliveryLabelHTML = (order) => {
 
         const pName = getLabel(vInfo.productName || 'Product');
         let vol = getLabel(vInfo.volume || '');
-        if (isDando && sellUnit !== 'Inner') {
+        if (isDando) {
             vol = '';
         }
         const sub = (it.price * it.quantity).toFixed(0);
