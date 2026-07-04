@@ -128,7 +128,7 @@ export const generateOrderInvoice = async (order) => {
                 const sellUnit = it.sellUnit || 'Base';
                 const vInfo = it.variantInfo || {};
                 const baseUnitId = it.variant?.baseUnitLabel || vInfo.baseUnitLabel;
-                const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6';
+                const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6' || String(baseUnitId).toLowerCase() === 'dando' || String(baseUnitId) === 'ડંડો';
 
                 let displayQuantity = Number(it.quantity);
                 let displayPrice = Number(it.price);
@@ -507,7 +507,7 @@ export const generateDeliveryLabel = async (order) => {
                 const sellUnit = it.sellUnit || 'Base';
                 const vInfo = it.variantInfo || {};
                 const baseUnitId = it.variant?.baseUnitLabel || vInfo.baseUnitLabel;
-                const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6';
+                const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6' || String(baseUnitId).toLowerCase() === 'dando' || String(baseUnitId) === 'ડંડો';
 
                 let displayQuantity = Number(it.quantity);
                 let unitLabel = '';
@@ -611,7 +611,7 @@ export const generateDeliveryLabelHTML = (order) => {
         };
 
         const baseUnitId = it.variant?.baseUnitLabel || vInfo.baseUnitLabel;
-        const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6';
+        const isDando = baseUnitId === '3451fa71-7dbc-4a25-aae0-5f6fce472cc6' || String(baseUnitId).toLowerCase() === 'dando' || String(baseUnitId) === 'ડંડો';
 
         let displayQuantity = Number(it.quantity);
         let unitLabel = '';
