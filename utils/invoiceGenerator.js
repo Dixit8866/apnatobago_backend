@@ -155,7 +155,7 @@ export const generateOrderInvoice = async (order) => {
                     unitLabel = String(rawLabel);
                 }
                 
-                const displayName = volStr ? `${nameStr} (${volStr})` : nameStr;
+                const displayName = volStr ? `(${volStr}) ${nameStr}` : nameStr;
                 doc.font('Helvetica').text(displayName, 60, itemY, { width: width - 250 });
                 doc.text(`₹${Number(displayPrice).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
                 doc.text(`${displayQuantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
@@ -532,8 +532,8 @@ export const generateDeliveryLabel = async (order) => {
                 if (isDando && sellUnit !== 'Inner') {
                     vol = '';
                 }
-                doc.fillColor('#0f172a').fontSize(8).font('Helvetica-Bold').text(name, 65, currentY, { width: 100 });
-                doc.fontSize(7).font('Helvetica').fillColor('#64748b').text(vol, 65, currentY + 9);
+                const displayName = vol ? `(${vol}) ${name}` : name;
+                doc.fillColor('#0f172a').fontSize(8).font('Helvetica-Bold').text(displayName, 65, currentY, { width: 100 });
                 
                 // Subtotal
                 const sub = (it.price * it.quantity).toFixed(0);
@@ -639,12 +639,11 @@ export const generateDeliveryLabelHTML = (order) => {
         return `
             <div class="item-entry">
                 <div class="item-main">
-                    <span class="item-name">${pName}</span>
+                    <span class="item-name">${displayVol ? `(${displayVol}) ` : ''}${pName}</span>
                     <span class="item-price">₹${sub}</span>
                 </div>
                 <div class="item-sub">
                     <span class="item-qty">${Math.round(displayQuantity)} ${unitLabel}</span>
-                    <span class="item-vol">${displayVol}</span>
                 </div>
             </div>
         `;
