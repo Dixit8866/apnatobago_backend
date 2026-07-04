@@ -135,11 +135,7 @@ export const generateOrderInvoice = async (order) => {
                 let rawLabel = '';
 
                 if (isDando && sellUnit !== 'Inner') {
-                    volStr = volStr
-                        .replace(/ડંડો/g, 'બોક્સ')
-                        .replace(/ડંડા/g, 'બોક્સ')
-                        .replace(/dando/gi, 'box')
-                        .replace(/danda/gi, 'box');
+                    volStr = '';
                     const dbUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 0);
                     const bUPP = (dbUPP && dbUPP !== 1) ? dbUPP : 20;
                     const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
@@ -159,7 +155,8 @@ export const generateOrderInvoice = async (order) => {
                     unitLabel = String(rawLabel);
                 }
                 
-                doc.font('Helvetica').text(`${nameStr} (${volStr})`, 60, itemY, { width: width - 250 });
+                const displayName = volStr ? `${nameStr} (${volStr})` : nameStr;
+                doc.font('Helvetica').text(displayName, 60, itemY, { width: width - 250 });
                 doc.text(`₹${Number(displayPrice).toFixed(2)}`, doc.page.width - 180, itemY, { width: 50, align: 'right' });
                 doc.text(`${displayQuantity} ${unitLabel}`, doc.page.width - 120, itemY, { width: 45, align: 'center' });
                 doc.font('Helvetica-Bold').text(`₹${(it.price * it.quantity).toFixed(2)}`, doc.page.width - 85, itemY, { width: 60, align: 'right' });
@@ -533,11 +530,7 @@ export const generateDeliveryLabel = async (order) => {
                 const name = getLabel(pName);
                 let vol = getLabel(vInfo.volume || '');
                 if (isDando && sellUnit !== 'Inner') {
-                    vol = vol
-                        .replace(/ડંડો/g, 'બોક્સ')
-                        .replace(/ડંડા/g, 'બોક્સ')
-                        .replace(/dando/gi, 'box')
-                        .replace(/danda/gi, 'box');
+                    vol = '';
                 }
                 doc.fillColor('#0f172a').fontSize(8).font('Helvetica-Bold').text(name, 65, currentY, { width: 100 });
                 doc.fontSize(7).font('Helvetica').fillColor('#64748b').text(vol, 65, currentY + 9);
@@ -635,11 +628,7 @@ export const generateDeliveryLabelHTML = (order) => {
         const pName = getLabel(vInfo.productName || 'Product');
         let vol = getLabel(vInfo.volume || '');
         if (isDando && sellUnit !== 'Inner') {
-            vol = vol
-                .replace(/ડંડો/g, 'બોક્સ')
-                .replace(/ડંડા/g, 'બોક્સ')
-                .replace(/dando/gi, 'box')
-                .replace(/danda/gi, 'box');
+            vol = '';
         }
         const sub = (it.price * it.quantity).toFixed(0);
 
