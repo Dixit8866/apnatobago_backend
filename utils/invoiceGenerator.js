@@ -135,6 +135,11 @@ export const generateOrderInvoice = async (order) => {
                 let rawLabel = '';
 
                 if (isDando && sellUnit !== 'Inner') {
+                    volStr = volStr
+                        .replace(/ડંડો/g, 'બોક્સ')
+                        .replace(/ડંડા/g, 'બોક્સ')
+                        .replace(/dando/gi, 'box')
+                        .replace(/danda/gi, 'box');
                     const bUPP = Number(it.variant?.baseUnitsPerPack || vInfo.baseUnitsPerPack || 1);
                     const sVol = Number(it.variant?.sellingVolume || vInfo.sellingVolume || 1);
                     const multiplier = bUPP * sVol;
@@ -524,7 +529,14 @@ export const generateDeliveryLabel = async (order) => {
                 // Item Name
                 const pName = vInfo.productName || 'Product';
                 const name = getLabel(pName);
-                const vol = getLabel(vInfo.volume || '');
+                let vol = getLabel(vInfo.volume || '');
+                if (isDando && sellUnit !== 'Inner') {
+                    vol = vol
+                        .replace(/ડંડો/g, 'બોક્સ')
+                        .replace(/ડંડા/g, 'બોક્સ')
+                        .replace(/dando/gi, 'box')
+                        .replace(/danda/gi, 'box');
+                }
                 doc.fillColor('#0f172a').fontSize(8).font('Helvetica-Bold').text(name, 65, currentY, { width: 100 });
                 doc.fontSize(7).font('Helvetica').fillColor('#64748b').text(vol, 65, currentY + 9);
                 
@@ -618,7 +630,14 @@ export const generateDeliveryLabelHTML = (order) => {
         }
 
         const pName = getLabel(vInfo.productName || 'Product');
-        const vol = getLabel(vInfo.volume || '');
+        let vol = getLabel(vInfo.volume || '');
+        if (isDando && sellUnit !== 'Inner') {
+            vol = vol
+                .replace(/ડંડો/g, 'બોક્સ')
+                .replace(/ડંડા/g, 'બોક્સ')
+                .replace(/dando/gi, 'box')
+                .replace(/danda/gi, 'box');
+        }
         const sub = (it.price * it.quantity).toFixed(0);
 
         // Hide volume if it's redundant (e.g. if vol is "1 Dando" and unit is "Dando")
