@@ -186,16 +186,18 @@ export const getProducts = async (req, res) => {
         if (user && !user.showtabacco) {
             whereClause.isTobaccoProduct = false;
         }
+        // When a category filter is applied, sort by admin-set position.
+        // When browsing all products (no filter), sort by most sold first.
+        const isCategoryFiltered = !!(mainCategoryId || subCategoryId || companyCategoryId);
 
-
-
-        // Only fetch pricings for the user's assigned level
-        const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
-
-        const queryOptions = {
-            where: whereClause,
-            distinct: true,
-            order: [
+        const orderClause = isCategoryFiltered
+            ? [
+                ['position', 'ASC'],
+                ['id', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
+                [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
+            ]
+            : [
                 [
                     sequelize.literal(`(
                         SELECT COALESCE(SUM("oi"."quantity"), 0)
@@ -211,7 +213,15 @@ export const getProducts = async (req, res) => {
                 ['id', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
                 [{ model: ProductVariant, as: 'variants' }, { model: ProductPricing, as: 'pricings' }, 'minQty', 'ASC']
-            ],
+            ];
+
+        // Only fetch pricings for the user's assigned level
+        const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
+
+        const queryOptions = {
+            where: whereClause,
+            distinct: true,
+            order: orderClause,
             attributes: { exclude: ['isTobaccoProduct', 'createdAt', 'updatedAt', 'deletedAt'] },
             include: [
                 {
