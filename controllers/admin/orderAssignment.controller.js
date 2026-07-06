@@ -89,7 +89,7 @@ export const getAllAssignments = async (req, res) => {
                             model: OrderItem,
                             as: 'items',
                             include: [
-                                { model: Product, as: 'product', attributes: ['id', 'name'] },
+                                { model: Product, as: 'product', attributes: ['id', 'name', 'mainCategoryId'] },
                                 {
                                     model: ProductVariant,
                                     as: 'variant',

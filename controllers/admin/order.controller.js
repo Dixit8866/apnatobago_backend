@@ -81,7 +81,7 @@ export const downloadDeliveryLabel = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'mainCategoryId'] },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] }
                     ]
                 },
@@ -381,7 +381,7 @@ export const getAllOrders = async (req, res) => {
                     {
                         model: Product,
                         as: 'product',
-                        attributes: ['id', 'name', 'thumbnail'],
+                        attributes: ['id', 'name', 'thumbnail', 'mainCategoryId'],
                         include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
                     },
                     {
@@ -410,7 +410,7 @@ export const getAllOrders = async (req, res) => {
                     {
                         model: Product,
                         as: 'product',
-                        attributes: ['id', 'name', 'thumbnail'],
+                        attributes: ['id', 'name', 'thumbnail', 'mainCategoryId'],
                         include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
                     },
                     { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'] }
@@ -1129,7 +1129,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: Product,
                             as: 'product',
-                            attributes: ['id', 'name', 'thumbnail', 'boxNumber'],
+                            attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'],
                             include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
                         },
                         {
@@ -1165,7 +1165,7 @@ export const getOrderDetails = async (req, res) => {
                     model: SalesReturn,
                     as: 'returns',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'] },
                         {
                             model: ProductVariant,
                             as: 'variant',
@@ -1836,7 +1836,7 @@ export const getMergeableOrders = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'mainCategoryId'] },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] }
                     ]
                 }

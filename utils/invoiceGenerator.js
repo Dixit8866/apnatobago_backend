@@ -134,7 +134,10 @@ export const generateOrderInvoice = async (order) => {
                 let displayPrice = Number(it.price);
                 let rawLabel = '';
 
-                if (isDando) {
+                const mainCategoryId = it.product?.mainCategoryId || it.product?.mainCategory?.id || '';
+                const isCigaretteCategory = mainCategoryId === '47b5d282-9cd2-4656-a695-8c237b4b2bfb';
+
+                if (isDando || isCigaretteCategory) {
                     volStr = '';
                 }
 
@@ -202,6 +205,12 @@ export const generateOrderInvoice = async (order) => {
                             volStr = String(volume);
                         }
                     }
+                    const mainCategoryId = ret.product?.mainCategoryId || ret.product?.mainCategory?.id || '';
+                    const isCigaretteCategory = mainCategoryId === '47b5d282-9cd2-4656-a695-8c237b4b2bfb';
+                    if (isCigaretteCategory) {
+                        volStr = '';
+                    }
+
                     const isInner = (ret.reason || '').startsWith('[Inner]');
                     const unitLabel = isInner ? 'Pcs' : 'Pack';
 
@@ -532,7 +541,10 @@ export const generateDeliveryLabel = async (order) => {
                 const pName = vInfo.productName || 'Product';
                 const name = getLabel(pName);
                 let vol = getLabel(vInfo.volume || '');
-                if (isDando) {
+                const mainCategoryId = it.product?.mainCategoryId || it.product?.mainCategory?.id || '';
+                const isCigaretteCategory = mainCategoryId === '47b5d282-9cd2-4656-a695-8c237b4b2bfb';
+
+                if (isDando || isCigaretteCategory) {
                     vol = '';
                 }
                 const displayName = vol ? `(${vol}) ${name}` : name;
@@ -630,7 +642,10 @@ export const generateDeliveryLabelHTML = (order) => {
 
         const pName = getLabel(vInfo.productName || 'Product');
         let vol = getLabel(vInfo.volume || '');
-        if (isDando) {
+        const mainCategoryId = it.product?.mainCategoryId || it.product?.mainCategory?.id || '';
+        const isCigaretteCategory = mainCategoryId === '47b5d282-9cd2-4656-a695-8c237b4b2bfb';
+
+        if (isDando || isCigaretteCategory) {
             vol = '';
         }
         const sub = (it.price * it.quantity).toFixed(0);
