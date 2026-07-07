@@ -72,7 +72,7 @@ export const admin = (req, res, next) => {
  * Middleware to protect routes and verify JWT token specifically for Godown Staff
  */
 export const protectGodownStaff = async (req, res, next) => {
-    let token = req.cookies?.apna_tobacco_admin || (req.headers.authorization?.startsWith('Bearer') ? req.headers.authorization.split(' ')[1] : null);
+    let token = req.cookies?.apna_tobacco_godown || (req.headers.authorization?.startsWith('Bearer') ? req.headers.authorization.split(' ')[1] : null);
 
     if (!token) return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.UNAUTHORIZED_NO_TOKEN);
 

@@ -91,6 +91,16 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(15, 10),
         allowNull: true,
     },
+    godownId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+            model: 'godowns',
+            key: 'id',
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+    },
     deliveryRoundId: {
         type: DataTypes.STRING,
         allowNull: true,

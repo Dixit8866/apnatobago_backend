@@ -549,7 +549,8 @@ export const createOrder = async (req, res) => {
                 deliveryRoundId,
                 deliveryRoundTiming: resolvedDeliveryRoundTiming,
                 deliveryDate: deliveryDate || null,
-                routeCategoryId: userData.routeCategoryId || null
+                routeCategoryId: userData.routeCategoryId || null,
+                godownId: userData.godownId || null,
             }, { transaction: t });
 
             targetOrder = newOrder;

@@ -28,7 +28,7 @@ export const loginGodownStaff = async (req, res, next) => {
             const token = generateToken(staff.id);
 
             // Set token securely in HTTP-Only Cookie
-            setTokenCookie(res, token);
+            setTokenCookie(res, token, 'apna_tobacco_godown');
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, APP_MESSAGES.LOGIN_SUCCESS, {
                 id: staff.id,
@@ -55,7 +55,7 @@ export const loginGodownStaff = async (req, res, next) => {
  */
 export const logoutGodownStaff = async (req, res, next) => {
     try {
-        clearTokenCookie(res);
+        clearTokenCookie(res, 'apna_tobacco_godown');
         return sendSuccessResponse(res, HTTP_STATUS.OK, APP_MESSAGES.LOGOUT_SUCCESS);
     } catch (error) {
         next(error);

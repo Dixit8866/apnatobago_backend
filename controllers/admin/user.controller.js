@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -10,7 +10,7 @@ const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
 export const createUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId } = req.body;
 
         if (!fullname || !number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Fullname, number, and password are required.');
@@ -71,6 +71,7 @@ export const createUser = async (req, res, next) => {
             reminderTime: '09:00 PM',
             latitude: (latitude === '' || latitude === undefined || latitude === null) ? null : parseFloat(latitude),
             longitude: (longitude === '' || longitude === undefined || longitude === null) ? null : parseFloat(longitude),
+            godownId: godownId || null,
         });
 
         // Handle Business Profile if provided
@@ -126,6 +127,11 @@ export const getAllUsers = async (req, res, next) => {
                 model: RouteCategory,
                 as: 'routeCategory',
                 attributes: ['id', 'name', 'pincode']
+            },
+            {
+                model: Godown,
+                as: 'assignedGodown',
+                attributes: ['id', 'name']
             }
         ];
 
@@ -222,7 +228,8 @@ export const getUserById = async (req, res, next) => {
             include: [
                 { model: CustomLevel, as: 'rewardLevel', attributes: ['id', 'name'] },
                 { model: BusinessProfile, as: 'businessProfile' },
-                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] }
+                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] },
+                { model: Godown, as: 'assignedGodown', attributes: ['id', 'name'] }
             ]
         });
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
@@ -235,7 +242,7 @@ export const getUserById = async (req, res, next) => {
 export const updateUser = async (req, res, next) => {
     try {
         console.log("[updateUser] Incoming request body:", req.body);
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
@@ -301,6 +308,7 @@ export const updateUser = async (req, res, next) => {
             kycverification: kycverification ?? user.kycverification,
             latitude: (latitude === '' || latitude === undefined) ? (latitude === '' ? null : user.latitude) : (latitude === null ? null : parseFloat(latitude)),
             longitude: (longitude === '' || longitude === undefined) ? (longitude === '' ? null : user.longitude) : (longitude === null ? null : parseFloat(longitude)),
+            godownId: (godownId === '' || godownId === undefined) ? (godownId === '' ? null : user.godownId) : godownId,
         };
         if (password) updateData.password = password;
 
@@ -337,7 +345,8 @@ export const updateUser = async (req, res, next) => {
             attributes: SAFE_ATTRIBUTES,
             include: [
                 { model: BusinessProfile, as: 'businessProfile' },
-                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] }
+                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] },
+                { model: Godown, as: 'assignedGodown', attributes: ['id', 'name'] }
             ]
         });
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User updated.', updated);
@@ -422,6 +431,31 @@ export const getUserAnalytics = async (req, res, next) => {
         };
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User analytics fetched.', analytics);
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Assign a party (user) to a specific godown
+ * @route   PATCH /api/admin/users/:id/assign-godown
+ * @access  Private (Admin)
+ */
+export const assignUserGodown = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { godownId } = req.body; // null to remove assignment
+
+        const user = await User.findByPk(id, { attributes: SAFE_ATTRIBUTES });
+        if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Party not found.');
+
+        await user.update({ godownId: godownId || null });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, godownId ? 'Party assigned to godown.' : 'Party godown assignment removed.', {
+            id: user.id,
+            fullname: user.fullname,
+            godownId: user.godownId,
+        });
     } catch (error) {
         next(error);
     }

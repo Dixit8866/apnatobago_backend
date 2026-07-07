@@ -260,7 +260,8 @@ export const createCustomSale = async (req, res) => {
             deliveryCharge,
             createdByAdminId: req.user?.id,
             notes,
-            routeCategoryId: resolvedRouteCategoryId
+            routeCategoryId: resolvedRouteCategoryId,
+            godownId: req.body.godownId || null,
         }, { transaction: t });
 
         // 3. Create Order Items

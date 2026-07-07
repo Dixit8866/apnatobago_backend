@@ -13,6 +13,7 @@ router.get('/:id', userController.getUserById);
 router.get('/:id/analytics', userController.getUserAnalytics);
 router.put('/:id', userController.updateUser);
 router.put('/:id/location', updateUserLocation);
+router.patch('/:id/assign-godown', userController.assignUserGodown);
 router.delete('/:id', userController.deleteUser);
 
 export default router;

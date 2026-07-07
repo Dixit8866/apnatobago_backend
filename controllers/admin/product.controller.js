@@ -342,7 +342,7 @@ const sortVariants = (productJson) => {
 
 export const getProducts = async (req, res, next) => {
     try {
-        const { search = '', status, mainCategoryId, isTobacco } = req.query;
+        const { search = '', status, mainCategoryId, isTobacco, godownId } = req.query;
         const isInventoryView = req.query.inventoryView === 'true';
 
         const trimmedSearch = String(search).trim();
@@ -376,6 +376,7 @@ export const getProducts = async (req, res, next) => {
               AND "stock"."deletedAt" IS NULL
               AND "variant"."status" != 'Deleted'
               AND "variant"."deletedAt" IS NULL
+              ${godownId ? `AND "stock"."godownId" = ${sequelize.escape(godownId)}` : ''}
         )`;
 
         const whereWithFilters = { ...searchWhere };
@@ -492,12 +493,13 @@ export const getProducts = async (req, res, next) => {
                 attributes: {
                     include: [
                         [
-                            sequelize.literal(`(
+                    sequelize.literal(`(
                                 SELECT COALESCE(SUM("totalBaseUnits"), 0)
                                 FROM "inventory_stocks" AS "stock"
                                 WHERE "stock"."variantId" = "variants"."id"
                                   AND "stock"."status" = 'Active'
                                   AND "stock"."deletedAt" IS NULL
+                                  ${godownId ? `AND "stock"."godownId" = ${sequelize.escape(godownId)}` : ''}
                             )`),
                             'totalStock'
                         ]

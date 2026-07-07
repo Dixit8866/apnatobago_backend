@@ -40,6 +40,8 @@ import SalesReturn from './superadmin-models/SalesReturn.js';
 import RouteCategory from './superadmin-models/RouteCategory.js';
 import BankSetting from './superadmin-models/BankSetting.js';
 import AdminRole from './superadmin-models/AdminRole.js';
+import StockTransfer from './superadmin-models/StockTransfer.js';
+import StockTransferItem from './superadmin-models/StockTransferItem.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -64,6 +66,14 @@ BusinessProfile.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 // Godown -> GodownStaff (One Godown has many Staff members)
 Godown.hasMany(GodownStaff, { foreignKey: 'godownId', as: 'staffs' });
 GodownStaff.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
+
+// Godown -> User (Party assignment)
+Godown.hasMany(User, { foreignKey: 'godownId', as: 'assignedParties' });
+User.belongsTo(Godown, { foreignKey: 'godownId', as: 'assignedGodown' });
+
+// Godown -> Order (Order routing)
+Godown.hasMany(Order, { foreignKey: 'godownId', as: 'godownOrders' });
+Order.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
 
 // Product -> Variants (volume-wise)
 Product.hasMany(ProductVariant, { foreignKey: 'productId', as: 'variants' });
@@ -453,11 +463,34 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS "discount" DECIMAL(10, 2) DEFAULT 0');
         } catch (e) { console.log('[Migration Warning] Add order_items discount column failed:', e.message); }
 
+        try {
+            // Add godownId to users table (party-godown assignment)
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "godownId" UUID REFERENCES godowns(id) ON DELETE SET NULL ON UPDATE CASCADE');
+        } catch (e) { console.log('[Migration Warning] Users godownId column failed:', e.message); }
+
+        try {
+            // Add godownId to orders table (order routing)
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "godownId" UUID REFERENCES godowns(id) ON DELETE SET NULL ON UPDATE CASCADE');
+        } catch (e) { console.log('[Migration Warning] Orders godownId column failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
+
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);
     }
 };
+
+// StockTransfer associations
+StockTransfer.belongsTo(Godown, { foreignKey: 'fromGodownId', as: 'fromGodown' });
+StockTransfer.belongsTo(Godown, { foreignKey: 'toGodownId', as: 'toGodown' });
+Godown.hasMany(StockTransfer, { foreignKey: 'fromGodownId', as: 'outgoingTransfers' });
+Godown.hasMany(StockTransfer, { foreignKey: 'toGodownId', as: 'incomingTransfers' });
+
+StockTransfer.hasMany(StockTransferItem, { foreignKey: 'stockTransferId', as: 'items' });
+StockTransferItem.belongsTo(StockTransfer, { foreignKey: 'stockTransferId', as: 'transfer' });
+
+StockTransferItem.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+StockTransferItem.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
 
 // ─── Realtime Database Hooks ───────────────────────────────────────────────
 import { emitAdminNotification } from '../socket.js';
@@ -530,5 +563,7 @@ export {
     RouteCategory,
     BankSetting,
     AdminRole,
+    StockTransfer,
+    StockTransferItem,
     runManualMigrations
 };

@@ -4,7 +4,7 @@ import {
     logoutGodownStaff,
     getGodownStaffProfile,
 } from '../../controllers/godown-panel/auth.controller.js';
-import { protect } from '../../middlewares/auth.middleware.js';
+import { protectGodownStaff } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
@@ -15,6 +15,6 @@ const router = express.Router();
 
 router.post('/login', loginGodownStaff);
 router.post('/logout', logoutGodownStaff);
-router.get('/profile', protect, getGodownStaffProfile);
+router.get('/profile', protectGodownStaff, getGodownStaffProfile);
 
 export default router;
