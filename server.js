@@ -16,8 +16,10 @@ initSocket(server);
 import { initReminderCron } from './utils/reminderCron.js';
 initReminderCron();
 
-// Import Admin model for seeding
+// Import Models for seeding
 import Admin from './models/superadmin-models/Admin.js';
+import Godown from './models/superadmin-models/Godown.js';
+import GodownStaff from './models/superadmin-models/GodownStaff.js';
 
 // ─── Seed Admin Function ──────────────────────────────────────────────────────
 const seedAdmin = async () => {
@@ -38,6 +40,44 @@ const seedAdmin = async () => {
     }
 };
 
+// ─── Seed Godown Admin Function ───────────────────────────────────────────────
+const seedGodownAdmin = async () => {
+    try {
+        // 1. Find or create Master Godown
+        const [masterGodown, godownCreated] = await Godown.findOrCreate({
+            where: { name: 'Master Godown', type: 'main' },
+            defaults: {
+                name: 'Master Godown',
+                type: 'main',
+                address: 'Head Office',
+                status: 'Active',
+                pincodes: [],
+            }
+        });
+
+        if (godownCreated) {
+            console.log(`[Seed] Created Master Godown: ${masterGodown.id} ✓`);
+        }
+
+        // 2. Find or create GodownStaff (superadmin)
+        const existing = await GodownStaff.findOne({ where: { email: 'godownadmin@gmail.com' } });
+        if (!existing) {
+            await GodownStaff.create({
+                godownId: masterGodown.id,
+                name: 'Godown Admin',
+                email: 'godownadmin@gmail.com',
+                password: 'godownadmin@gmail.com',
+                role: 'superadmin',
+                phone: null,
+                status: 'Active',
+            });
+            console.log(`[Seed] GodownStaff (godownadmin@gmail.com) created successfully ✓`);
+        }
+    } catch (error) {
+        console.error('[Seed Error] Failed to seed godown admin:', error.message);
+    }
+};
+
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const startServer = async () => {
     try {
@@ -52,8 +92,10 @@ const startServer = async () => {
         await sequelize.sync({ force: false, alter: { drop: false } });
         
         // Seed SuperAdmin if database is empty
-        // await seedAdmin();
         await seedAdmin();
+        // Seed Godown Admin if database is empty / not present
+        await seedGodownAdmin();
+        
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);
             console.log(`[Network] Access at http://192.168.1.50:${PORT}`);
