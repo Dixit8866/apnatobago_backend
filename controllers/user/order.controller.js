@@ -110,23 +110,25 @@ export const createOrder = async (req, res) => {
 
         let targetGodownId = userData.godownId || null;
 
+        const masterGodown = await Godown.findOne({ where: { type: 'main' }, transaction: t });
+        const masterGodownId = masterGodown ? masterGodown.id : null;
+
         if (!targetGodownId) {
-            if (userData.postcode) {
-                const godown = await Godown.findOne({
-                    where: { pincodes: { [Op.contains]: [userData.postcode] } },
-                    transaction: t
-                });
-                if (godown) targetGodownId = godown.id;
-            }
+            if (masterGodownId) {
+                targetGodownId = masterGodownId;
+            } else {
+                if (userData.postcode) {
+                    const godown = await Godown.findOne({
+                        where: { pincodes: { [Op.contains]: [userData.postcode] } },
+                        transaction: t
+                    });
+                    if (godown) targetGodownId = godown.id;
+                }
 
-            if (!targetGodownId) {
-                const mainGodown = await Godown.findOne({ where: { type: 'main' }, transaction: t });
-                if (mainGodown) targetGodownId = mainGodown.id;
-            }
-
-            if (!targetGodownId) {
-                const anyGodown = await Godown.findOne({ transaction: t });
-                if (anyGodown) targetGodownId = anyGodown.id;
+                if (!targetGodownId) {
+                    const anyGodown = await Godown.findOne({ transaction: t });
+                    if (anyGodown) targetGodownId = anyGodown.id;
+                }
             }
         }
 
@@ -199,7 +201,7 @@ export const createOrder = async (req, res) => {
 
                 let stock1 = 0;
                 if (targetGodownId) {
-                    stock1 = await InventoryStock.sum('totalBaseUnits', {
+                    const targetStock1 = await InventoryStock.sum('totalBaseUnits', {
                         where: {
                             productId: variant.product.comboProduct1Id,
                             godownId: targetGodownId,
@@ -207,6 +209,18 @@ export const createOrder = async (req, res) => {
                         },
                         transaction: t
                     }) || 0;
+                    stock1 += parseFloat(targetStock1);
+                }
+                if (masterGodownId && String(masterGodownId) !== String(targetGodownId)) {
+                    const masterStock1 = await InventoryStock.sum('totalBaseUnits', {
+                        where: {
+                            productId: variant.product.comboProduct1Id,
+                            godownId: masterGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        transaction: t
+                    }) || 0;
+                    stock1 += parseFloat(masterStock1);
                 }
 
                 if (deduction1 > stock1) {
@@ -224,7 +238,7 @@ export const createOrder = async (req, res) => {
 
                 let stock2 = 0;
                 if (targetGodownId) {
-                    stock2 = await InventoryStock.sum('totalBaseUnits', {
+                    const targetStock2 = await InventoryStock.sum('totalBaseUnits', {
                         where: {
                             productId: variant.product.comboProduct2Id,
                             godownId: targetGodownId,
@@ -232,6 +246,18 @@ export const createOrder = async (req, res) => {
                         },
                         transaction: t
                     }) || 0;
+                    stock2 += parseFloat(targetStock2);
+                }
+                if (masterGodownId && String(masterGodownId) !== String(targetGodownId)) {
+                    const masterStock2 = await InventoryStock.sum('totalBaseUnits', {
+                        where: {
+                            productId: variant.product.comboProduct2Id,
+                            godownId: masterGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        transaction: t
+                    }) || 0;
+                    stock2 += parseFloat(masterStock2);
                 }
 
                 if (deduction2 > stock2) {
@@ -250,7 +276,7 @@ export const createOrder = async (req, res) => {
                 // NORMAL PRODUCT STOCK CHECK
                 let availableStock = 0;
                 if (targetGodownId) {
-                    const totalStock = await InventoryStock.sum('totalBaseUnits', {
+                    const targetStock = await InventoryStock.sum('totalBaseUnits', {
                         where: {
                             productId: item.productId,
                             godownId: targetGodownId,
@@ -258,7 +284,18 @@ export const createOrder = async (req, res) => {
                         },
                         transaction: t
                     });
-                    availableStock = parseFloat(totalStock) || 0;
+                    availableStock += parseFloat(targetStock) || 0;
+                }
+                if (masterGodownId && String(masterGodownId) !== String(targetGodownId)) {
+                    const masterStock = await InventoryStock.sum('totalBaseUnits', {
+                        where: {
+                            productId: item.productId,
+                            godownId: masterGodownId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        transaction: t
+                    });
+                    availableStock += parseFloat(masterStock) || 0;
                 }
 
                 if (deductionRequired > availableStock) {
@@ -646,6 +683,46 @@ export const createOrder = async (req, res) => {
                             remainingToDeduct -= deductFromThis;
                         }
 
+                        // SPILLOVER: If there's still a shortfall and target godown is not the Master godown, deduct from Master godown!
+                        if (remainingToDeduct > 0 && masterGodownId && String(masterGodownId) !== String(targetGodownId)) {
+                            const masterStocks = await InventoryStock.findAll({
+                                where: {
+                                    productId: cp.id,
+                                    godownId: masterGodownId,
+                                    totalBaseUnits: { [Op.gt]: 0 }
+                                },
+                                order: [['createdAt', 'ASC']],
+                                transaction: t
+                            });
+
+                            for (const stock of masterStocks) {
+                                if (remainingToDeduct <= 0) break;
+
+                                const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                                const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                                // Log the transaction
+                                await InventoryTransaction.create({
+                                    stockId: stock.id,
+                                    productId: cp.id,
+                                    variantId: compVariant.id,
+                                    godownId: masterGodownId,
+                                    type: 'SALE',
+                                    primaryUnitId: stock.primaryUnitId,
+                                    secondaryUnitId: stock.secondaryUnitId,
+                                    secondaryPerPrimary: stock.secondaryPerPrimary,
+                                    totalQtyBaseUnits: deductFromThis,
+                                    balanceAfterBaseUnits: newTotalBaseUnits,
+                                    note: `Sales Order #${targetOrder.orderId} (Combo Component - Spillover from Master)`,
+                                    createdBy: req.user?.fullname || 'Customer'
+                                }, { transaction: t });
+
+                                remainingToDeduct -= deductFromThis;
+                            }
+                        }
+
                         if (remainingToDeduct > 0) {
                             logger.warn(`[Stock Deduction Shortfall]: Order #${targetOrder.orderId} - Shortfall of ${remainingToDeduct} base units for combo component variant ${compVariant.id} in Godown ${targetGodownId}`);
                         }
@@ -693,6 +770,46 @@ export const createOrder = async (req, res) => {
                         }, { transaction: t });
 
                         remainingToDeduct -= deductFromThis;
+                    }
+
+                    // SPILLOVER: If there's still a shortfall and target godown is not the Master godown, deduct from Master godown!
+                    if (remainingToDeduct > 0 && masterGodownId && String(masterGodownId) !== String(targetGodownId)) {
+                        const masterStocks = await InventoryStock.findAll({
+                            where: {
+                                productId: item.productId,
+                                godownId: masterGodownId,
+                                totalBaseUnits: { [Op.gt]: 0 }
+                            },
+                            order: [['createdAt', 'ASC']],
+                            transaction: t
+                        });
+
+                        for (const stock of masterStocks) {
+                            if (remainingToDeduct <= 0) break;
+
+                            const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                            const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                            await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                            // Log the transaction
+                            await InventoryTransaction.create({
+                                stockId: stock.id,
+                                productId: item.productId,
+                                variantId: item.variantId,
+                                godownId: masterGodownId,
+                                type: 'SALE',
+                                primaryUnitId: stock.primaryUnitId,
+                                secondaryUnitId: stock.secondaryUnitId,
+                                secondaryPerPrimary: stock.secondaryPerPrimary,
+                                totalQtyBaseUnits: deductFromThis,
+                                balanceAfterBaseUnits: newTotalBaseUnits,
+                                note: `Sales Order #${targetOrder.orderId} (Spillover from Master)`,
+                                createdBy: req.user?.fullname || 'Customer'
+                            }, { transaction: t });
+
+                            remainingToDeduct -= deductFromThis;
+                        }
                     }
 
                     if (remainingToDeduct > 0) {
