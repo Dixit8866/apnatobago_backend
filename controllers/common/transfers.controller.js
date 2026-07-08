@@ -46,8 +46,10 @@ export const getTransfers = async (req, res, next) => {
             where: whereClause,
             include: [
                 { model: Godown, as: 'fromGodown', attributes: ['id', 'name'] },
-                { model: Godown, as: 'toGodown', attributes: ['id', 'name'] }
+                { model: Godown, as: 'toGodown', attributes: ['id', 'name'] },
+                { model: StockTransferItem, as: 'items', attributes: ['id'] }
             ],
+            distinct: true,
             limit,
             offset,
             order: [['createdAt', 'DESC']]
@@ -73,7 +75,16 @@ export const getTransferById = async (req, res, next) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'volumeId'] }
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'volumeId', 'extra'],
+                            include: [
+                                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                            ]
+                        }
                     ]
                 }
             ]
@@ -92,16 +103,31 @@ export const getTransferById = async (req, res, next) => {
         // Enrich items for the frontend view
         const enrichedItems = (transfer.items || []).map(item => {
             const prodName = item.product?.name?.en || item.product?.name?.gu || item.product?.name || 'Unknown Product';
-            const volVal = item.variant?.volume || 'N/A';
+            const variant = item.variant;
+            const volumeUnit = variant?.volumeRef?.name?.en || variant?.volumeRef?.name?.gu || Object.values(variant?.volumeRef?.name || {})[0] || '';
+            const volValue = variant?.volume || '';
+            let volLabel = volValue;
+            if (volumeUnit && volumeUnit !== '-') {
+                if (!volValue.toLowerCase().includes(volumeUnit.toLowerCase())) {
+                    volLabel = `${volValue} ${volumeUnit}`.trim();
+                }
+            }
+            if (variant?.extra && String(variant.extra).trim()) {
+                volLabel = `${String(variant.extra).trim()} ${volLabel}`;
+            }
+
+            const primaryUnit = variant?.baseUnitRef?.name?.en || variant?.baseUnitRef?.name?.gu || Object.values(variant?.baseUnitRef?.name || {})[0] || 'packs';
+
             return {
                 id: item.id,
                 productId: item.productId,
                 variantId: item.variantId,
                 productName: prodName,
-                volume: volVal,
+                volume: volLabel || 'N/A',
                 qty: item.qty,
                 price: Number(item.price || 0),
-                amount: Number(item.amount || 0)
+                amount: Number(item.amount || 0),
+                unitLabel: primaryUnit
             };
         });
 
@@ -167,24 +193,27 @@ export const createTransfer = async (req, res, next) => {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid item quantity or product selection.');
             }
 
+            const variant = await ProductVariant.findByPk(variantId, { transaction: t });
+            const factor = Number(variant?.baseUnitsPerPack || 1);
+            const qtyInBaseUnits = Number(qty) * factor;
+
             // Check if there is a valid stock record for this item in the source godown
             const sourceStock = await InventoryStock.findOne({
                 where: { productId, variantId, godownId: fromGodownId },
                 transaction: t
             });
 
-            if (!sourceStock || Number(sourceStock.totalBaseUnits || 0) < Number(qty)) {
+            if (!sourceStock || Number(sourceStock.totalBaseUnits || 0) < qtyInBaseUnits) {
                 await t.rollback();
-                const variant = await ProductVariant.findByPk(variantId, { transaction: t });
                 const vol = variant ? variant.volume : '';
+                const maxAvailablePacks = sourceStock ? (Number(sourceStock.totalBaseUnits) / factor) : 0;
                 return sendErrorResponse(
                     res,
                     HTTP_STATUS.BAD_REQUEST,
-                    `Insufficient stock in source godown for variant ${vol || ''}. Available: ${sourceStock ? sourceStock.totalBaseUnits : 0}`
+                    `Insufficient stock in source godown for variant ${vol || ''}. Available: ${maxAvailablePacks} packs`
                 );
             }
 
-            const variant = await ProductVariant.findByPk(variantId, { transaction: t });
             const price = Number(variant?.purchasePrice || 0);
             const amount = price * Number(qty);
             grandTotal += amount;
@@ -248,13 +277,18 @@ export const updateTransferStatus = async (req, res, next) => {
             const toGodownName = toGodown?.name || 'Destination Godown';
 
             for (const item of transfer.items) {
+                // Fetch variant to get the baseUnitsPerPack factor
+                const variant = await ProductVariant.findByPk(item.variantId, { transaction: t });
+                const factor = Number(variant?.baseUnitsPerPack || 1);
+                const qtyInBaseUnits = Number(item.qty) * factor;
+
                 // 1. Decrement source stock
                 const sourceStock = await InventoryStock.findOne({
                     where: { productId: item.productId, variantId: item.variantId, godownId: transfer.fromGodownId },
                     transaction: t
                 });
 
-                if (!sourceStock || Number(sourceStock.totalBaseUnits || 0) < Number(item.qty)) {
+                if (!sourceStock || Number(sourceStock.totalBaseUnits || 0) < qtyInBaseUnits) {
                     await t.rollback();
                     return sendErrorResponse(
                         res,
@@ -263,7 +297,7 @@ export const updateTransferStatus = async (req, res, next) => {
                     );
                 }
 
-                const newSourceQty = Number(sourceStock.totalBaseUnits) - Number(item.qty);
+                const newSourceQty = Number(sourceStock.totalBaseUnits) - qtyInBaseUnits;
                 await sourceStock.update({ totalBaseUnits: newSourceQty }, { transaction: t });
 
                 // Log InventoryTransaction for Outgoing
@@ -278,7 +312,7 @@ export const updateTransferStatus = async (req, res, next) => {
                     secondaryPerPrimary: sourceStock.secondaryPerPrimary,
                     qtyPrimary: 0,
                     qtySecondary: 0,
-                    totalQtyBaseUnits: -Number(item.qty),
+                    totalQtyBaseUnits: -qtyInBaseUnits,
                     avgPriceAfterTxn: sourceStock.avgPurchasePricePerBaseUnit || 0,
                     balanceAfterBaseUnits: newSourceQty,
                     note: `Stock Transfer Out to ${toGodownName} (TRF: ${transfer.transferNo})`,
@@ -305,7 +339,7 @@ export const updateTransferStatus = async (req, res, next) => {
                     }, { transaction: t });
                 }
 
-                const newDestQty = Number(destStock.totalBaseUnits) + Number(item.qty);
+                const newDestQty = Number(destStock.totalBaseUnits) + qtyInBaseUnits;
                 await destStock.update({ totalBaseUnits: newDestQty }, { transaction: t });
 
                 // Log InventoryTransaction for Incoming
@@ -320,7 +354,7 @@ export const updateTransferStatus = async (req, res, next) => {
                     secondaryPerPrimary: destStock.secondaryPerPrimary,
                     qtyPrimary: 0,
                     qtySecondary: 0,
-                    totalQtyBaseUnits: Number(item.qty),
+                    totalQtyBaseUnits: qtyInBaseUnits,
                     avgPriceAfterTxn: destStock.avgPurchasePricePerBaseUnit || 0,
                     balanceAfterBaseUnits: newDestQty,
                     note: `Stock Transfer In from ${fromGodownName} (TRF: ${transfer.transferNo})`,
@@ -379,7 +413,9 @@ export const getGodownStock = async (req, res, next) => {
         variants.forEach(v => {
             if (!v.product) return;
             const key = `${v.productId}_${v.id}`;
-            const qtyAvailable = stockMap[key] || 0;
+            const qtyAvailableBase = stockMap[key] || 0;
+            const factor = Number(v.baseUnitsPerPack || 1);
+            const qtyAvailable = qtyAvailableBase / factor;
             
             const nameEn = v.product.name?.en || '';
             const nameGu = v.product.name?.gu || v.product.name?.guj || '';
