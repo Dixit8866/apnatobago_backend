@@ -255,6 +255,7 @@ export const getProducts = async (req, res) => {
                                     WHERE "stock"."variantId" = "variants"."id"
                                       AND "stock"."status" = 'Active'
                                       AND "stock"."deletedAt" IS NULL
+                                      ${user?.godownId ? `AND "stock"."godownId" = ${sequelize.escape(user.godownId)}` : ''}
                                 )`),
                                 'totalStock'
                             ]
@@ -532,6 +533,7 @@ export const searchCatalogue = async (req, res) => {
                                     WHERE "stock"."variantId" = "variants"."id"
                                       AND "stock"."status" = 'Active'
                                       AND "stock"."deletedAt" IS NULL
+                                      ${user?.godownId ? `AND "stock"."godownId" = ${sequelize.escape(user.godownId)}` : ''}
                                 )`),
                                 'totalStock'
                             ]

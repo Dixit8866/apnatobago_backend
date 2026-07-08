@@ -53,6 +53,7 @@ export const getWishlist = async (req, res) => {
                                         WHERE "stock"."variantId" = "product->variants"."id"
                                           AND "stock"."status" = 'Active'
                                           AND "stock"."deletedAt" IS NULL
+                                          ${req.user?.godownId ? `AND "stock"."godownId" = ${sequelize.escape(req.user.godownId)}` : ''}
                                     )`),
                                     'totalStock'
                                 ]
