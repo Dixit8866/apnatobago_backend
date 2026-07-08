@@ -1,3 +1,4 @@
+import { Op } from 'sequelize';
 import GodownStaff from '../../models/superadmin-models/GodownStaff.js';
 import Godown from '../../models/superadmin-models/Godown.js';
 import { generateToken } from '../../helpers/jwt.helper.js';
@@ -14,10 +15,12 @@ import APP_MESSAGES from '../../constants/messages.js';
 export const loginGodownStaff = async (req, res, next) => {
     try {
         const { email, password } = req.body;
-        const cleanEmail = email ? email.toLowerCase().trim() : '';
+        const cleanEmail = email ? email.trim() : '';
 
         const staff = await GodownStaff.findOne({
-            where: { email: cleanEmail },
+            where: {
+                email: { [Op.iLike]: cleanEmail }
+            },
             include: [{ model: Godown, as: 'godown', attributes: ['id', 'name', 'type', 'status'] }]
         });
 

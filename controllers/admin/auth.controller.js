@@ -1,3 +1,4 @@
+import { Op } from 'sequelize';
 import Admin from '../../models/superadmin-models/Admin.js';
 import { generateToken } from '../../helpers/jwt.helper.js';
 import { setTokenCookie, clearTokenCookie } from '../../helpers/cookie.helper.js';
@@ -49,8 +50,13 @@ export const registerAdmin = async (req, res, next) => {
 export const loginAdmin = async (req, res, next) => {
     try {
         const { email, password, fcmtoken } = req.body;
+        const cleanEmail = email ? email.trim() : '';
 
-        const admin = await Admin.findOne({ where: { email } });
+        const admin = await Admin.findOne({
+            where: {
+                email: { [Op.iLike]: cleanEmail }
+            }
+        });
 
         if (admin && (await admin.matchPassword(password))) {
             const token = generateToken(admin.id);
