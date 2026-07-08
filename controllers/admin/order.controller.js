@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -123,12 +123,16 @@ export const downloadDeliveryLabel = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
     try {
-        const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming } = req.query;
+        const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming, godownId } = req.query;
         const baseWhere = {};
         let searchClause = null;
         let dateClause = null;
         let routeClause = null;
         let timingClause = null;
+
+        if (godownId) {
+            baseWhere.godownId = godownId;
+        }
 
         // Pre-fetch settings to resolve any empty deliveryRoundTiming
         const appSettings = await AppSettings.findOne();
@@ -361,6 +365,12 @@ export const getAllOrders = async (req, res) => {
                     as: 'creator',
                     required: false,
                     attributes: ['id', 'name', 'role']
+                },
+                {
+                    model: Godown,
+                    as: 'godown',
+                    required: false,
+                    attributes: ['id', 'name']
                 }
             ],
             limit,
@@ -455,6 +465,9 @@ export const getAllOrders = async (req, res) => {
 
         // ── Calculate Dynamic Status Counts for Tab Badges ────────────────────────
         const countWhere = {};
+        if (godownId) {
+            countWhere.godownId = godownId;
+        }
         const countInclude = [];
 
         if (routeCategoryId) {
