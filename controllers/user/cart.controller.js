@@ -10,46 +10,15 @@ import { roundTotal } from '../../utils/roundHelper.js';
 // can add to cart as long as stock exists anywhere in the system.
 // Godown-specific deduction still happens correctly at order placement time.
 const getAvailableStock = async (productId, godownId) => {
-    // 1. Get stock in the assigned godown
-    let assignedStock = 0;
-    if (godownId) {
-        assignedStock = await InventoryStock.sum('totalBaseUnits', {
-            where: {
-                productId,
-                godownId,
-                totalBaseUnits: { [Op.gt]: 0 }
-            }
-        }) || 0;
-    }
+    const totalStock = await InventoryStock.sum('totalBaseUnits', {
+        where: {
+            productId,
+            totalBaseUnits: { [Op.gt]: 0 },
+            ...(godownId && { godownId })
+        }
+    });
 
-    // Find the Master Godown ID (type: 'main')
-    const masterGodown = await Godown.findOne({ where: { type: 'main' } });
-    const masterGodownId = masterGodown ? masterGodown.id : null;
-
-    // 2. Get stock in the Master godown (only if the user's godown is not the Master godown)
-    let masterStock = 0;
-    if (masterGodownId && String(masterGodownId) !== String(godownId)) {
-        masterStock = await InventoryStock.sum('totalBaseUnits', {
-            where: {
-                productId,
-                godownId: masterGodownId,
-                totalBaseUnits: { [Op.gt]: 0 }
-            }
-        }) || 0;
-    }
-
-    // If godownId is not provided, check across ALL godowns as a generic fallback
-    if (!godownId) {
-        const totalStock = await InventoryStock.sum('totalBaseUnits', {
-            where: {
-                productId,
-                totalBaseUnits: { [Op.gt]: 0 }
-            }
-        });
-        return parseFloat(totalStock) || 0;
-    }
-
-    return parseFloat(assignedStock) + parseFloat(masterStock);
+    return parseFloat(totalStock) || 0;
 };
 
 /**
