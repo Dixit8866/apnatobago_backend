@@ -15,12 +15,11 @@ const SAFE_ATTRIBUTES = ['id', 'fullname', 'email', 'dialcode', 'number', 'city'
 export const getGodownParties = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId, deliveryRoundTiming } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
         const searchWhere = {
-            ...(isSuperAdmin ? {} : { godownId: staff.godownId }),
+            godownId: staff.godownId,
         };
 
         if (search) {
@@ -157,7 +156,7 @@ export const getGodownPartyById = async (req, res, next) => {
         const user = await User.findOne({
             where: {
                 id,
-                ...(staff.role !== 'superadmin' && { godownId: staff.godownId }),
+                godownId: staff.godownId,
             },
             include: [
                 { model: BusinessProfile, as: 'businessProfile', required: false },
@@ -181,14 +180,13 @@ export const getGodownPartyById = async (req, res, next) => {
 export const updateGodownParty = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { id } = req.params;
         const { showtabacco, blockcredit, kycverification, status } = req.body;
 
         const user = await User.findOne({
             where: {
                 id,
-                ...(isSuperAdmin ? {} : { godownId: staff.godownId }),
+                godownId: staff.godownId,
             }
         });
 

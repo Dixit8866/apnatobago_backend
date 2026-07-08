@@ -11,17 +11,16 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 export const getGodownDashboard = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const godownId = staff.godownId;
 
-        // Build godown filter — superadmin sees all
-        const godownFilter = isSuperAdmin ? {} : { godownId };
+        // Build godown filter
+        const godownFilter = { godownId };
 
         // Total assigned parties
         const totalParties = await User.count({
             where: {
                 status: 'Active',
-                ...(!isSuperAdmin && { godownId }),
+                godownId,
             }
         });
 
@@ -64,7 +63,7 @@ export const getGodownDashboard = async (req, res, next) => {
         const totalSales = Number(totalSalesSum || 0);
 
         // Low stock count (base units <= 10)
-        const inventoryFilter = isSuperAdmin ? {} : { godownId };
+        const inventoryFilter = { godownId };
         const lowStockCount = await InventoryStock.count({
             where: {
                 ...inventoryFilter,

@@ -13,7 +13,6 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
 export const getDailyCallings = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
 
         const appSettings = await AppSettings.findOne();
@@ -49,7 +48,7 @@ export const getDailyCallings = async (req, res, next) => {
                     { [Op.ne]: 'none' }
                 ]
             },
-            ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+            godownId: staff.godownId
         };
 
         if (search) {
@@ -244,7 +243,6 @@ export const getDailyCallings = async (req, res, next) => {
 export const getInactiveParties = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
 
         const appSettings = await AppSettings.findOne();
@@ -287,7 +285,7 @@ export const getInactiveParties = async (req, res, next) => {
                     { [Op.ne]: 'none' }
                 ]
             },
-            ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+            godownId: staff.godownId
         };
 
         if (search) {

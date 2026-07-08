@@ -11,7 +11,6 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 export const getGodownPayments = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { page = 1, limit = 20, search = '', status = '' } = req.query;
 
         const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -22,7 +21,7 @@ export const getGodownPayments = async (req, res, next) => {
                     model: Order,
                     as: 'order',
                     where: {
-                        ...(isSuperAdmin ? {} : { godownId: staff.godownId }),
+                        godownId: staff.godownId,
                         ...(search && {
                             [Op.or]: [
                                 { orderId: { [Op.iLike]: `%${search}%` } },
@@ -68,7 +67,6 @@ export const getGodownPayments = async (req, res, next) => {
 export const bulkVerifyPayments = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { orderIds, note } = req.body;
 
         if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
@@ -79,7 +77,7 @@ export const bulkVerifyPayments = async (req, res, next) => {
         const whereClause = {
             id: { [Op.in]: orderIds },
             orderStatus: 'Payment Collect',
-            ...(isSuperAdmin ? {} : { godownId: staff.godownId }),
+            godownId: staff.godownId,
         };
 
         const [updatedCount] = await Order.update(

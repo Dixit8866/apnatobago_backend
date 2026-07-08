@@ -11,13 +11,12 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 export const getGodownHelpSupport = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { page = 1, limit = 20, search = '', status = '' } = req.query;
 
         const offset = (parseInt(page) - 1) * parseInt(limit);
 
         const userWhere = {
-            ...(isSuperAdmin ? {} : { godownId: staff.godownId }),
+            godownId: staff.godownId,
             ...(search && {
                 [Op.or]: [
                     { fullname: { [Op.iLike]: `%${search}%` } },
@@ -29,19 +28,19 @@ export const getGodownHelpSupport = async (req, res, next) => {
         // Parallel status counts
         const [totalCount, pendingCount, resolvedCount, closedCount] = await Promise.all([
             HelpSupport.count({
-                include: [{ model: User, as: 'user', where: { ...(isSuperAdmin ? {} : { godownId: staff.godownId }) }, required: true }]
+                include: [{ model: User, as: 'user', where: { godownId: staff.godownId }, required: true }]
             }),
             HelpSupport.count({
                 where: { status: 'Pending' },
-                include: [{ model: User, as: 'user', where: { ...(isSuperAdmin ? {} : { godownId: staff.godownId }) }, required: true }]
+                include: [{ model: User, as: 'user', where: { godownId: staff.godownId }, required: true }]
             }),
             HelpSupport.count({
                 where: { status: 'Resolved' },
-                include: [{ model: User, as: 'user', where: { ...(isSuperAdmin ? {} : { godownId: staff.godownId }) }, required: true }]
+                include: [{ model: User, as: 'user', where: { godownId: staff.godownId }, required: true }]
             }),
             HelpSupport.count({
                 where: { status: 'Closed' },
-                include: [{ model: User, as: 'user', where: { ...(isSuperAdmin ? {} : { godownId: staff.godownId }) }, required: true }]
+                include: [{ model: User, as: 'user', where: { godownId: staff.godownId }, required: true }]
             }),
         ]);
         const statusCounts = { '': totalCount, Pending: pendingCount, Resolved: resolvedCount, Closed: closedCount };
@@ -84,7 +83,6 @@ export const getGodownHelpSupport = async (req, res, next) => {
 export const updateGodownHelpSupportStatus = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { id } = req.params;
         const { status } = req.body;
 
@@ -94,7 +92,7 @@ export const updateGodownHelpSupportStatus = async (req, res, next) => {
                 model: User,
                 as: 'user',
                 where: {
-                    ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+                    godownId: staff.godownId
                 },
                 required: true
             }]

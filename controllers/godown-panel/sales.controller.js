@@ -14,7 +14,6 @@ import { sendToDevice } from '../../services/notification.service.js';
 export const getGodownOrders = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const {
             page = 1,
             limit = 20,
@@ -38,9 +37,7 @@ export const getGodownOrders = async (req, res, next) => {
         const pendingDueStatuses = ['Delivered', 'Payment Collect', 'Payment Verify'];
 
         // Godown restriction
-        const godownFilter = isSuperAdmin
-            ? (filterGodownId ? { godownId: filterGodownId } : {})
-            : { godownId: staff.godownId };
+        const godownFilter = { godownId: staff.godownId };
 
         let orderStatusFilter = {};
         if (status === 'Pending Due Order') {
@@ -200,14 +197,13 @@ export const getGodownOrders = async (req, res, next) => {
 export const updateGodownOrderStatus = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { id } = req.params;
         const { orderStatus } = req.body;
 
         const order = await Order.findOne({
             where: {
                 id,
-                ...(isSuperAdmin ? {} : { godownId: staff.godownId }),
+                godownId: staff.godownId,
             }
         });
 
@@ -298,7 +294,7 @@ export const bulkUpdateGodownOrderStatus = async (req, res, next) => {
             {
                 where: {
                     id: { [Op.in]: orderIds },
-                    ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+                    godownId: staff.godownId
                 }
             }
         );
@@ -333,7 +329,7 @@ export const bulkAssignGodownOrders = async (req, res, next) => {
         const orders = await Order.findAll({
             where: {
                 id: { [Op.in]: orderIds },
-                ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+                godownId: staff.godownId
             }
         });
 
@@ -381,7 +377,6 @@ export const mergeGodownOrders = async (req, res, next) => {
     const t = await sequelize.transaction();
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { sourceOrderId, sourceOrderIds, targetOrderId, targetStatus } = req.body;
 
         const resolvedSourceOrderIds = sourceOrderIds || (sourceOrderId ? [sourceOrderId] : []);
@@ -398,7 +393,7 @@ export const mergeGodownOrders = async (req, res, next) => {
         const targetOrder = await Order.findOne({
             where: {
                 id: targetOrderId,
-                ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+                godownId: staff.godownId
             },
             include: [{ model: OrderItem, as: 'items' }],
             transaction: t
@@ -424,7 +419,7 @@ export const mergeGodownOrders = async (req, res, next) => {
             const sourceOrder = await Order.findOne({
                 where: {
                     id: sId,
-                    ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+                    godownId: staff.godownId
                 },
                 include: [{ model: OrderItem, as: 'items' }],
                 transaction: t
@@ -562,12 +557,11 @@ export const mergeGodownOrders = async (req, res, next) => {
 export const getGodownMergeableOrders = async (req, res, next) => {
     try {
         const staff = req.user;
-        const isSuperAdmin = staff.role === 'superadmin';
         const { id } = req.params;
         const order = await Order.findOne({
             where: {
                 id,
-                ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+                godownId: staff.godownId
             }
         });
         if (!order) {
@@ -577,7 +571,7 @@ export const getGodownMergeableOrders = async (req, res, next) => {
         const where = {
             id: { [Op.ne]: id },
             orderStatus: { [Op.in]: ['Pending', 'Packaging', 'Packed'] },
-            ...(isSuperAdmin ? {} : { godownId: staff.godownId })
+            godownId: staff.godownId
         };
 
         if (order.userId) {
