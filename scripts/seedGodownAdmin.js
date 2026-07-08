@@ -44,6 +44,14 @@ async function seedGodownAdmin() {
         const existing = await GodownStaff.findOne({ where: { email: 'godownadmin@gmail.com' } });
         if (existing) {
             console.log('[Seed] GodownStaff already exists with email: godownadmin@gmail.com');
+            const isMatch = await existing.matchPassword('godownadmin@gmail.com');
+            if (!isMatch) {
+                existing.password = 'godownadmin@gmail.com';
+                await existing.save();
+                console.log('[Seed] GodownStaff password updated/corrected to default ✓');
+            } else {
+                console.log('[Seed] Password is already correct. ✓');
+            }
             console.log('[Seed] Seeding complete. ✓');
             process.exit(0);
         }

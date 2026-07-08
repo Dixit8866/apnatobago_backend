@@ -24,8 +24,8 @@ import GodownStaff from './models/superadmin-models/GodownStaff.js';
 // ─── Seed Admin Function ──────────────────────────────────────────────────────
 const seedAdmin = async () => {
     try {
-        const adminCount = await Admin.count();
-        if (adminCount === 0) {
+        const existing = await Admin.findOne({ where: { email: 'apnatobacco@gmail.com' } });
+        if (!existing) {
             await Admin.create({
                 name: 'Super Admin',
                 email: 'apnatobacco@gmail.com',
@@ -34,6 +34,13 @@ const seedAdmin = async () => {
                 status: 'Active'
             });
             console.log('[Seed] SuperAdmin created successfully ✓');
+        } else {
+            const isMatch = await existing.matchPassword('apnatobacco123');
+            if (!isMatch) {
+                existing.password = 'apnatobacco123';
+                await existing.save();
+                console.log('[Seed] SuperAdmin password updated/corrected to default ✓');
+            }
         }
     } catch (error) {
         console.error('[Seed Error] Failed to seed admin:', error.message);
@@ -72,6 +79,13 @@ const seedGodownAdmin = async () => {
                 status: 'Active',
             });
             console.log(`[Seed] GodownStaff (godownadmin@gmail.com) created successfully ✓`);
+        } else {
+            const isMatch = await existing.matchPassword('godownadmin@gmail.com');
+            if (!isMatch) {
+                existing.password = 'godownadmin@gmail.com';
+                await existing.save();
+                console.log('[Seed] GodownStaff (godownadmin@gmail.com) password updated/corrected to default ✓');
+            }
         }
     } catch (error) {
         console.error('[Seed Error] Failed to seed godown admin:', error.message);

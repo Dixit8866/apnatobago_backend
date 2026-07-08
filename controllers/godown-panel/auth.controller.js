@@ -14,9 +14,10 @@ import APP_MESSAGES from '../../constants/messages.js';
 export const loginGodownStaff = async (req, res, next) => {
     try {
         const { email, password } = req.body;
+        const cleanEmail = email ? email.toLowerCase().trim() : '';
 
         const staff = await GodownStaff.findOne({
-            where: { email },
+            where: { email: cleanEmail },
             include: [{ model: Godown, as: 'godown', attributes: ['id', 'name', 'type', 'status'] }]
         });
 
