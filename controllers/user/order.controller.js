@@ -108,23 +108,26 @@ export const createOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
         }
 
-        let targetGodownId = null;
-        if (userData.postcode) {
-            const godown = await Godown.findOne({
-                where: { pincodes: { [Op.contains]: [userData.postcode] } },
-                transaction: t
-            });
-            if (godown) targetGodownId = godown.id;
-        }
+        let targetGodownId = userData.godownId || null;
 
         if (!targetGodownId) {
-            const mainGodown = await Godown.findOne({ where: { type: 'main' }, transaction: t });
-            if (mainGodown) targetGodownId = mainGodown.id;
-        }
+            if (userData.postcode) {
+                const godown = await Godown.findOne({
+                    where: { pincodes: { [Op.contains]: [userData.postcode] } },
+                    transaction: t
+                });
+                if (godown) targetGodownId = godown.id;
+            }
 
-        if (!targetGodownId) {
-            const anyGodown = await Godown.findOne({ transaction: t });
-            if (anyGodown) targetGodownId = anyGodown.id;
+            if (!targetGodownId) {
+                const mainGodown = await Godown.findOne({ where: { type: 'main' }, transaction: t });
+                if (mainGodown) targetGodownId = mainGodown.id;
+            }
+
+            if (!targetGodownId) {
+                const anyGodown = await Godown.findOne({ transaction: t });
+                if (anyGodown) targetGodownId = anyGodown.id;
+            }
         }
 
         let calculatedSubtotal = 0;
@@ -550,7 +553,7 @@ export const createOrder = async (req, res) => {
                 deliveryRoundTiming: resolvedDeliveryRoundTiming,
                 deliveryDate: deliveryDate || null,
                 routeCategoryId: userData.routeCategoryId || null,
-                godownId: userData.godownId || null,
+                godownId: targetGodownId,
             }, { transaction: t });
 
             targetOrder = newOrder;

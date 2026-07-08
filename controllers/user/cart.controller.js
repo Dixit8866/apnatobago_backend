@@ -9,11 +9,12 @@ import { roundTotal } from '../../utils/roundHelper.js';
 // Cart availability check sums stock from all godowns so the user
 // can add to cart as long as stock exists anywhere in the system.
 // Godown-specific deduction still happens correctly at order placement time.
-const getAvailableStock = async (productId) => {
+const getAvailableStock = async (productId, godownId) => {
     const totalStock = await InventoryStock.sum('totalBaseUnits', {
         where: {
             productId,
-            totalBaseUnits: { [Op.gt]: 0 }
+            totalBaseUnits: { [Op.gt]: 0 },
+            ...(godownId && { godownId })
         }
     });
 
@@ -379,8 +380,8 @@ export const addToCart = async (req, res) => {
         // last aya change karo cho je koi biji product ma aa issues ave to 
         const deductionRequired = totalProposedQty * bUPP;
 
-        // Check stock first — sum across ALL godowns
-        const availableStock = await getAvailableStock(productId);
+        // Check stock first — sum across user's assigned godown
+        const availableStock = await getAvailableStock(productId, req.user?.godownId);
 
         if (deductionRequired > availableStock) {
             const productName = typeof variant.product?.name === 'object'
@@ -511,7 +512,7 @@ export const updateCartItem = async (req, res) => {
             const bUPP = variant ? Number(variant.baseUnitsPerPack || 1) : 1;
             const deductionRequired = proposedQty * bUPP;
 
-            const availableStock = await getAvailableStock(cartItem.productId);
+            const availableStock = await getAvailableStock(cartItem.productId, req.user?.godownId);
             if (deductionRequired > availableStock) {
                 const productName = typeof variant?.product?.name === 'object'
                     ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')

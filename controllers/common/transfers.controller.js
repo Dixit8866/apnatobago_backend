@@ -78,7 +78,7 @@ export const getTransferById = async (req, res, next) => {
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'volume', 'volumeId', 'extra'],
+                            attributes: ['id', 'volume', 'volumeId', 'extra', 'baseUnitLabel', 'innerUnitLabel'],
                             include: [
                                 { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                                 { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
