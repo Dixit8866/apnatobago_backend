@@ -29,6 +29,7 @@ import Cart from './user/Cart.js';
 import Wishlist from './user/Wishlist.js';
 import AppSettings from './superadmin-models/AppSettings.js';
 import Banner from './superadmin-models/Banner.js';
+import Offer from './superadmin-models/Offer.js';
 import Order from './user/Order.js';
 import OrderItem from './user/OrderItem.js';
 import Notification from './superadmin-models/Notification.js';
@@ -112,6 +113,16 @@ Banner.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' }
 
 Product.hasMany(Banner, { foreignKey: 'productId', as: 'banners' });
 Banner.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+
+// Offer -> Categories / Products
+MainCategory.hasMany(Offer, { foreignKey: 'mainCategoryId', as: 'offers' });
+Offer.belongsTo(MainCategory, { foreignKey: 'mainCategoryId', as: 'mainCategory' });
+
+SubCategory.hasMany(Offer, { foreignKey: 'subCategoryId', as: 'offers' });
+Offer.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' });
+
+Product.hasMany(Offer, { foreignKey: 'productId', as: 'offers' });
+Offer.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 
 SubCategory.hasMany(Product, { foreignKey: 'subCategoryId', as: 'products' });
 Product.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' });
@@ -567,6 +578,7 @@ export {
     Wishlist,
     AppSettings,
     Banner,
+    Offer,
     Order,
     OrderItem,
     BusinessProfile,
