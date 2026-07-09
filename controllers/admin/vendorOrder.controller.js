@@ -72,6 +72,7 @@ async function enrichItems(rawItems) {
             variantId: item.variantId,
             volume: cleanForPDF(volume),
             unitLabel: cleanForPDF(unitLabel),
+            quotationPrice: item.quotationPrice !== undefined && item.quotationPrice !== null ? Number(item.quotationPrice) : null,
             qty: Number(item.qty),
         };
     }));
