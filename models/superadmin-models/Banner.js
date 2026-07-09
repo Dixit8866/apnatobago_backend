@@ -27,6 +27,19 @@ const Banner = sequelize.define('Banner', {
     mainCategoryId: {
         type: DataTypes.UUID,
         allowNull: true,
+    },
+    subCategoryId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+    },
+    productId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+    },
+    type: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: 'Category'
     }
 }, {
     timestamps: true,

@@ -342,7 +342,7 @@ const sortVariants = (productJson) => {
 
 export const getProducts = async (req, res, next) => {
     try {
-        const { search = '', status, mainCategoryId, isTobacco, godownId } = req.query;
+        const { search = '', status, mainCategoryId, subCategoryId, isTobacco, godownId } = req.query;
         const isInventoryView = req.query.inventoryView === 'true';
 
         const trimmedSearch = String(search).trim();
@@ -415,6 +415,9 @@ export const getProducts = async (req, res, next) => {
         if (mainCategoryId) {
             whereWithFilters.mainCategoryId = mainCategoryId;
         }
+        if (subCategoryId) {
+            whereWithFilters.subCategoryId = subCategoryId;
+        }
 
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
@@ -424,6 +427,9 @@ export const getProducts = async (req, res, next) => {
         const countBaseWhere = { ...searchWhere };
         if (mainCategoryId) {
             countBaseWhere.mainCategoryId = mainCategoryId;
+        }
+        if (subCategoryId) {
+            countBaseWhere.subCategoryId = subCategoryId;
         }
 
         if (isInventoryView) {
@@ -475,10 +481,10 @@ export const getProducts = async (req, res, next) => {
             lowStockCount = lowStockVal;
 
             [activeCount, inactiveCount, deletedCount, totalCount] = await Promise.all([
-                Product.count({ where: { ...searchWhere, status: 'Active', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
-                Product.count({ where: { ...searchWhere, status: 'Inactive', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
-                Product.count({ where: { ...searchWhere, status: 'Deleted', ...(mainCategoryId ? { mainCategoryId } : {}) } }),
-                Product.count({ where: { ...searchWhere, ...(mainCategoryId ? { mainCategoryId } : {}) } }),
+                Product.count({ where: { ...searchWhere, status: 'Active', ...(mainCategoryId ? { mainCategoryId } : {}), ...(subCategoryId ? { subCategoryId } : {}) } }),
+                Product.count({ where: { ...searchWhere, status: 'Inactive', ...(mainCategoryId ? { mainCategoryId } : {}), ...(subCategoryId ? { subCategoryId } : {}) } }),
+                Product.count({ where: { ...searchWhere, status: 'Deleted', ...(mainCategoryId ? { mainCategoryId } : {}), ...(subCategoryId ? { subCategoryId } : {}) } }),
+                Product.count({ where: { ...searchWhere, ...(mainCategoryId ? { mainCategoryId } : {}), ...(subCategoryId ? { subCategoryId } : {}) } }),
             ]);
         }
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount, 'Low Stock': lowStockCount };

@@ -103,9 +103,15 @@ ProductPricing.belongsTo(CustomLevel, { foreignKey: 'customLevelId', as: 'custom
 MainCategory.hasMany(Product, { foreignKey: 'mainCategoryId', as: 'products' });
 Product.belongsTo(MainCategory, { foreignKey: 'mainCategoryId', as: 'mainCategory' });
 
-// Banner -> Categories
+// Banner -> Categories / Products
 MainCategory.hasMany(Banner, { foreignKey: 'mainCategoryId', as: 'banners' });
 Banner.belongsTo(MainCategory, { foreignKey: 'mainCategoryId', as: 'mainCategory' });
+
+SubCategory.hasMany(Banner, { foreignKey: 'subCategoryId', as: 'banners' });
+Banner.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' });
+
+Product.hasMany(Banner, { foreignKey: 'productId', as: 'banners' });
+Banner.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 
 SubCategory.hasMany(Product, { foreignKey: 'subCategoryId', as: 'products' });
 Product.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' });
@@ -407,6 +413,13 @@ const runManualMigrations = async () => {
             // Add mainCategoryId to banners
             await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "mainCategoryId" UUID REFERENCES main_categories(id) ON DELETE SET NULL');
         } catch (e) { console.log('[Migration Warning] Banners mainCategoryId column failed:', e.message); }
+
+        try {
+            // Add subCategoryId and productId to banners
+            await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "subCategoryId" UUID REFERENCES sub_categories(id) ON DELETE SET NULL');
+            await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "productId" UUID REFERENCES products(id) ON DELETE SET NULL');
+            await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "type" VARCHAR(255) DEFAULT \'Category\'');
+        } catch (e) { console.log('[Migration Warning] Banners subCategoryId/productId/type columns failed:', e.message); }
 
         try {
             // Add image to help_supports

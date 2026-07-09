@@ -1,4 +1,4 @@
-import { Banner, MainCategory } from '../../models/index.js';
+import { Banner, MainCategory, SubCategory, Product } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -7,12 +7,12 @@ import sequelize from '../../config/db.js';
 
 export const createBanner = async (req, res, next) => {
     try {
-        const { image, title, status, mainCategoryId } = req.body;
+        const { image, title, status, mainCategoryId, subCategoryId, productId, type } = req.body;
         
         // Get max position for auto-increment
         const maxPos = await Banner.max('position') || 0;
         const banner = await Banner.create({
-            image, title, status, mainCategoryId,
+            image, title, status, mainCategoryId, subCategoryId, productId, type: type || 'Category',
             position: maxPos + 1
         });
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Banner created successfully.", banner);
@@ -57,7 +57,11 @@ export const getBanners = async (req, res, next) => {
         if (req.query.paginate === 'false') {
             const banners = await Banner.findAll({
                 where: whereClause,
-                include: [{ model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] }],
+                include: [
+                    { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                    { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+                    { model: Product, as: 'product', attributes: ['id', 'name'] }
+                ],
                 order: [['position', 'ASC'], ['createdAt', 'DESC']]
             });
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Banners fetched successfully.", { banners, statusCounts });
@@ -68,7 +72,11 @@ export const getBanners = async (req, res, next) => {
             where: whereClause,
             limit,
             offset,
-            include: [{ model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] }],
+            include: [
+                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+                { model: Product, as: 'product', attributes: ['id', 'name'] }
+            ],
             order: [['position', 'ASC'], ['createdAt', 'DESC']]
         });
 
@@ -85,7 +93,11 @@ export const getBanners = async (req, res, next) => {
 export const getBannerById = async (req, res, next) => {
     try {
         const banner = await Banner.findByPk(req.params.id, {
-            include: [{ model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] }]
+            include: [
+                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+                { model: Product, as: 'product', attributes: ['id', 'name'] }
+            ]
         });
         if (!banner) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Banner not found.");
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Banner fetched successfully.", banner);
@@ -96,11 +108,11 @@ export const getBannerById = async (req, res, next) => {
 
 export const updateBanner = async (req, res, next) => {
     try {
-        const { image, title, status, mainCategoryId } = req.body;
+        const { image, title, status, mainCategoryId, subCategoryId, productId, type } = req.body;
         const banner = await Banner.findByPk(req.params.id);
         if (!banner) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Banner not found.");
 
-        await banner.update({ image, title, status, mainCategoryId });
+        await banner.update({ image, title, status, mainCategoryId, subCategoryId, productId, type: type || 'Category' });
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Banner updated successfully.", banner);
     } catch (error) {
         next(error);
