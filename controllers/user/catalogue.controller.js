@@ -7,6 +7,7 @@ import ProductPricing from '../../models/superadmin-models/ProductPricing.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
 import Banner from '../../models/superadmin-models/Banner.js';
+import Offer from '../../models/superadmin-models/Offer.js';
 import Wishlist from '../../models/user/Wishlist.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -401,6 +402,63 @@ export const getBanners = async (req, res) => {
     } catch (error) {
         logger.error(`[Get Banners Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch banners");
+    }
+};
+
+/**
+ * @desc    Get active and currently valid offers
+ * @route   GET /api/user/offers
+ * @access  Private (User)
+ */
+export const getOffers = async (req, res) => {
+    try {
+        const now = new Date();
+        const offers = await Offer.findAll({
+            where: {
+                status: 'Active',
+                [Op.and]: [
+                    {
+                        [Op.or]: [
+                            { startDate: null },
+                            { startDate: { [Op.lte]: now } }
+                        ]
+                    },
+                    {
+                        [Op.or]: [
+                            { endDate: null },
+                            { endDate: { [Op.gte]: now } }
+                        ]
+                    }
+                ]
+            },
+            include: [
+                { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
+                { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
+                { model: Product, as: 'product', attributes: ['id', 'name'] }
+            ],
+            order: [['position', 'ASC'], ['createdAt', 'DESC']]
+        });
+
+        const showTobacco = req.user ? req.user.showtabacco : false;
+        if (!showTobacco) {
+            const tobaccoKeywords = [
+                'tobacco', 'tobaco', 'cigarette', 'cig', 'smoking', 'bidi', 'gutka', 'paan', 'pan', 'smoke',
+                'તમાકુ', 'બીડી', 'સિગારેટ', 'ગુટખા', 'માવો', 'પાન', 'ખૈની'
+            ];
+
+            const filteredOffers = offers.filter(offer => {
+                const nameStr = JSON.stringify(offer.name || {}).toLowerCase();
+                const descStr = JSON.stringify(offer.description || {}).toLowerCase();
+                return !tobaccoKeywords.some(keyword => nameStr.includes(keyword) || descStr.includes(keyword));
+            });
+
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Offers fetched successfully", filteredOffers);
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Offers fetched successfully", offers);
+    } catch (error) {
+        logger.error(`[Get Offers Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch offers");
     }
 };
 /**

@@ -22,6 +22,7 @@ import {
     getProductsBySubCategory,
     getProductsByCompanyCategory,
     getBanners,
+    getOffers,
     searchCatalogue
 } from '../../controllers/user/catalogue.controller.js';
 import { getAppSettings } from '../../controllers/user/settings.controller.js';
@@ -59,6 +60,7 @@ router.get('/products/main-category/:id', protectUser, getProductsByMainCategory
 router.get('/products/sub-category/:id', protectUser, getProductsBySubCategory);
 router.get('/products/company-category/:id', protectUser, getProductsByCompanyCategory);
 router.get('/banners', optionalProtectUser, getBanners);
+router.get('/offers', optionalProtectUser, getOffers);
 router.get('/settings', getAppSettings);
 router.get('/search', protectUser, searchCatalogue);
 
