@@ -23,58 +23,63 @@ async function generateOrderNo() {
 // ─── Enrich items: attach productName, volume, unitLabel for display ──────────
 async function enrichItems(rawItems) {
     return await Promise.all(rawItems.map(async (item) => {
-        let productName = item.productName || '';
-        let volume = item.volume || '';
-        let unitLabel = item.unitLabel || '';
+        try {
+            let productName = item.productName || '';
+            let volume = item.volume || '';
+            let unitLabel = item.unitLabel || '';
 
-        // Only enrich if names are missing
-        if (!productName && item.productId) {
-            const prod = await Product.findByPk(item.productId, { attributes: ['id', 'name'] });
-            if (prod) {
-                productName = prod.name?.en || Object.values(prod.name || {})[0] || '';
-            }
-        }
-        if (!volume && item.variantId) {
-            const variant = await ProductVariant.findByPk(item.variantId, {
-                attributes: ['id', 'volume', 'baseUnitLabel'],
-            });
-            if (variant) {
-                volume = variant.volume || '';
-                let rawLabel = variant.baseUnitLabel || '';
-
-                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                if (uuidRegex.test(rawLabel)) {
-                    const volRecord = await Volume.findByPk(rawLabel, { attributes: ['id', 'name'] });
-                    if (volRecord && volRecord.name) {
-                        rawLabel = volRecord.name.en || Object.values(volRecord.name)[0] || rawLabel;
-                    }
+            // Only enrich if names are missing
+            if (!productName && item.productId) {
+                const prod = await Product.findByPk(item.productId, { attributes: ['id', 'name'] });
+                if (prod) {
+                    productName = prod.name?.en || Object.values(prod.name || {})[0] || '';
                 }
-                unitLabel = rawLabel;
             }
+            if (!volume && item.variantId) {
+                const variant = await ProductVariant.findByPk(item.variantId, {
+                    attributes: ['id', 'volume', 'baseUnitLabel'],
+                });
+                if (variant) {
+                    volume = variant.volume || '';
+                    let rawLabel = variant.baseUnitLabel || '';
+
+                    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                    if (uuidRegex.test(rawLabel)) {
+                        const volRecord = await Volume.findByPk(rawLabel, { attributes: ['id', 'name'] });
+                        if (volRecord && volRecord.name) {
+                            rawLabel = volRecord.name.en || Object.values(volRecord.name)[0] || rawLabel;
+                        }
+                    }
+                    unitLabel = rawLabel;
+                }
+            }
+
+            // Final PDF-safe cleaning
+            const cleanForPDF = (text) => {
+                if (!text) return '';
+                let s = String(text)
+                    .replace(/મિલીલીટર/g, 'ml')
+                    .replace(/લીટર/g, 'Litre')
+                    .replace(/ગ્રામ/g, 'gm')
+                    .replace(/કિલોગ્રામ/g, 'kg')
+                    .replace(/નંગ/g, 'pcs')
+                    .replace(/કાર્ટૂન/g, 'Cartoon');
+                return s.replace(/[^\x00-\x7F]/g, "").trim();
+            };
+
+            return {
+                productId: item.productId,
+                productName: cleanForPDF(productName),
+                variantId: item.variantId,
+                volume: cleanForPDF(volume),
+                unitLabel: cleanForPDF(unitLabel),
+                quotationPrice: item.quotationPrice !== undefined && item.quotationPrice !== null ? Number(item.quotationPrice) : null,
+                qty: Number(item.qty),
+            };
+        } catch (err) {
+            console.error("ERROR ENRICHING ITEM DETAIL IN VENDOR ORDER CONTROLLER:", item, err);
+            throw err;
         }
-
-        // Final PDF-safe cleaning
-        const cleanForPDF = (text) => {
-            if (!text) return '';
-            let s = String(text)
-                .replace(/મિલીલીટર/g, 'ml')
-                .replace(/લીટર/g, 'Litre')
-                .replace(/ગ્રામ/g, 'gm')
-                .replace(/કિલોગ્રામ/g, 'kg')
-                .replace(/નંગ/g, 'pcs')
-                .replace(/કાર્ટૂન/g, 'Cartoon');
-            return s.replace(/[^\x00-\x7F]/g, "").trim();
-        };
-
-        return {
-            productId: item.productId,
-            productName: cleanForPDF(productName),
-            variantId: item.variantId,
-            volume: cleanForPDF(volume),
-            unitLabel: cleanForPDF(unitLabel),
-            quotationPrice: item.quotationPrice !== undefined && item.quotationPrice !== null ? Number(item.quotationPrice) : null,
-            qty: Number(item.qty),
-        };
     }));
 }
 
@@ -111,6 +116,7 @@ export const createVendorOrder = async (req, res) => {
             data: result
         });
     } catch (error) {
+        console.error("ERROR IN CREATE VENDOR ORDER CONTROLLER:", error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -227,6 +233,7 @@ export const updateVendorOrder = async (req, res) => {
             data: result
         });
     } catch (error) {
+        console.error("ERROR IN UPDATE VENDOR ORDER CONTROLLER:", error);
         res.status(500).json({ message: error.message });
     }
 };
