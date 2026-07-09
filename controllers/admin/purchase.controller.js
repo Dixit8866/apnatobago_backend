@@ -24,10 +24,7 @@ export const convertToBill = async (req, res, next) => {
 
         // 1. Create Purchase Bill
         const billNo = `PB-${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
-        const totalAmount = items.reduce((sum, item) => {
-            const rQty = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
-            return sum + (Number(item.purchasePrice) * rQty);
-        }, 0);
+        const totalAmount = items.reduce((sum, item) => sum + (Number(item.purchasePrice) * Number(item.qty)), 0);
 
         const bill = await PurchaseBill.create({
             billNo,
@@ -46,12 +43,12 @@ export const convertToBill = async (req, res, next) => {
 
         // 3. Update Inventory
         for (const item of items) {
-            const variant = await ProductVariant.findByPk(item.variantId, { 
+            const variant = await ProductVariant.findByPk(item.variantId, {
                 include: [{ model: Product, as: 'product' }],
-                transaction: t 
+                transaction: t
             });
             if (!variant) continue;
-            
+
             // Validation: Ensure same batch number isn't used for same product with different details
             if (item.batchNumber) {
                 const existingBatch = await InventoryStock.findOne({
@@ -74,9 +71,9 @@ export const convertToBill = async (req, res, next) => {
 
             // Find or create stock entry for this variant in this godown + expiryDate + batchNumber (Batch tracking)
             let stock = await InventoryStock.findOne({
-                where: { 
-                    productId: item.productId, 
-                    variantId: item.variantId, 
+                where: {
+                    productId: item.productId,
+                    variantId: item.variantId,
                     godownId,
                     expiryDate: item.expiryDate || null,
                     batchNumber: item.batchNumber || null
@@ -114,9 +111,9 @@ export const convertToBill = async (req, res, next) => {
                 const currentTotalUnits = Number(stock.totalBaseUnits || 0);
                 const currentAvgPrice = Number(stock.avgPurchasePricePerBaseUnit || 0);
                 const newTotalUnits = currentTotalUnits + addedBaseUnits;
-                
+
                 // Calculate new average price
-                const newAvgPrice = newTotalUnits > 0 
+                const newAvgPrice = newTotalUnits > 0
                     ? ((currentAvgPrice * currentTotalUnits) + (purchasePricePerBaseUnit * addedBaseUnits)) / newTotalUnits
                     : purchasePricePerBaseUnit;
 
@@ -176,7 +173,7 @@ export const convertToBill = async (req, res, next) => {
                 purchasePricePerBaseUnit: purchasePricePerBaseUnit,
                 avgPriceAfterTxn: stock.avgPurchasePricePerBaseUnit,
                 balanceAfterBaseUnits: stock.totalBaseUnits,
-                note: note || `Purchase Bill ${billNo}${Number(item.bonusQty) > 0 ? ` (Bonus: +${item.bonusQty})` : ''}${Number(item.lossQty) > 0 ? ` (Shortage: -${item.lossQty})` : ''}`,
+                note: note || `Purchase Bill ${billNo}`,
                 createdBy: req.user?.name || 'Admin'
             }, { transaction: t });
         }
