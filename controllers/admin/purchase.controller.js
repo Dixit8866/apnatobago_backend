@@ -84,7 +84,8 @@ export const convertToBill = async (req, res, next) => {
             // Fix: Use baseUnitsPerPack (e.g. 24) to convert outer units (Cartons) to base units (Pcs)
             const baseUnitsMultiplier = Number(variant.baseUnitsPerPack || 1);
 
-            const addedBaseUnits = Number(item.qty) * baseUnitsMultiplier;
+            const receivedQty = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
+            const addedBaseUnits = receivedQty * baseUnitsMultiplier;
             const purchasePricePerBaseUnit = Number(item.purchasePrice) / baseUnitsMultiplier;
 
             // Fix: Use baseUnitLabel (Outer, e.g. Dando) as Primary
@@ -166,13 +167,13 @@ export const convertToBill = async (req, res, next) => {
                 primaryUnitId,
                 secondaryUnitId,
                 secondaryPerPrimary: baseUnitsMultiplier,
-                qtyPrimary: item.qty, // E.g. 20 dando
+                qtyPrimary: receivedQty, // E.g. 20 dando
                 qtySecondary: 0,
                 totalQtyBaseUnits: addedBaseUnits, // E.g. 400 box
                 purchasePricePerBaseUnit: purchasePricePerBaseUnit,
                 avgPriceAfterTxn: stock.avgPurchasePricePerBaseUnit,
                 balanceAfterBaseUnits: stock.totalBaseUnits,
-                note: note || `Purchase Bill ${billNo}`,
+                note: note || `Purchase Bill ${billNo}${Number(item.bonusQty) > 0 ? ` (Bonus: +${item.bonusQty})` : ''}${Number(item.lossQty) > 0 ? ` (Shortage: -${item.lossQty})` : ''}`,
                 createdBy: req.user?.name || 'Admin'
             }, { transaction: t });
         }
