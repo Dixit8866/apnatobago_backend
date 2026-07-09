@@ -11,11 +11,13 @@ async function generateOrderNo() {
     const lastOrder = await VendorOrder.findOne({
         order: [['createdAt', 'DESC']],
         attributes: ['orderNo'],
+        paranoid: false,
     });
 
     if (!lastOrder) return 'VO-00001';
 
-    const lastNo = parseInt(lastOrder.orderNo.split('-')[1]);
+    const parts = lastOrder.orderNo.split('-');
+    const lastNo = parseInt(parts[1] || '0');
     const nextNo = (lastNo + 1).toString().padStart(5, '0');
     return `VO-${nextNo}`;
 }
