@@ -61,6 +61,7 @@ app.use(helmet());
 app.use('/api/admin', superadminRoutes);
 app.use('/api/godown-panel', godownpanelRoutes);
 app.use('/api/user', userRoutes);
+app.use('/user', userRoutes); // Support compatibility path (without /api prefix) for user endpoints
 app.use('/api/delivery', deliveryRoutes);
 
 // Health Check Route
