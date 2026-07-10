@@ -25,7 +25,7 @@ import {
     getOffers,
     searchCatalogue
 } from '../../controllers/user/catalogue.controller.js';
-import { getAppSettings } from '../../controllers/user/settings.controller.js';
+import { getAppSettings, getOrderBlockSetting } from '../../controllers/user/settings.controller.js';
 import { protectUser, optionalProtectUser } from '../../middlewares/userAuth.middleware.js';
 import cartRoutes from './cart.routes.js';
 import wishlistRoutes from './wishlist.routes.js';
@@ -62,6 +62,7 @@ router.get('/products/company-category/:id', protectUser, getProductsByCompanyCa
 router.get('/banners', optionalProtectUser, getBanners);
 router.get('/offers', optionalProtectUser, getOffers);
 router.get('/settings', getAppSettings);
+router.get('/order-block', getOrderBlockSetting);
 router.get('/search', protectUser, searchCatalogue);
 
 // Cart

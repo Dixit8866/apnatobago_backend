@@ -15,7 +15,7 @@ const JSON_PATH = path.join(__dirname, 'product-pricings.json');
 
 const ensureCustomLevelExists = async (customLevelId) => {
     if (!customLevelId) return;
-    const lvl = await CustomLevel.findByPk(customLevelId);
+    const lvl = await CustomLevel.findByPk(customLevelId, { paranoid: false });
     if (!lvl) {
         await CustomLevel.create({
             id: customLevelId,
@@ -28,7 +28,7 @@ const ensureCustomLevelExists = async (customLevelId) => {
 
 const ensureVariantExists = async (variantId) => {
     if (!variantId) return;
-    const variant = await ProductVariant.findByPk(variantId);
+    const variant = await ProductVariant.findByPk(variantId, { paranoid: false });
     if (!variant) {
         const prod = await Product.findOne();
         const vol = await Volume.findOne();

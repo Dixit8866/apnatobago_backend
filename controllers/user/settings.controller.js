@@ -85,3 +85,63 @@ export const getAppSettings = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch app settings");
     }
 };
+
+/**
+ * @desc    Get Emergency Order Block / Control setting
+ * @route   GET /api/user/order-block
+ * @access  Public
+ */
+export const getOrderBlockSetting = async (req, res) => {
+    try {
+        let setting = await OrderBlockSetting.findOne();
+        
+        if (!setting) {
+            setting = await OrderBlockSetting.create({
+                isBlocked: false,
+                type: 'Under Maintenance',
+                fromDate: null,
+                toDate: null,
+                title: '',
+                description: '',
+                message: ''
+            });
+        }
+
+        // Calculate dynamic active blocking state based on dates & toggle
+        let isCurrentlyBlocked = false;
+        if (setting.isBlocked) {
+            const now = new Date();
+            if (setting.fromDate && setting.toDate) {
+                const from = new Date(setting.fromDate);
+                const to = new Date(setting.toDate);
+                if (now >= from && now <= to) {
+                    isCurrentlyBlocked = true;
+                }
+            } else {
+                isCurrentlyBlocked = true;
+            }
+        }
+
+        const defaultMsg = `Order creation is temporarily paused due to ${
+            setting.type === 'Monsoon' ? 'monsoon conditions' : 'maintenance'
+        }.`;
+        const finalMsg = setting.description || setting.message || setting.title || defaultMsg;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Emergency order control settings fetched successfully", {
+            isBlocked: setting.isBlocked,
+            type: setting.type,
+            fromDate: setting.fromDate,
+            toDate: setting.toDate,
+            title: setting.title,
+            description: setting.description,
+            message: setting.message,
+            isCurrentlyBlocked,
+            activeMessage: finalMsg,
+            serverUtcTime: new Date().toISOString()
+        });
+    } catch (error) {
+        logger.error(`Error in getOrderBlockSetting (User): ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to fetch order block settings");
+    }
+};
+
