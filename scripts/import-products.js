@@ -9,114 +9,33 @@ dotenv.config();
 import sequelize, { connectDB } from '../config/db.js';
 import { Product, MainCategory, SubCategory, CompanyCategory } from '../models/index.js';
 
-const CSV_PATH = 'c:\\Users\\Admin\\Downloads\\products.csv';
-
-// ─── Custom CSV Parser (RFC 4180 compliant) ──────────────────────────────────
-function parseCSV(text) {
-    let p = '', c = '', r = [];
-    let q = false;
-    let row = [''];
-    for (let i = 0; i < text.length; i++) {
-        c = text[i];
-        let next = text[i + 1];
-        if (c === '"') {
-            if (q && next === '"') {
-                row[row.length - 1] += '"';
-                i++;
-            } else {
-                q = !q;
-            }
-        } else if (c === ',' && !q) {
-            row.push('');
-        } else if ((c === '\r' || c === '\n') && !q) {
-            if (c === '\r' && next === '\n') { i++; }
-            r.push(row);
-            row = [''];
-        } else {
-            row[row.length - 1] += c;
-        }
-    }
-    if (row.length > 1 || row[0] !== '') {
-        r.push(row);
-    }
-    return r;
-}
-
-// ─── Type Parsers ─────────────────────────────────────────────────────────────
-const parsePgArray = (str) => {
-    if (!str || str === '{}' || str === 'NULL') return [];
-    const cleaned = str.replace(/^\{|\}$/g, '');
-    if (!cleaned) return [];
-    return cleaned.split(',').map(item => {
-        let val = item.trim();
-        if (val.startsWith('"') && val.endsWith('"')) {
-            val = val.substring(1, val.length - 1);
-        }
-        return val.replace(/""/g, '"');
-    });
-};
-
-const parseJson = (str, fallback) => {
-    if (!str || str === 'NULL' || str === 'null') return fallback;
-    try {
-        return JSON.parse(str);
-    } catch (err) {
-        return fallback;
-    }
-};
-
-const parseBoolean = (str, defaultVal) => {
-    if (!str || str === 'NULL') return defaultVal;
-    const lower = str.toLowerCase().trim();
-    if (lower === 'true' || lower === 't' || lower === '1') return true;
-    if (lower === 'false' || lower === 'f' || lower === '0') return false;
-    return defaultVal;
-};
-
-const parseDate = (str) => {
-    if (!str || str === 'NULL' || str.trim() === '') return null;
-    const d = new Date(str);
-    return isNaN(d.getTime()) ? null : d;
-};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const JSON_PATH = path.join(__dirname, 'products.json');
 
 const importProducts = async () => {
     try {
-        console.log(`[Import] Reading CSV file from: ${CSV_PATH}...`);
-        if (!fs.existsSync(CSV_PATH)) {
-            throw new Error(`CSV file not found at path: ${CSV_PATH}`);
+        console.log(`[Import] Reading local products.json file...`);
+        if (!fs.existsSync(JSON_PATH)) {
+            throw new Error(`JSON file not found at path: ${JSON_PATH}`);
         }
 
-        const csvData = fs.readFileSync(CSV_PATH, 'utf-8');
-        const parsed = parseCSV(csvData);
+        const dataStr = fs.readFileSync(JSON_PATH, 'utf-8');
+        const products = JSON.parse(dataStr);
 
-        if (parsed.length < 2) {
-            throw new Error('CSV file is empty or missing data rows.');
-        }
-
-        const headers = parsed[0].map(h => h.trim());
-        console.log('[Import] CSV Headers:', headers);
+        console.log(`[Import] Loaded ${products.length} products to seed.`);
 
         // Connect to the DB
         await connectDB();
 
-        console.log('[Import] Processing rows...');
+        console.log('[Import] Seeding database...');
         let successCount = 0;
         let failCount = 0;
 
-        for (let i = 1; i < parsed.length; i++) {
-            const row = parsed[i];
-            if (row.length < headers.length) {
-                continue;
-            }
-
-            const item = {};
-            headers.forEach((header, idx) => {
-                item[header] = row[idx];
-            });
-
+        for (const item of products) {
             try {
                 // 1. Ensure MainCategory exists
-                if (item.mainCategoryId && item.mainCategoryId !== 'NULL') {
+                if (item.mainCategoryId) {
                     await MainCategory.findOrCreate({
                         where: { id: item.mainCategoryId },
                         defaults: {
@@ -129,7 +48,7 @@ const importProducts = async () => {
                 }
 
                 // 2. Ensure SubCategory exists
-                if (item.subCategoryId && item.subCategoryId !== 'NULL') {
+                if (item.subCategoryId) {
                     await SubCategory.findOrCreate({
                         where: { id: item.subCategoryId },
                         defaults: {
@@ -142,7 +61,7 @@ const importProducts = async () => {
                 }
 
                 // 3. Ensure CompanyCategory exists
-                if (item.companyCategoryId && item.companyCategoryId !== 'NULL') {
+                if (item.companyCategoryId) {
                     await CompanyCategory.findOrCreate({
                         where: { id: item.companyCategoryId },
                         defaults: {
@@ -154,30 +73,12 @@ const importProducts = async () => {
                     });
                 }
 
+                // Ensure dates are converted back to Date objects or kept null
                 const productRecord = {
-                    id: item.id,
-                    thumbnail: item.thumbnail,
-                    images: parsePgArray(item.images),
-                    name: parseJson(item.name, { en: '', gu: '', hn: '' }),
-                    mainCategoryId: item.mainCategoryId,
-                    subCategoryId: item.subCategoryId,
-                    companyCategoryId: item.companyCategoryId,
-                    isTobaccoProduct: parseBoolean(item.isTobaccoProduct, true),
-                    productDescription: parseJson(item.productDescription, {
-                        keyInformation: [],
-                        nutritionalInformation: [],
-                        info: [],
-                    }),
-                    status: item.status || 'Active',
-                    position: parseInt(item.position, 10) || 0,
-                    isCombo: parseBoolean(item.isCombo, false),
-                    comboProduct1Id: item.comboProduct1Id === 'NULL' || !item.comboProduct1Id ? null : item.comboProduct1Id,
-                    comboProduct2Id: item.comboProduct2Id === 'NULL' || !item.comboProduct2Id ? null : item.comboProduct2Id,
-                    keywords: parsePgArray(item.keywords),
-                    boxNumber: item.boxNumber === 'NULL' || !item.boxNumber ? null : item.boxNumber,
-                    createdAt: parseDate(item.createdAt) || new Date(),
-                    updatedAt: parseDate(item.updatedAt) || new Date(),
-                    deletedAt: parseDate(item.deletedAt)
+                    ...item,
+                    createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+                    updatedAt: item.updatedAt ? new Date(item.updatedAt) : new Date(),
+                    deletedAt: item.deletedAt ? new Date(item.deletedAt) : null
                 };
 
                 // Upsert into DB
@@ -188,7 +89,7 @@ const importProducts = async () => {
                     console.log(`[Import] Progress: Imported ${successCount} products...`);
                 }
             } catch (err) {
-                console.error(`[Import Error] Failed at row ${i + 1} (${item.name || 'Unknown'}):`, err.message);
+                console.error(`[Import Error] Failed at product ${item.id} (${item.name?.en || 'Unknown'}):`, err.message);
                 failCount++;
             }
         }
