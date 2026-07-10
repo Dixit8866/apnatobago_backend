@@ -1,4 +1,5 @@
 import AppSettings from '../../models/superadmin-models/AppSettings.js';
+import OrderBlockSetting from '../../models/superadmin-models/OrderBlockSetting.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -11,6 +12,24 @@ import logger from '../../logger/apiLogger.js';
 export const getAppSettings = async (req, res) => {
     try {
         let settings = await AppSettings.findOne();
+        const orderBlock = await OrderBlockSetting.findOne();
+        const orderBlockData = orderBlock ? {
+            isBlocked: orderBlock.isBlocked,
+            fromDate: orderBlock.fromDate,
+            toDate: orderBlock.toDate,
+            type: orderBlock.type,
+            title: orderBlock.title,
+            description: orderBlock.description,
+            message: orderBlock.message
+        } : {
+            isBlocked: false,
+            fromDate: null,
+            toDate: null,
+            type: 'Under Maintenance',
+            title: '',
+            description: '',
+            message: ''
+        };
 
         if (!settings) {
             return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", {
@@ -32,7 +51,9 @@ export const getAppSettings = async (req, res) => {
                 eveningDeliveryEnd: '17:00',
                 expressDeliveryStart: '08:00',
                 expressDeliveryEnd: '18:00',
-                expressDeliverySchedules: []
+                expressDeliverySchedules: [],
+                orderBlock: orderBlockData,
+                serverUtcTime: new Date().toISOString()
             });
         }
 
@@ -56,6 +77,7 @@ export const getAppSettings = async (req, res) => {
         // Append server-side UTC timestamp so mobile apps can rely on server time
         // instead of the user's device clock (prevents issues when users change phone time).
         settingsData.serverUtcTime = new Date().toISOString();
+        settingsData.orderBlock = orderBlockData;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "App settings fetched successfully", settingsData);
     } catch (error) {

@@ -28,6 +28,7 @@ import PurchaseBill from './superadmin-models/PurchaseBill.js';
 import Cart from './user/Cart.js';
 import Wishlist from './user/Wishlist.js';
 import AppSettings from './superadmin-models/AppSettings.js';
+import OrderBlockSetting from './superadmin-models/OrderBlockSetting.js';
 import Banner from './superadmin-models/Banner.js';
 import Offer from './superadmin-models/Offer.js';
 import Order from './user/Order.js';
@@ -497,6 +498,11 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "godownId" UUID REFERENCES godowns(id) ON DELETE SET NULL ON UPDATE CASCADE');
         } catch (e) { console.log('[Migration Warning] Orders godownId column failed:', e.message); }
 
+        try {
+            await sequelize.query('ALTER TABLE order_block_settings ADD COLUMN IF NOT EXISTS "title" VARCHAR(255)');
+            await sequelize.query('ALTER TABLE order_block_settings ADD COLUMN IF NOT EXISTS "description" TEXT');
+        } catch (e) { console.log('[Migration Warning] Order block settings columns migration failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
 
     } catch (error) {
@@ -577,6 +583,7 @@ export {
     Cart,
     Wishlist,
     AppSettings,
+    OrderBlockSetting,
     Banner,
     Offer,
     Order,

@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn, Notification, Admin } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn, Notification, Admin, OrderBlockSetting } from '../../models/index.js';
 import { emitAdminNotification, getIO } from '../../socket.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import { roundTotal } from '../../utils/roundHelper.js';
@@ -85,6 +85,41 @@ const sendPushToAllAdmins = async (title, body, data = {}) => {
  */
 export const createOrder = async (req, res) => {
     logger.info(`[Create Order] Started. Body: ${JSON.stringify(req.body)}, User: ${req.user?.id}`);
+
+    // Check if order creation is paused/blocked due to emergency/maintenance
+    try {
+        const blockSetting = await OrderBlockSetting.findOne();
+        if (blockSetting && blockSetting.isBlocked) {
+            const now = new Date();
+            let shouldBlock = false;
+
+            if (blockSetting.fromDate && blockSetting.toDate) {
+                const from = new Date(blockSetting.fromDate);
+                const to = new Date(blockSetting.toDate);
+                if (now >= from && now <= to) {
+                    shouldBlock = true;
+                }
+            } else {
+                // If no dates are specified but block is toggled, block immediately
+                shouldBlock = true;
+            }
+
+            if (shouldBlock) {
+                const defaultMsg = `Order creation is temporarily paused due to ${
+                    blockSetting.type === 'Monsoon' ? 'monsoon conditions' : 'maintenance'
+                }.`;
+                const finalMsg = blockSetting.description || blockSetting.message || blockSetting.title || defaultMsg;
+                return sendErrorResponse(
+                    res, 
+                    HTTP_STATUS.BAD_REQUEST, 
+                    finalMsg
+                );
+            }
+        }
+    } catch (err) {
+        logger.error(`[Create Order Block Check Error]: ${err.message}`);
+    }
+
     const t = await sequelize.transaction();
     try {
         const {
