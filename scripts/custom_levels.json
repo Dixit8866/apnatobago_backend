@@ -1,0 +1,29 @@
+[
+    {
+        "id": "18992e0e-6587-49dd-b163-fa174a6a277e",
+        "name": "Basic",
+        "status": "Active",
+        "createdAt": "2026-05-15 12:43:25.869+00",
+        "updatedAt": "2026-05-15 12:43:25.869+00",
+        "deletedAt": null,
+        "icon": null
+    },
+    {
+        "id": "6b0722c6-ee28-4058-b4de-a961d1b16da0",
+        "name": "Premium",
+        "status": "Active",
+        "createdAt": "2026-05-15 12:43:55.484+00",
+        "updatedAt": "2026-05-30 05:18:13.529+00",
+        "deletedAt": null,
+        "icon": "https://apnatobacco.s3.ap-south-1.amazonaws.com/uploads/1780118293022-b05be0333a86c0c697d2a9351cb82bf0.png"
+    },
+    {
+        "id": "ec6295ab-0e66-46b2-8678-16199860f947",
+        "name": "Standard",
+        "status": "Active",
+        "createdAt": "2026-05-15 12:43:40.631+00",
+        "updatedAt": "2026-05-15 12:43:40.631+00",
+        "deletedAt": null,
+        "icon": null
+    }
+]
