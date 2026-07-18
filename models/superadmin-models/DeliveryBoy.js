@@ -27,6 +27,10 @@ const DeliveryBoy = sequelize.define('DeliveryBoy', {
         type: DataTypes.STRING,
         allowNull: false,
     },
+    plainPassword: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     vehicleNumber: {
         type: DataTypes.STRING,
         allowNull: true,
@@ -54,12 +58,14 @@ const DeliveryBoy = sequelize.define('DeliveryBoy', {
     hooks: {
         beforeCreate: async (boy) => {
             if (boy.password) {
+                boy.plainPassword = boy.password;
                 const salt = await bcrypt.genSalt(10);
                 boy.password = await bcrypt.hash(boy.password, salt);
             }
         },
         beforeUpdate: async (boy) => {
             if (boy.changed('password')) {
+                boy.plainPassword = boy.password;
                 const salt = await bcrypt.genSalt(10);
                 boy.password = await bcrypt.hash(boy.password, salt);
             }

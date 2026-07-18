@@ -36,6 +36,10 @@ const GodownStaff = sequelize.define('GodownStaff', {
         type: DataTypes.STRING,
         allowNull: false,
     },
+    plainPassword: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     role: {
         type: DataTypes.STRING,
         defaultValue: 'staff', // superadmin | staff
@@ -66,12 +70,14 @@ const GodownStaff = sequelize.define('GodownStaff', {
     hooks: {
         beforeCreate: async (staff) => {
             if (staff.password) {
+                staff.plainPassword = staff.password;
                 const salt = await bcrypt.genSalt(10);
                 staff.password = await bcrypt.hash(staff.password, salt);
             }
         },
         beforeUpdate: async (staff) => {
             if (staff.changed('password')) {
+                staff.plainPassword = staff.password;
                 const salt = await bcrypt.genSalt(10);
                 staff.password = await bcrypt.hash(staff.password, salt);
             }
