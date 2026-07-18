@@ -12,11 +12,15 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
  */
 export const getAllPayments = async (req, res) => {
     try {
-        const { status, search, date, fromDate, toDate, deliveryBoyId } = req.query;
+        const { status, search, date, fromDate, toDate, deliveryBoyId, godownId } = req.query;
         const where = {};
 
         if (deliveryBoyId) {
             where.deliveryBoyId = deliveryBoyId;
+        }
+
+        if (godownId) {
+            where['$order.godownId$'] = godownId;
         }
 
         // Support tabs: CASH, ONLINE, CREDIT, Razorpay, Bank Account, Submitted, Pending
@@ -60,12 +64,15 @@ export const getAllPayments = async (req, res) => {
         }
 
         if (search) {
-            where[Op.or] = [
-                { transactionId: { [Op.iLike]: `%${search}%` } },
-                { '$order.orderId$': { [Op.iLike]: `%${search}%` } },
-                { '$order.user.fullname$': { [Op.iLike]: `%${search}%` } },
-                { '$order.customerName$': { [Op.iLike]: `%${search}%` } },
-                { '$deliveryBoy.name$': { [Op.iLike]: `%${search}%` } }
+            const escapedSearch = OrderPayment.sequelize.escape(`%${search}%`);
+            where[Op.and] = [
+                OrderPayment.sequelize.literal(`(
+                    "OrderPayment"."transactionId" ILIKE ${escapedSearch}
+                    OR "order"."orderId" ILIKE ${escapedSearch}
+                    OR "order->user"."fullname" ILIKE ${escapedSearch}
+                    OR "order"."customerName" ILIKE ${escapedSearch}
+                    OR "deliveryBoy"."name" ILIKE ${escapedSearch}
+                )`)
             ];
         }
 

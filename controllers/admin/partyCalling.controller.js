@@ -11,7 +11,7 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
  */
 export const getDailyPartyCalls = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
+        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date, godownId } = req.query;
 
         const appSettings = await AppSettings.findOne();
         const schedules = appSettings?.deliveryRoundSchedules || [];
@@ -47,6 +47,10 @@ export const getDailyPartyCalls = async (req, res, next) => {
                 ]
             }
         };
+
+        if (godownId) {
+            userWhere.godownId = godownId;
+        }
 
         if (search) {
             userWhere[Op.or] = [
@@ -293,7 +297,7 @@ export const logOrUpdateCall = async (req, res, next) => {
  */
 export const getInactivePartyCalls = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date } = req.query;
+        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date, godownId } = req.query;
 
         const appSettings = await AppSettings.findOne();
         const schedules = appSettings?.deliveryRoundSchedules || [];
@@ -339,6 +343,10 @@ export const getInactivePartyCalls = async (req, res, next) => {
                 ]
             }
         };
+
+        if (godownId) {
+            userWhere.godownId = godownId;
+        }
 
         if (search) {
             userWhere[Op.or] = [

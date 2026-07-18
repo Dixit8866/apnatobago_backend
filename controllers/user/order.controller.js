@@ -15,11 +15,11 @@ import { sendToDevice } from '../../services/notification.service.js';
  * Generate a unique human-readable Order ID (100% bulletproof with uniqueness check)
  */
 const generateUniqueOrderId = async () => {
-    let nextId = 1001;
+    let nextId = 100001;
     const lastOrder = await Order.findOne({
         where: {
             orderId: {
-                [Op.regexp]: '^[0-9]+$'
+                [Op.regexp]: '^[0-9]{5,6}$'
             }
         },
         order: [['createdAt', 'DESC']],
@@ -29,7 +29,7 @@ const generateUniqueOrderId = async () => {
 
     if (lastOrder && lastOrder.orderId) {
         const numericPart = Number(lastOrder.orderId);
-        nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
+        nextId = Number.isFinite(numericPart) && numericPart >= 10000 ? numericPart + 1 : 100001;
     }
 
     // Ensure it is absolutely unique (including soft-deleted ones)

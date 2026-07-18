@@ -147,20 +147,19 @@ export const getAllOrders = async (req, res) => {
         }
 
         if (search) {
-            searchClause = {
-                [Op.or]: [
-                    { orderId: { [Op.iLike]: `%${search}%` } },
-                    { customerName: { [Op.iLike]: `%${search}%` } },
-                    { customerNumber: { [Op.iLike]: `%${search}%` } },
-                    { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
-                    { '$user.number$': { [Op.iLike]: `%${search}%` } },
-                    { '$user.city$': { [Op.iLike]: `%${search}%` } },
-                    { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
-                    { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } },
-                    { '$assignment.deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
-                    { '$assignment.deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } }
-                ]
-            };
+            const escapedSearch = sequelize.escape(`%${search}%`);
+            searchClause = sequelize.literal(`(
+                "Order"."orderId" ILIKE ${escapedSearch}
+                OR "Order"."customerName" ILIKE ${escapedSearch}
+                OR "Order"."customerNumber" ILIKE ${escapedSearch}
+                OR "user"."fullname" ILIKE ${escapedSearch}
+                OR "user"."number" ILIKE ${escapedSearch}
+                OR "user"."city" ILIKE ${escapedSearch}
+                OR "user->businessProfile"."shopName" ILIKE ${escapedSearch}
+                OR "user->businessProfile"."shopNameAlt" ILIKE ${escapedSearch}
+                OR "assignment->deliveryBoy"."name" ILIKE ${escapedSearch}
+                OR "assignment->deliveryBoy"."phone" ILIKE ${escapedSearch}
+            )`);
         }
 
         // Helper to get today's 24-hour date range in India Standard Time (IST)

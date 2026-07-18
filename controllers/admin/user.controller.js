@@ -97,7 +97,7 @@ export const createUser = async (req, res, next) => {
 
 export const getAllUsers = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId, deliveryRoundTiming } = req.query;
+        const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId, deliveryRoundTiming, godownId } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
         const searchWhere = {};
@@ -113,6 +113,7 @@ export const getAllUsers = async (req, res, next) => {
         if (kycverification) searchWhere.kycverification = kycverification;
         if (routeCategoryId) searchWhere.routeCategoryId = routeCategoryId;
         if (deliveryRoundTiming) searchWhere.deliveryRoundTiming = deliveryRoundTiming;
+        if (godownId) searchWhere.godownId = godownId;
 
         const where = { ...searchWhere };
         if (status) where.status = status;

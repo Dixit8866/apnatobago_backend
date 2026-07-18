@@ -62,16 +62,19 @@ export const getAllAssignments = async (req, res) => {
         const where = {};
 
         if (search) {
-            where[Op.or] = [
-                { '$order.orderId$': { [Op.iLike]: `%${search}%` } },
-                { '$order.customerName$': { [Op.iLike]: `%${search}%` } },
-                { '$order.customerNumber$': { [Op.iLike]: `%${search}%` } },
-                { '$order.user.fullname$': { [Op.iLike]: `%${search}%` } },
-                { '$order.user.number$': { [Op.iLike]: `%${search}%` } },
-                { '$order.user.city$': { [Op.iLike]: `%${search}%` } },
-                { '$deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
-                { '$deliveryBoy.phone$': { [Op.iLike]: `%${search}%` } },
-                { '$deliveryBoy.vehicleNumber$': { [Op.iLike]: `%${search}%` } }
+            const escapedSearch = OrderAssignment.sequelize.escape(`%${search}%`);
+            where[Op.and] = [
+                OrderAssignment.sequelize.literal(`(
+                    "order"."orderId" ILIKE ${escapedSearch}
+                    OR "order"."customerName" ILIKE ${escapedSearch}
+                    OR "order"."customerNumber" ILIKE ${escapedSearch}
+                    OR "order->user"."fullname" ILIKE ${escapedSearch}
+                    OR "order->user"."number" ILIKE ${escapedSearch}
+                    OR "order->user"."city" ILIKE ${escapedSearch}
+                    OR "deliveryBoy"."name" ILIKE ${escapedSearch}
+                    OR "deliveryBoy"."phone" ILIKE ${escapedSearch}
+                    OR "deliveryBoy"."vehicleNumber" ILIKE ${escapedSearch}
+                )`)
             ];
         }
 

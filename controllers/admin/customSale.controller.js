@@ -11,11 +11,11 @@ import { roundTotal } from '../../utils/roundHelper.js';
  * Generate a unique human-readable Order ID for Direct Sales
  */
 const generateUniqueDirectSaleId = async () => {
-    let nextId = 1001;
+    let nextId = 100001;
     const lastOrder = await Order.findOne({
         where: {
             orderId: {
-                [Op.regexp]: '^[0-9]+$'
+                [Op.regexp]: '^[0-9]{5,6}$'
             }
         },
         order: [['createdAt', 'DESC']],
@@ -25,7 +25,7 @@ const generateUniqueDirectSaleId = async () => {
 
     if (lastOrder && lastOrder.orderId) {
         const numericPart = Number(lastOrder.orderId);
-        nextId = Number.isFinite(numericPart) && numericPart >= 1000 ? numericPart + 1 : 1001;
+        nextId = Number.isFinite(numericPart) && numericPart >= 10000 ? numericPart + 1 : 100001;
     }
 
     // Ensure it is absolutely unique (including soft-deleted ones)
@@ -354,8 +354,12 @@ export const createCustomSale = async (req, res) => {
  */
 export const getCustomSales = async (req, res) => {
     try {
-        const { search, date, status } = req.query;
+        const { search, date, status, godownId } = req.query;
         const where = { saleType: 'Direct' };
+
+        if (godownId) {
+            where.godownId = godownId;
+        }
 
         if (search) {
             // Global search bypasses tab and date constraints
@@ -411,15 +415,20 @@ export const getCustomSales = async (req, res) => {
         const endOfToday = new Date(todayStr);
         endOfToday.setHours(23, 59, 59, 999);
 
+        const countWhere = { saleType: 'Direct' };
+        if (godownId) {
+            countWhere.godownId = godownId;
+        }
+
         const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, cancelledCount, todayCount] = await Promise.all([
-            Order.count({ where: { orderStatus: 'Pending', saleType: 'Direct' } }),
-            Order.count({ where: { orderStatus: 'Packaging', saleType: 'Direct' } }),
-            Order.count({ where: { orderStatus: 'Packed', saleType: 'Direct' } }),
-            Order.count({ where: { orderStatus: 'Shipping', saleType: 'Direct' } }),
-            Order.count({ where: { orderStatus: 'Delivered', saleType: 'Direct' } }),
-            Order.count({ where: { orderStatus: 'Payment Collect', saleType: 'Direct' } }),
-            Order.count({ where: { orderStatus: 'Cancelled', saleType: 'Direct' } }),
-            Order.count({ where: { createdAt: { [Op.between]: [startOfToday, endOfToday] }, saleType: 'Direct' } })
+            Order.count({ where: { ...countWhere, orderStatus: 'Pending' } }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Packaging' } }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Packed' } }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Shipping' } }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Delivered' } }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Payment Collect' } }),
+            Order.count({ where: { ...countWhere, orderStatus: 'Cancelled' } }),
+            Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } } })
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);

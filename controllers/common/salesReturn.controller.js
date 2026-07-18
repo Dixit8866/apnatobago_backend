@@ -356,22 +356,29 @@ export const approveSalesReturn = async (req, res) => {
  */
 export const getSalesReturns = async (req, res) => {
     try {
-        const { search, deliveryBoyId } = req.query;
+        const { search, deliveryBoyId, godownId } = req.query;
         const where = {};
 
         if (deliveryBoyId) {
             where.deliveryBoyId = deliveryBoyId;
         }
 
+        if (godownId) {
+            where['$order.godownId$'] = godownId;
+        }
+
         if (search) {
-            where[Op.or] = [
-                { '$order.orderId$': { [Op.iLike]: `%${search}%` } },
-                { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
-                { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
-                { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } },
-                { '$product.name$': { [Op.iLike]: `%${search}%` } },
-                { '$deliveryBoy.name$': { [Op.iLike]: `%${search}%` } },
-                { reason: { [Op.iLike]: `%${search}%` } }
+            const escapedSearch = sequelize.escape(`%${search}%`);
+            where[Op.and] = [
+                sequelize.literal(`(
+                    "order"."orderId" ILIKE ${escapedSearch}
+                    OR "user"."fullname" ILIKE ${escapedSearch}
+                    OR "user->businessProfile"."shopName" ILIKE ${escapedSearch}
+                    OR "user->businessProfile"."shopNameAlt" ILIKE ${escapedSearch}
+                    OR "product"."name" ILIKE ${escapedSearch}
+                    OR "deliveryBoy"."name" ILIKE ${escapedSearch}
+                    OR "SalesReturn"."reason" ILIKE ${escapedSearch}
+                )`)
             ];
         }
 

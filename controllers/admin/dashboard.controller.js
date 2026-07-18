@@ -6,7 +6,7 @@ import logger from '../../logger/apiLogger.js';
 
 export const getDashboardStats = async (req, res) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, godownId } = req.query;
         
         const dateFilter = {};
         if (startDate && endDate) {
@@ -23,20 +23,33 @@ export const getDashboardStats = async (req, res) => {
 
         const cancelledStatuses = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
 
+        // Build conditional godown filter
+        const godownFilter = godownId ? { godownId } : {};
+
         // 1. Total Sales
         const totalSales = await Order.sum('totalAmount', { 
             where: { 
                 ...dateFilter,
+                ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             } 
         }) || 0;
 
         // 2. Total Purchase
-        const totalPurchase = await PurchaseBill.sum('totalAmount', { where: dateFilter }) || 0;
+        const totalPurchase = await PurchaseBill.sum('totalAmount', { 
+            where: {
+                ...dateFilter,
+                ...godownFilter
+            }
+        }) || 0;
 
         // 3. Payment Bifurcation
         const paymentStats = await Order.findAll({
-            where: { ...dateFilter, orderStatus: { [Op.notIn]: cancelledStatuses } },
+            where: { 
+                ...dateFilter, 
+                ...godownFilter,
+                orderStatus: { [Op.notIn]: cancelledStatuses } 
+            },
             attributes: [
                 'paymentMethod',
                 [fn('SUM', col('totalAmount')), 'total']
@@ -47,6 +60,7 @@ export const getDashboardStats = async (req, res) => {
         // 4. Total Outstanding (Money yet to be received)
         const totalOutstanding = await Order.sum('dueAmount', {
             where: {
+                ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
@@ -55,6 +69,7 @@ export const getDashboardStats = async (req, res) => {
         const totalReceived = await Order.sum('paidAmount', {
             where: {
                 ...dateFilter,
+                ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
@@ -64,13 +79,18 @@ export const getDashboardStats = async (req, res) => {
 
         // 6.1 New Order Count
         const newOrderCount = await Order.count({
-            where: { ...dateFilter, orderStatus: 'Pending' }
+            where: { 
+                ...dateFilter, 
+                ...godownFilter,
+                orderStatus: 'Pending' 
+            }
         });
 
         // 6.2 Delivered Order Count
         const deliveredOrderCount = await Order.count({
             where: { 
                 ...dateFilter, 
+                ...godownFilter,
                 orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } 
             }
         });
@@ -82,6 +102,7 @@ export const getDashboardStats = async (req, res) => {
         todayEnd.setHours(23, 59, 59, 999);
         const todayTotalOrder = await Order.count({
             where: {
+                ...godownFilter,
                 createdAt: {
                     [Op.between]: [todayStart, todayEnd]
                 }
@@ -103,6 +124,7 @@ export const getDashboardStats = async (req, res) => {
                     attributes: [], 
                     where: { 
                         ...dateFilter,
+                        ...godownFilter,
                         orderStatus: { [Op.ne]: 'Cancelled' }
                     } 
                 }
@@ -132,6 +154,7 @@ export const getDashboardStats = async (req, res) => {
                     attributes: [], 
                     where: { 
                         ...dateFilter,
+                        ...godownFilter,
                         orderStatus: { [Op.ne]: 'Cancelled' }
                     } 
                 }
@@ -149,6 +172,7 @@ export const getDashboardStats = async (req, res) => {
         // 8. Product Expiry Soon (Next 30 days)
         const expirySoon = await InventoryStock.findAll({
             where: {
+                ...godownFilter,
                 expiryDate: {
                     [Op.and]: [
                         { [Op.gt]: new Date() },
@@ -166,7 +190,11 @@ export const getDashboardStats = async (req, res) => {
 
         // 9. Sales Trend (Last 7 days or date range)
         const salesTrend = await Order.findAll({
-            where: { ...dateFilter, orderStatus: { [Op.ne]: 'Cancelled' } },
+            where: { 
+                ...dateFilter, 
+                ...godownFilter,
+                orderStatus: { [Op.ne]: 'Cancelled' } 
+            },
             attributes: [
                 [fn('DATE', col('Order.createdAt')), 'date'],
                 [fn('SUM', col('totalAmount')), 'total']
@@ -217,6 +245,7 @@ export const getDashboardStats = async (req, res) => {
                             model: InventoryStock,
                             as: 'inventoryStocks',
                             attributes: ['totalBaseUnits', 'status'],
+                            where: godownId ? { godownId } : undefined,
                             required: false
                         }
                     ]

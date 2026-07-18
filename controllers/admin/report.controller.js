@@ -48,7 +48,7 @@ const jsonToXls = (items) => {
  */
 export const getOrderReport = async (req, res, next) => {
     try {
-        const { status = 'Cancelled', startDate, endDate } = req.query;
+        const { status = 'Cancelled', startDate, endDate, godownId } = req.query;
         
         let statusList = [status];
         if (status === 'Cancelled') {
@@ -58,6 +58,9 @@ export const getOrderReport = async (req, res, next) => {
         }
 
         const where = { orderStatus: { [Op.in]: statusList } };
+        if (godownId) {
+            where.godownId = godownId;
+        }
 
         if (startDate && endDate) {
             const start = new Date(startDate);
@@ -201,7 +204,7 @@ export const getOrderReport = async (req, res, next) => {
  */
 export const getTopSellingReport = async (req, res, next) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, godownId } = req.query;
         const where = {};
         if (startDate && endDate) {
             const start = new Date(startDate);
@@ -209,6 +212,9 @@ export const getTopSellingReport = async (req, res, next) => {
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
             where.createdAt = { [Op.between]: [start, end] };
+        }
+        if (godownId) {
+            where['$order.godownId$'] = godownId;
         }
 
         const items = await OrderItem.findAll({
@@ -218,8 +224,11 @@ export const getTopSellingReport = async (req, res, next) => {
                 [sequelize.fn('SUM', sequelize.col('totalPrice')), 'totalRevenue']
             ],
             where,
-            group: ['productId', 'product.id'],
-            include: [{ model: Product, as: 'product', attributes: ['name'] }],
+            group: ['productId', 'product.id', 'order.id'],
+            include: [
+                { model: Product, as: 'product', attributes: ['name'] },
+                { model: Order, as: 'order', attributes: [] }
+            ],
             order: [[sequelize.literal('"totalQty"'), 'DESC']],
             limit: 50
         });
@@ -253,8 +262,13 @@ export const getTopSellingReport = async (req, res, next) => {
  */
 export const getLowStockReport = async (req, res, next) => {
     try {
+        const { godownId } = req.query;
+        const where = { totalBaseUnits: { [Op.lte]: 10 }, status: 'Active' };
+        if (godownId) {
+            where.godownId = godownId;
+        }
         const stocks = await InventoryStock.findAll({
-            where: { totalBaseUnits: { [Op.lte]: 10 }, status: 'Active' },
+            where,
             include: [
                 { model: Product, as: 'product', attributes: ['name'] },
                 { model: ProductVariant, as: 'variant', attributes: ['volume'] }
@@ -291,7 +305,7 @@ export const getLowStockReport = async (req, res, next) => {
  */
 export const getPartyReport = async (req, res, next) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, godownId } = req.query;
         const where = {};
         if (startDate && endDate) {
             const start = new Date(startDate);
@@ -299,6 +313,9 @@ export const getPartyReport = async (req, res, next) => {
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
             where.createdAt = { [Op.between]: [start, end] };
+        }
+        if (godownId) {
+            where.godownId = godownId;
         }
 
         const users = await User.findAll({
@@ -338,7 +355,7 @@ export const getPartyReport = async (req, res, next) => {
  */
 export const getPurchaseReport = async (req, res, next) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, godownId } = req.query;
         const where = {};
         if (startDate && endDate) {
             const start = new Date(startDate);
@@ -346,6 +363,9 @@ export const getPurchaseReport = async (req, res, next) => {
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
             where.createdAt = { [Op.between]: [start, end] };
+        }
+        if (godownId) {
+            where.godownId = godownId;
         }
 
         const bills = await PurchaseBill.findAll({
@@ -385,7 +405,7 @@ export const getPurchaseReport = async (req, res, next) => {
  */
 export const getInventoryReport = async (req, res, next) => {
     try {
-        const { type } = req.query; // 'all', 'low-stock', 'expiry'
+        const { type, godownId } = req.query; // 'all', 'low-stock', 'expiry'
         const where = { status: 'Active' };
         
         if (type === 'low-stock') {
@@ -394,6 +414,9 @@ export const getInventoryReport = async (req, res, next) => {
             const soon = new Date();
             soon.setMonth(soon.getMonth() + 3); // next 3 months
             where.expiryDate = { [Op.lte]: soon };
+        }
+        if (godownId) {
+            where.godownId = godownId;
         }
 
         const stocks = await InventoryStock.findAll({
@@ -476,7 +499,7 @@ export const getProductMasterReport = async (req, res, next) => {
  */
 export const getPaymentCollectionReport = async (req, res, next) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, godownId } = req.query;
         const where = {};
         if (startDate && endDate) {
             const start = new Date(startDate);
@@ -484,6 +507,9 @@ export const getPaymentCollectionReport = async (req, res, next) => {
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
             where.createdAt = { [Op.between]: [start, end] };
+        }
+        if (godownId) {
+            where['$order.godownId$'] = godownId;
         }
 
         const payments = await OrderPayment.findAll({
@@ -544,7 +570,7 @@ export const getPaymentCollectionReport = async (req, res, next) => {
  */
 export const getPaymentReconciliationReport = async (req, res, next) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, godownId } = req.query;
         const where = {};
         if (startDate && endDate) {
             const start = new Date(startDate);
@@ -552,6 +578,9 @@ export const getPaymentReconciliationReport = async (req, res, next) => {
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
             where.createdAt = { [Op.between]: [start, end] };
+        }
+        if (godownId) {
+            where.godownId = godownId;
         }
 
         const orders = await Order.findAll({

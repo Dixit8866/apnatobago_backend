@@ -188,11 +188,14 @@ export const convertToBill = async (req, res, next) => {
 
 export const getPurchaseBills = async (req, res, next) => {
     try {
-        const { search } = req.query;
+        const { search, godownId } = req.query;
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
         const where = {};
+        if (godownId) {
+            where.godownId = godownId;
+        }
 
         if (search) {
             where[Op.or] = [
