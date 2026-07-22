@@ -5,7 +5,7 @@ import sequelize from '../config/db.js';
 import User from '../models/user/User.js';
 import Godown from '../models/superadmin-models/Godown.js';
 
-const TARGET_GODOWN_ID = '48180959-1987-473b-b263-19c5b221f198';
+const TARGET_GODOWN_ID = 'a453cdca-2ccf-41b6-8d8a-8fa8741778c8';
 
 async function assignGodownToAllParties() {
     try {
