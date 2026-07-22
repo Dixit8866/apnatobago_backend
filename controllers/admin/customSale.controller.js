@@ -112,6 +112,36 @@ export const createCustomSale = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant ${variantId} not found.`);
             }
 
+            // Check stock availability in selected godown
+            const bUPPCheck = Number(variant.baseUnitsPerPack || 1);
+            const sellUnitCheck = item.sellUnit || 'Base';
+            const reqBaseUnits = sellUnitCheck === 'Inner' ? Number(quantity) : (Number(quantity) * bUPPCheck);
+
+            const totalAvailableStock = await InventoryStock.sum('totalBaseUnits', {
+                where: {
+                    variantId,
+                    godownId,
+                    status: 'Active'
+                },
+                transaction: t
+            }) || 0;
+
+            if (totalAvailableStock <= 0) {
+                await t.rollback();
+                const prodName = typeof variant.product?.name === 'object'
+                    ? (variant.product.name.gu || variant.product.name.en || Object.values(variant.product.name)[0])
+                    : (variant.product?.name || 'Product');
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `પ્રોડક્ટ '${prodName}' સ્ટોકમાં નથી (Out of stock).`);
+            }
+
+            if (totalAvailableStock < reqBaseUnits) {
+                await t.rollback();
+                const prodName = typeof variant.product?.name === 'object'
+                    ? (variant.product.name.gu || variant.product.name.en || Object.values(variant.product.name)[0])
+                    : (variant.product?.name || 'Product');
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `પ્રોડક્ટ '${prodName}' નો પુરતો સ્ટોક નથી (માત્ર ${totalAvailableStock} યુનિટ ઉપલબ્ધ છે).`);
+            }
+
             // Resolve regular selling price
             const pricings = await ProductPricing.findAll({
                 where: { variantId },

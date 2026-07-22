@@ -951,7 +951,7 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             updateFields.packagingAt = Order.sequelize.literal('COALESCE("packagingAt", NOW())');
             updateFields.packedAt = Order.sequelize.literal('COALESCE("packedAt", NOW())');
             updateFields.shippingAt = Order.sequelize.literal('COALESCE("shippingAt", NOW())');
-            updateFields.deliveredAt = new Date();
+            updateFields.deliveredAt = Order.sequelize.literal('COALESCE("deliveredAt", NOW())');
         }
 
         await Order.update(

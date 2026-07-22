@@ -226,6 +226,7 @@ export const updateGodownOrderStatus = async (req, res, next) => {
         if (orderStatus === 'Packaging') updates.packagingAt = now;
         if (orderStatus === 'Packed') updates.packedAt = now;
         if (orderStatus === 'Shipping') updates.shippingAt = now;
+        if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(orderStatus)) updates.deliveredAt = order.deliveredAt || now;
 
         await order.update(updates);
 
@@ -286,7 +287,7 @@ export const bulkUpdateGodownOrderStatus = async (req, res, next) => {
             updateFields.packagingAt = Order.sequelize.literal('COALESCE("packagingAt", NOW())');
             updateFields.packedAt = Order.sequelize.literal('COALESCE("packedAt", NOW())');
             updateFields.shippingAt = Order.sequelize.literal('COALESCE("shippingAt", NOW())');
-            updateFields.deliveredAt = now;
+            updateFields.deliveredAt = Order.sequelize.literal('COALESCE("deliveredAt", NOW())');
         }
 
         await Order.update(

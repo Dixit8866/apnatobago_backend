@@ -506,7 +506,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
                 }
             } else if (status === 'Completed') {
                 order.orderStatus = 'Delivered';
-                order.deliveredAt = new Date();
+                order.deliveredAt = order.deliveredAt || new Date();
                 await order.save();
                 await sendDeliveredNotification(order.id);
             }
@@ -581,7 +581,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
                 }
             }
         } else if (status === 'Completed') {
-            await Order.update({ orderStatus: 'Delivered', deliveredAt: new Date() }, { where: { id: assignment.orderId } });
+            await Order.update({ orderStatus: 'Delivered', deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') }, { where: { id: assignment.orderId } });
             await sendDeliveredNotification(assignment.orderId);
         }
 
@@ -922,7 +922,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
         // Ensure current order status is updated to Payment Collect so it lands in the Payment Collect tab
         await Order.update(
-            { orderStatus: 'Payment Collect', deliveredAt: new Date() },
+            { orderStatus: 'Payment Collect', deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') },
             { where: { id: assignment.orderId }, transaction: t }
         );
 
@@ -1358,7 +1358,7 @@ export const submitDeliveryBankPayment = async (req, res) => {
         // Also set deliveredAt since the order has been delivered
         await order.update({
             orderStatus: 'Payment Verify',
-            deliveredAt: new Date()
+            deliveredAt: order.deliveredAt || new Date()
         }, { transaction: t });
 
         await t.commit();

@@ -14,7 +14,9 @@
     "update-apiKey": "node scripts/updateVendorApiKey.js",
     "update-apiKey:prod": "NODE_ENV=production node scripts/updateVendorApiKey.js",
     "generate:secret": "node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\"",
-    "wipe:non-admin": "node scripts/wipe-non-admin.js"
+    "wipe:non-admin": "node scripts/wipe-non-admin.js",
+    "assign-godown": "node scripts/assign-godown-all-parties.js",
+    "assign-godown:prod": "NODE_ENV=production node scripts/assign-godown-all-parties.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1022.0",
