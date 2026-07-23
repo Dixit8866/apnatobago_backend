@@ -81,7 +81,7 @@ export const downloadDeliveryLabel = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'mainCategoryId'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'] },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] }
                     ]
                 },
@@ -1848,7 +1848,7 @@ export const getMergeableOrders = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'mainCategoryId'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'] },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] }
                     ]
                 }

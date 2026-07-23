@@ -116,7 +116,7 @@ export const getGodownOrders = async (req, res, next) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'mainCategoryId'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'] },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'volumeId'] },
                     ],
                     required: false,
@@ -590,7 +590,7 @@ export const getGodownMergeableOrders = async (req, res, next) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'mainCategoryId'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'] },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume'] }
                     ]
                 }

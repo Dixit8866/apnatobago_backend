@@ -876,7 +876,7 @@ export const getOrders = async (req, res) => {
                 model: OrderItem,
                 as: 'items',
                 include: [
-                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                     {
                         model: ProductVariant,
                         as: 'variant',
@@ -892,7 +892,7 @@ export const getOrders = async (req, res) => {
                 model: SalesReturn,
                 as: 'returns',
                 include: [
-                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                     {
                         model: ProductVariant,
                         as: 'variant',
@@ -997,7 +997,7 @@ export const getOrderDetails = async (req, res) => {
 
         // Build the include array for OrderItem
         const orderItemInclude = [
-            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
             {
                 model: ProductVariant,
                 as: 'variant',
@@ -1026,7 +1026,7 @@ export const getOrderDetails = async (req, res) => {
                         model: SalesReturn,
                         as: 'returns',
                         include: [
-                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                             {
                                 model: ProductVariant,
                                 as: 'variant',
@@ -1096,7 +1096,7 @@ export const getOrderDetails = async (req, res) => {
                         model: SalesReturn,
                         as: 'returns',
                         include: [
-                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                             {
                                 model: ProductVariant,
                                 as: 'variant',
@@ -1161,7 +1161,7 @@ export const getOrderDetailsV2 = async (req, res) => {
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
 
         const orderItemInclude = [
-            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
             {
                 model: ProductVariant,
                 as: 'variant',
@@ -1190,7 +1190,7 @@ export const getOrderDetailsV2 = async (req, res) => {
                         model: SalesReturn,
                         as: 'returns',
                         include: [
-                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                            { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                             {
                                 model: ProductVariant,
                                 as: 'variant',
@@ -1258,7 +1258,7 @@ export const getOrderDetailsV2 = async (req, res) => {
                     model: SalesReturn,
                     as: 'returns',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                         {
                             model: ProductVariant,
                             as: 'variant',
@@ -1573,7 +1573,7 @@ export const getOrdersWithPaymentStatus = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                         {
                             model: ProductVariant,
                             as: 'variant',
@@ -2159,7 +2159,7 @@ export const updateOrder = async (req, res) => {
                     model: OrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'boxNumber'] },
                         {
                             model: ProductVariant,
                             as: 'variant',

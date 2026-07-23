@@ -8,24 +8,69 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const logoPath = path.join(__dirname, '..', 'assets', 'logo.png');
 
+const getItemBoxNumber = (item) => {
+    return (
+        item.product?.boxNumber ||
+        item.variantInfo?.boxNumber ||
+        item.variantInfo?.productBoxNumber ||
+        item.variant?.product?.boxNumber ||
+        item.boxNumber ||
+        ''
+    );
+};
+
+const getItemDisplayName = (item) => {
+    const pName = item.product?.name;
+    let name = '';
+    if (typeof pName === 'object' && pName !== null) {
+        name = pName.gu || pName.guj || pName.en || pName.EN || pName.hn || pName.HN || '';
+    } else if (typeof pName === 'string') {
+        name = pName;
+    } else if (item.variantInfo?.productName) {
+        name = item.variantInfo.productName;
+    } else {
+        name = 'Item';
+    }
+    return String(name).trim();
+};
+
 const sortItemsByBoxNumber = (items) => {
     return [...(items || [])].sort((a, b) => {
-        const boxA = a.product?.boxNumber || a.variantInfo?.boxNumber || a.boxNumber || '';
-        const boxB = b.product?.boxNumber || b.variantInfo?.boxNumber || b.boxNumber || '';
+        const rawBoxA = String(getItemBoxNumber(a) || '').trim();
+        const rawBoxB = String(getItemBoxNumber(b) || '').trim();
 
-        const numA = parseInt(boxA, 10);
-        const numB = parseInt(boxB, 10);
+        const hasBoxA = rawBoxA !== '';
+        const hasBoxB = rawBoxB !== '';
 
-        const isNumA = !isNaN(numA);
-        const isNumB = !isNaN(numB);
+        if (hasBoxA && !hasBoxB) return -1;
+        if (!hasBoxA && hasBoxB) return 1;
 
-        if (isNumA && isNumB) {
-            return numA - numB;
+        if (hasBoxA && hasBoxB) {
+            const matchA = rawBoxA.match(/\d+/);
+            const matchB = rawBoxB.match(/\d+/);
+
+            const numA = matchA ? parseInt(matchA[0], 10) : null;
+            const numB = matchB ? parseInt(matchB[0], 10) : null;
+
+            if (numA !== null && numB !== null) {
+                if (numA !== numB) {
+                    return numA - numB;
+                }
+            } else if (numA !== null) {
+                return -1;
+            } else if (numB !== null) {
+                return 1;
+            }
+
+            const boxCompare = rawBoxA.localeCompare(rawBoxB, undefined, { numeric: true, sensitivity: 'base' });
+            if (boxCompare !== 0) {
+                return boxCompare;
+            }
         }
-        if (isNumA) return -1;
-        if (isNumB) return 1;
 
-        return boxA.localeCompare(boxB, undefined, { numeric: true, sensitivity: 'base' });
+        const nameA = getItemDisplayName(a);
+        const nameB = getItemDisplayName(b);
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
     });
 };
 
