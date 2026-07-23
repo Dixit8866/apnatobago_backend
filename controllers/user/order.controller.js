@@ -408,7 +408,8 @@ export const createOrder = async (req, res) => {
                         ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
                         : variant.baseUnitLabel,
                     sellingVolume: variant.sellingVolume,
-                    baseUnitsPerPack: variant.baseUnitsPerPack
+                    baseUnitsPerPack: variant.baseUnitsPerPack,
+                    boxNumber: variant.product?.boxNumber || null
                 }
             });
         }
@@ -1974,7 +1975,8 @@ export const updateOrder = async (req, res) => {
                         ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
                         : variant.baseUnitLabel,
                     sellingVolume: variant.sellingVolume,
-                    baseUnitsPerPack: variant.baseUnitsPerPack
+                    baseUnitsPerPack: variant.baseUnitsPerPack,
+                    boxNumber: variant.product?.boxNumber || null
                 }
             });
         }

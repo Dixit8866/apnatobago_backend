@@ -206,7 +206,8 @@ export const createCustomSale = async (req, res) => {
                         ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel)
                         : variant.baseUnitLabel || 'Pack',
                     sellingVolume: variant.sellingVolume,
-                    baseUnitsPerPack: variant.baseUnitsPerPack || 1
+                    baseUnitsPerPack: variant.baseUnitsPerPack || 1,
+                    boxNumber: variant.product?.boxNumber || null
                 }
             });
         }
