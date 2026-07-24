@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -549,7 +549,7 @@ export const getAllOrders = async (req, res) => {
             cancelledCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
         }
 
-        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount, pendingDueCount] = await Promise.all([
+        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount, pendingDueCount, userCartCount] = await Promise.all([
             Order.count({ where: pendingCountWhere, include: countInclude }),
             Order.count({ where: packagingCountWhere, include: countInclude }),
             Order.count({ where: packedCountWhere, include: countInclude }),
@@ -560,7 +560,8 @@ export const getAllOrders = async (req, res) => {
             Order.count({ where: cancelledCountWhere, include: countInclude }),
             Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }, include: countInclude }),
             SalesReturn.count({ where: deliveryBoyId ? { deliveryBoyId } : {} }),
-            Order.count({ where: pendingDueCountWhere, include: countInclude })
+            Order.count({ where: pendingDueCountWhere, include: countInclude }),
+            Cart.count({ distinct: true, col: 'userId' })
         ]);
 
         // Calculate dynamic order counts by routeCategory for the currently active tab status and date filter
@@ -659,6 +660,7 @@ export const getAllOrders = async (req, res) => {
         responseData.statusCounts = {
             '': responseData.totalRecords,
             Today: todayCount,
+            UserCart: userCartCount,
             Pending: pendingCount,
             Packaging: packagingCount,
             Packed: packedCount,
@@ -1859,6 +1861,217 @@ export const getMergeableOrders = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Mergeable orders fetched successfully.", mergeableOrders);
     } catch (error) {
         logger.error(`[Get Mergeable Orders Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get user carts for admin
+ * @route   GET /api/admin/orders/user-carts
+ * @access  Private (Admin)
+ */
+export const getUserCarts = async (req, res) => {
+    try {
+        const { search, godownId, routeCategoryId, page: queryPage, limit: queryLimit } = req.query;
+        const page = parseInt(queryPage) || 1;
+        const limit = parseInt(queryLimit) || 50;
+
+        const userWhere = {};
+        if (godownId) {
+            userWhere.godownId = godownId;
+        }
+        if (routeCategoryId) {
+            userWhere.routeCategoryId = routeCategoryId;
+        }
+
+        if (search) {
+            const escapedSearch = sequelize.escape(`%${search}%`);
+            userWhere[Op.or] = [
+                sequelize.literal(`"user"."fullname" ILIKE ${escapedSearch}`),
+                sequelize.literal(`"user"."number" ILIKE ${escapedSearch}`),
+                sequelize.literal(`"user"."city" ILIKE ${escapedSearch}`),
+                sequelize.literal(`"user->businessProfile"."shopName" ILIKE ${escapedSearch}`),
+                sequelize.literal(`"user->businessProfile"."shopAddress" ILIKE ${escapedSearch}`),
+                sequelize.literal(`"product"."name" ILIKE ${escapedSearch}`)
+            ];
+        }
+
+        const cartItems = await Cart.findAll({
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    required: true,
+                    where: Object.keys(userWhere).length > 0 ? userWhere : undefined,
+                    attributes: ['id', 'fullname', 'number', 'city', 'applevel', 'routeCategoryId', 'godownId'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            required: false,
+                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                        },
+                        {
+                            model: RouteCategory,
+                            as: 'routeCategory',
+                            required: false,
+                            attributes: ['id', 'name']
+                        },
+                        {
+                            model: Godown,
+                            as: 'assignedGodown',
+                            required: false,
+                            attributes: ['id', 'name']
+                        }
+                    ]
+                },
+                {
+                    model: Product,
+                    as: 'product',
+                    required: true,
+                    attributes: ['id', 'name', 'thumbnail', 'boxNumber']
+                },
+                {
+                    model: ProductVariant,
+                    as: 'variant',
+                    required: true,
+                    attributes: ['id', 'volume', 'extra', 'image', 'baseUnitLabel', 'innerUnitLabel', 'purchasePrice', 'sellingVolume', 'baseUnitsPerPack'],
+                    include: [
+                        {
+                            model: ProductPricing,
+                            as: 'pricings',
+                            attributes: ['customLevelId', 'minQty', 'maxQty', 'price', 'mrp']
+                        },
+                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                    ]
+                }
+            ],
+            order: [['updatedAt', 'DESC']]
+        });
+
+        // Group cart items by User
+        const userCartsMap = new Map();
+
+        for (const item of cartItems) {
+            const user = item.user;
+            if (!user) continue;
+
+            const userId = user.id;
+            if (!userCartsMap.has(userId)) {
+                userCartsMap.set(userId, {
+                    id: userId,
+                    userId: userId,
+                    user: user,
+                    items: [],
+                    totalItems: 0,
+                    totalQty: 0,
+                    totalCartAmount: 0,
+                    lastUpdated: item.updatedAt
+                });
+            }
+
+            const group = userCartsMap.get(userId);
+            const variant = item.variant;
+            const product = item.product;
+            const quantity = Number(item.quantity);
+            const userAppLevel = user.applevel;
+
+            // Determine unit price based on pricing tier or purchase price
+            let applicablePricing = variant?.pricings?.find(p =>
+                p.customLevelId === userAppLevel &&
+                quantity >= Number(p.minQty) &&
+                (p.maxQty === null || quantity <= Number(p.maxQty))
+            );
+            if (!applicablePricing) {
+                applicablePricing = variant?.pricings?.find(p => p.customLevelId === userAppLevel);
+            }
+            const unitPrice = applicablePricing ? Number(applicablePricing.price) : Number(variant?.purchasePrice || 0);
+            const itemTotal = unitPrice * quantity;
+
+            const rawPName = product?.name;
+            const productNameStr = typeof rawPName === 'object' && rawPName !== null
+                ? (rawPName.gu || rawPName.en || rawPName.HN || Object.values(rawPName)[0] || 'Product')
+                : (rawPName || 'Product');
+
+            group.items.push({
+                cartId: item.id,
+                productId: product?.id,
+                variantId: variant?.id,
+                productName: productNameStr,
+                thumbnail: variant?.image || product?.thumbnail,
+                volumeLabel: variant?.volume,
+                extra: variant?.extra,
+                baseUnitLabel: variant?.baseUnitRef?.name ? (Object.values(variant.baseUnitRef.name)[0] || variant.baseUnitLabel) : variant?.baseUnitLabel,
+                innerUnitLabel: variant?.innerUnitRef?.name ? (Object.values(variant.innerUnitRef.name)[0] || variant.innerUnitLabel) : variant?.innerUnitLabel,
+                quantity,
+                unitPrice: Number(unitPrice.toFixed(2)),
+                totalPrice: Number(itemTotal.toFixed(2)),
+                updatedAt: item.updatedAt
+            });
+
+            group.totalItems += 1;
+            group.totalQty += quantity;
+            group.totalCartAmount += itemTotal;
+            if (new Date(item.updatedAt) > new Date(group.lastUpdated)) {
+                group.lastUpdated = item.updatedAt;
+            }
+        }
+
+        const allUserCarts = Array.from(userCartsMap.values());
+        // Sort user carts by most recent update time
+        allUserCarts.sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated));
+
+        const totalRecords = allUserCarts.length;
+        const totalPages = Math.ceil(totalRecords / limit) || 1;
+        const startIndex = (page - 1) * limit;
+        const paginatedUserCarts = allUserCarts.slice(startIndex, startIndex + limit);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "User carts fetched successfully.", {
+            data: paginatedUserCarts,
+            totalRecords,
+            currentPage: page,
+            totalPages,
+            limit
+        });
+    } catch (error) {
+        logger.error(`[Get User Carts Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Delete single cart item by Admin
+ * @route   DELETE /api/admin/orders/user-carts/:cartId
+ * @access  Private (Admin)
+ */
+export const deleteUserCartItem = async (req, res) => {
+    try {
+        const { cartId } = req.params;
+        const cartItem = await Cart.findByPk(cartId);
+        if (!cartItem) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Cart item not found.");
+        }
+        await cartItem.destroy();
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Cart item removed successfully.");
+    } catch (error) {
+        logger.error(`[Delete Cart Item Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Clear entire cart of a user by Admin
+ * @route   DELETE /api/admin/orders/user-carts/clear/:userId
+ * @access  Private (Admin)
+ */
+export const clearUserCart = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        await Cart.destroy({ where: { userId } });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "User cart cleared successfully.");
+    } catch (error) {
+        logger.error(`[Clear User Cart Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
