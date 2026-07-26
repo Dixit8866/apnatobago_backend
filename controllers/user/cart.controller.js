@@ -381,7 +381,13 @@ export const addToCart = async (req, res) => {
         const deductionRequired = totalProposedQty * bUPP;
 
         // Check stock first — sum across user's assigned godown
-        const availableStock = await getAvailableStock(productId, req.user?.godownId);
+        let availableStock = await getAvailableStock(productId, req.user?.godownId);
+
+        // Check Old Stock Lock Toggle restriction
+        if (variant && variant.oldStockLockToggle) {
+            const lockedBaseUnits = Number(variant.oldStockLimitQty || 0) * bUPP;
+            availableStock = Math.min(availableStock, lockedBaseUnits);
+        }
 
         if (deductionRequired > availableStock) {
             const productName = typeof variant.product?.name === 'object'
@@ -512,7 +518,12 @@ export const updateCartItem = async (req, res) => {
             const bUPP = variant ? Number(variant.baseUnitsPerPack || 1) : 1;
             const deductionRequired = proposedQty * bUPP;
 
-            const availableStock = await getAvailableStock(cartItem.productId, req.user?.godownId);
+            let availableStock = await getAvailableStock(cartItem.productId, req.user?.godownId);
+            if (variant && variant.oldStockLockToggle) {
+                const lockedBaseUnits = Number(variant.oldStockLimitQty || 0) * bUPP;
+                availableStock = Math.min(availableStock, lockedBaseUnits);
+            }
+
             if (deductionRequired > availableStock) {
                 const productName = typeof variant?.product?.name === 'object'
                     ? (variant.product.name.en || Object.values(variant.product.name)[0] || 'Product')

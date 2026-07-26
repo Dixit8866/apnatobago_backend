@@ -173,7 +173,7 @@ export const getCompanyCategories = async (req, res) => {
  */
 export const getProducts = async (req, res) => {
     try {
-        const { mainCategoryId, subCategoryId, companyCategoryId, page, limit } = req.query;
+        const { mainCategoryId, subCategoryId, companyCategoryId, search, page, limit } = req.query;
 
         const user = req.user;
         const userLevel = user?.applevel || null;
@@ -182,6 +182,14 @@ export const getProducts = async (req, res) => {
         if (mainCategoryId) whereClause.mainCategoryId = mainCategoryId;
         if (subCategoryId) whereClause.subCategoryId = subCategoryId;
         if (companyCategoryId) whereClause.companyCategoryId = companyCategoryId;
+        if (search && String(search).trim()) {
+            const searchLower = String(search).trim().toLowerCase();
+            whereClause[Op.or] = [
+                sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${searchLower}%` }),
+                { serialNumber: { [Op.iLike]: `%${searchLower}%` } },
+                sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape('%' + searchLower + '%')})`)
+            ];
+        }
 
         // If user doesn't have showtabacco permission, only show non-tobacco products
         if (user && !user.showtabacco) {
@@ -525,6 +533,7 @@ export const searchCatalogue = async (req, res) => {
             status: 'Active',
             [Op.or]: [
                 sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${searchLower}%` }),
+                { serialNumber: { [Op.iLike]: `%${searchLower}%` } },
                 sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape('%' + searchLower + '%')})`)
             ]
         };

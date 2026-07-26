@@ -296,6 +296,11 @@ export const createOrder = async (req, res) => {
                     availableStock = parseFloat(totalStock) || 0;
                 }
 
+                if (variant.oldStockLockToggle) {
+                    const lockedBaseUnits = Number(variant.oldStockLimitQty || 0) * bUPP;
+                    availableStock = Math.min(availableStock, lockedBaseUnits);
+                }
+
                 if (deductionRequired > availableStock) {
                     // Build friendly product name
                     const productName = typeof variant.product?.name === 'object'
@@ -617,6 +622,51 @@ export const createOrder = async (req, res) => {
                     transaction: t
                 });
                 if (!variant) continue;
+
+                // Process Old Stock Lock Toggle deduction & auto-activation of new pricings
+                if (variant.oldStockLockToggle) {
+                    const bUPP = Number(variant.baseUnitsPerPack || 1);
+                    const purchasedPacks = item.sellUnit === 'Inner'
+                        ? (Number(item.quantity) / bUPP)
+                        : Number(item.quantity);
+
+                    const currentLimit = Number(variant.oldStockLimitQty || 0);
+                    const newLimit = currentLimit - purchasedPacks;
+
+                    if (newLimit <= 0) {
+                        const newPricings = variant.newPricingData;
+                        if (newPricings && Array.isArray(newPricings) && newPricings.length > 0) {
+                            await ProductPricing.destroy({
+                                where: { variantId: variant.id },
+                                transaction: t
+                            });
+
+                            for (const p of newPricings) {
+                                await ProductPricing.create({
+                                    variantId: variant.id,
+                                    customLevelId: p.customLevelId,
+                                    quantityRange: `${p.minQty}-${p.maxQty}`,
+                                    minQty: p.minQty,
+                                    maxQty: p.maxQty,
+                                    purchasePrice: variant.purchasePrice,
+                                    price: p.price,
+                                    mrp: p.mrp,
+                                    status: 'Active'
+                                }, { transaction: t });
+                            }
+                        }
+
+                        await variant.update({
+                            oldStockLockToggle: false,
+                            oldStockLimitQty: 0,
+                            newPricingData: null
+                        }, { transaction: t });
+                    } else {
+                        await variant.update({
+                            oldStockLimitQty: newLimit
+                        }, { transaction: t });
+                    }
+                }
 
                 if (variant.product?.isCombo) {
                     // DEDUCT FROM COMBO COMPONENTS!

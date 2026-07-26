@@ -154,6 +154,7 @@ export const createProduct = async (req, res, next) => {
             comboProduct2Id,
             keywords,
             boxNumber,
+            serialNumber,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -221,6 +222,7 @@ export const createProduct = async (req, res, next) => {
                 position: maxPos + 1,
                 keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : [],
                 boxNumber: boxNumber || null,
+                serialNumber: serialNumber || null,
             },
             { transaction: t }
         );
@@ -357,6 +359,8 @@ export const getProducts = async (req, res, next) => {
                         { 'name.HN': { [Op.iLike]: `%${term}%` } },
                         { 'name.GU': { [Op.iLike]: `%${term}%` } },
                         { 'name.EN': { [Op.iLike]: `%${term}%` } },
+                        { serialNumber: { [Op.iLike]: `%${term}%` } },
+                        { boxNumber: { [Op.iLike]: `%${term}%` } },
                         sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape('%' + term + '%')})`)
                     ]
                 }))
@@ -629,6 +633,7 @@ export const updateProduct = async (req, res, next) => {
             comboProduct2Id,
             keywords,
             boxNumber,
+            serialNumber,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -757,6 +762,7 @@ export const updateProduct = async (req, res, next) => {
                 comboProduct2Id: comboProduct2Id !== undefined ? comboProduct2Id : product.comboProduct2Id,
                 keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : (product.keywords || []),
                 boxNumber: boxNumber !== undefined ? boxNumber : product.boxNumber,
+                serialNumber: serialNumber !== undefined ? serialNumber : product.serialNumber,
             },
             { transaction: t }
         );

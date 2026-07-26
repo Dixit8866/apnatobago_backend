@@ -81,6 +81,21 @@ const ProductVariant = sequelize.define(
             allowNull: false,
             defaultValue: 0,
         },
+        oldStockLockToggle: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        oldStockLimitQty: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: false,
+            defaultValue: 0,
+        },
+        newPricingData: {
+            type: DataTypes.JSONB,
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,

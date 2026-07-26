@@ -128,32 +128,53 @@ export const convertToBill = async (req, res, next) => {
                 }, { transaction: t });
             }
 
-            // Update Product Variant base purchase price
-            await ProductVariant.update(
-                { purchasePrice: item.purchasePrice },
-                { where: { id: item.variantId }, transaction: t }
-            );
+            const isLockEnabled = !!item.oldStockLockToggle;
+            const oldStockLimitQty = isLockEnabled ? Number(item.oldStockLimitQty || 0) : 0;
+            const newPricingsPayload = (isLockEnabled && item.pricings && Array.isArray(item.pricings)) ? item.pricings : null;
 
-            // Update Level Wise Pricing if provided
-            if (item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
-                // Delete existing pricings for this variant to replace them
-                await ProductPricing.destroy({
-                    where: { variantId: item.variantId },
-                    transaction: t
-                });
-
-                for (const p of item.pricings) {
-                    await ProductPricing.create({
-                        variantId: item.variantId,
-                        customLevelId: p.customLevelId,
-                        quantityRange: `${p.minQty}-${p.maxQty}`,
-                        minQty: p.minQty,
-                        maxQty: p.maxQty,
+            if (isLockEnabled) {
+                await ProductVariant.update(
+                    {
                         purchasePrice: item.purchasePrice,
-                        price: p.price,
-                        mrp: p.mrp,
-                        status: 'Active'
-                    }, { transaction: t });
+                        oldStockLockToggle: true,
+                        oldStockLimitQty: oldStockLimitQty,
+                        newPricingData: newPricingsPayload
+                    },
+                    { where: { id: item.variantId }, transaction: t }
+                );
+                // When Old Stock Lock Toggle is enabled, keep existing active ProductPricing intact
+                // for the remaining old stock. New pricing will be automatically applied when old stock limit hits 0.
+            } else {
+                await ProductVariant.update(
+                    {
+                        purchasePrice: item.purchasePrice,
+                        oldStockLockToggle: false,
+                        oldStockLimitQty: 0,
+                        newPricingData: null
+                    },
+                    { where: { id: item.variantId }, transaction: t }
+                );
+
+                // Update Level Wise Pricing immediately if provided
+                if (item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
+                    await ProductPricing.destroy({
+                        where: { variantId: item.variantId },
+                        transaction: t
+                    });
+
+                    for (const p of item.pricings) {
+                        await ProductPricing.create({
+                            variantId: item.variantId,
+                            customLevelId: p.customLevelId,
+                            quantityRange: `${p.minQty}-${p.maxQty}`,
+                            minQty: p.minQty,
+                            maxQty: p.maxQty,
+                            purchasePrice: item.purchasePrice,
+                            price: p.price,
+                            mrp: p.mrp,
+                            status: 'Active'
+                        }, { transaction: t });
+                    }
                 }
             }
 

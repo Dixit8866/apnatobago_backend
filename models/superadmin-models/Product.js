@@ -82,6 +82,11 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        serialNumber: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,

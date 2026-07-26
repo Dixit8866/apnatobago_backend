@@ -397,7 +397,10 @@ const runManualMigrations = async () => {
         try {
             // Add position to product_variants
             await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "position" INTEGER DEFAULT 0');
-        } catch (e) { console.log('[Migration Warning] Product variants position column failed:', e.message); }
+            await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "oldStockLockToggle" BOOLEAN DEFAULT false');
+            await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "oldStockLimitQty" DECIMAL(10, 2) DEFAULT 0');
+            await sequelize.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS "newPricingData" JSONB DEFAULT null');
+        } catch (e) { console.log('[Migration Warning] Product variants position/oldStock columns failed:', e.message); }
 
         try {
             // Add isCombo, comboProduct1Id, comboProduct2Id to products
