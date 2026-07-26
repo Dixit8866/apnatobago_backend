@@ -1144,4 +1144,22 @@ export const updateProductBoxNumber = async (req, res, next) => {
     }
 };
 
+export const updateProductSerialNumber = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { serialNumber } = req.body;
+
+        const product = await Product.findByPk(id);
+        if (!product) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
+        }
+
+        await product.update({ serialNumber: serialNumber || null });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product Serial Number updated successfully.', product);
+    } catch (error) {
+        next(error);
+    }
+};
+
 
