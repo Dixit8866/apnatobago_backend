@@ -49,6 +49,11 @@ const Vendor = sequelize.define(
             type: DataTypes.STRING,
             defaultValue: 'Active', // Active, Inactive, Deleted
         },
+        productIds: {
+            type: DataTypes.JSONB,
+            allowNull: true,
+            defaultValue: [],
+        },
     },
     {
         timestamps: true,
