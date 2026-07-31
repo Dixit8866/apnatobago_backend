@@ -68,7 +68,9 @@ export const createCustomSale = async (req, res) => {
             orderStatus,
             deliveryMode,
             deliveryRoundId,
-            deliveryRoundTiming
+            deliveryRoundTiming,
+            orderDate,
+            deliveryDate
         } = req.body;
 
         if (!items || !Array.isArray(items) || items.length === 0) {
@@ -293,6 +295,9 @@ export const createCustomSale = async (req, res) => {
             notes,
             routeCategoryId: resolvedRouteCategoryId,
             godownId: req.body.godownId || null,
+            orderDate: orderDate || new Date().toISOString().split('T')[0],
+            deliveryDate: deliveryDate || null,
+            ...(orderDate ? { createdAt: new Date(orderDate) } : {})
         }, { transaction: t });
 
         // 3. Create Order Items
