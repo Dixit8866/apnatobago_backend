@@ -114,6 +114,25 @@ export const createCustomSale = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant ${variantId} not found.`);
             }
 
+            // Check Min Qty and Max Qty limits
+            const minQ = (variant.minQty !== null && variant.minQty !== undefined && variant.minQty !== '') ? Number(variant.minQty) : null;
+            const maxQ = (variant.maxQty !== null && variant.maxQty !== undefined && variant.maxQty !== '') ? Number(variant.maxQty) : null;
+            const numQty = Number(quantity);
+
+            const prodName = typeof variant.product?.name === 'object'
+                ? (variant.product.name.gu || variant.product.name.en || Object.values(variant.product.name)[0])
+                : (variant.product?.name || 'Product');
+
+            if (minQ !== null && minQ > 0 && numQty < minQ) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `પ્રોડક્ટ '${prodName}' માટે ન્યૂનતમ જથ્થો (Min Qty) ${minQ} હોવો જોઈએ.`);
+            }
+
+            if (maxQ !== null && maxQ > 0 && numQty > maxQ) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `પ્રોડક્ટ '${prodName}' માટે મહત્તમ જથ્થો (Max Qty) ${maxQ} થી વધારે ન હોઈ શકે.`);
+            }
+
             // Check stock availability in selected godown
             const bUPPCheck = Number(variant.baseUnitsPerPack || 1);
             const sellUnitCheck = item.sellUnit || 'Base';
@@ -121,7 +140,7 @@ export const createCustomSale = async (req, res) => {
 
             const totalAvailableStock = await InventoryStock.sum('totalBaseUnits', {
                 where: {
-                    variantId,
+                    productId: variant.productId,
                     godownId,
                     status: 'Active'
                 },
@@ -130,17 +149,11 @@ export const createCustomSale = async (req, res) => {
 
             if (totalAvailableStock <= 0) {
                 await t.rollback();
-                const prodName = typeof variant.product?.name === 'object'
-                    ? (variant.product.name.gu || variant.product.name.en || Object.values(variant.product.name)[0])
-                    : (variant.product?.name || 'Product');
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `પ્રોડક્ટ '${prodName}' સ્ટોકમાં નથી (Out of stock).`);
             }
 
             if (totalAvailableStock < reqBaseUnits) {
                 await t.rollback();
-                const prodName = typeof variant.product?.name === 'object'
-                    ? (variant.product.name.gu || variant.product.name.en || Object.values(variant.product.name)[0])
-                    : (variant.product?.name || 'Product');
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `પ્રોડક્ટ '${prodName}' નો પુરતો સ્ટોક નથી (માત્ર ${totalAvailableStock} યુનિટ ઉપલબ્ધ છે).`);
             }
 
