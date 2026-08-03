@@ -91,6 +91,12 @@ export const getInventoryOptions = async (req, res, next) => {
                                 required: false,
                                 order: [['minQty', 'ASC']],
                             },
+                            {
+                                model: InventoryStock,
+                                as: 'inventoryStocks',
+                                where: { status: 'Active' },
+                                required: false,
+                            },
                             { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
                             { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
                             { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }

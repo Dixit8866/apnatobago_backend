@@ -36,6 +36,10 @@ const VendorOrder = sequelize.define('VendorOrder', {
         type: DataTypes.TEXT,
         allowNull: true,
     },
+    receivedOrderDate: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+    },
     isConverted: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,

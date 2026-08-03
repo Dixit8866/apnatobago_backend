@@ -89,7 +89,7 @@ async function enrichItems(rawItems) {
 
 export const createVendorOrder = async (req, res) => {
     try {
-        const { vendorId, status, note, items } = req.body;
+        const { vendorId, status, note, items, receivedOrderDate } = req.body;
 
         if (!vendorId || !items || items.length === 0) {
             return res.status(400).json({ message: 'Vendor and items are required' });
@@ -104,6 +104,7 @@ export const createVendorOrder = async (req, res) => {
             vendorId,
             status: status || 'Pending',
             note: note || null,
+            receivedOrderDate: receivedOrderDate || null,
             items: enrichedItems,
             totalItems,
         });
@@ -209,7 +210,7 @@ export const getVendorOrderById = async (req, res) => {
 export const updateVendorOrder = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, note, items } = req.body;
+        const { status, note, items, receivedOrderDate } = req.body;
 
         const order = await VendorOrder.findByPk(id);
         if (!order) return res.status(404).json({ message: 'Order not found' });
@@ -217,6 +218,7 @@ export const updateVendorOrder = async (req, res) => {
         const updateData = {};
         if (status) updateData.status = status;
         if (note !== undefined) updateData.note = note;
+        if (receivedOrderDate !== undefined) updateData.receivedOrderDate = receivedOrderDate || null;
         if (items) {
             const enrichedItems = await enrichItems(items);
             updateData.items = enrichedItems;
