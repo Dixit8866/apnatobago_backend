@@ -406,11 +406,19 @@ export const generatePurchaseBill = async (bill) => {
             doc.fillColor('#ffffff').fontSize(7).font('Helvetica-Bold').text('PURCHASED FROM (VENDOR)', c1X + 8, currentY + 5);
             
             doc.rect(c1X, currentY + 18, card1Width, cardHeight - 18).fillAndStroke(bgWarm, borderColor);
-            const vendorName = String(bill.vendor?.companyName || bill.vendor?.name || 'Vendor').toUpperCase();
-            doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text(vendorName, c1X + 8, currentY + 24, { width: card1Width - 16, ellipsis: true });
-            doc.fillColor('#777777').fontSize(6.5).font('Helvetica-Bold').text('VENDOR CONTACT:', c1X + 8, currentY + 44);
+            const companyName = bill.vendor?.companyName ? String(bill.vendor.companyName).trim() : '';
+            const vendorContactName = bill.vendor?.name ? String(bill.vendor.name).trim() : '';
+            const displayName = companyName || vendorContactName || 'VENDOR';
+            
+            doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text(displayName.toUpperCase(), c1X + 8, currentY + 23, { width: card1Width - 16, ellipsis: true });
+            
+            if (companyName && vendorContactName && companyName.toLowerCase() !== vendorContactName.toLowerCase()) {
+                doc.fillColor('#555555').fontSize(7.5).font('Helvetica-Bold').text(`(${vendorContactName})`, c1X + 8, currentY + 34, { width: card1Width - 16, ellipsis: true });
+            }
+            
+            doc.fillColor('#777777').fontSize(6.5).font('Helvetica-Bold').text('VENDOR CONTACT:', c1X + 8, currentY + 45);
             const phoneStr = bill.vendor?.phoneNumber || bill.vendor?.whatsappNumber || '-';
-            doc.fillColor('#333333').fontSize(8).font('Helvetica').text(`Tel: ${phoneStr}`, c1X + 8, currentY + 54);
+            doc.fillColor('#333333').fontSize(7.5).font('Helvetica').text(`Tel: ${phoneStr}`, c1X + 8, currentY + 54);
 
             // Card 2: Received At
             const c2X = c1X + card1Width + gap;
@@ -453,18 +461,20 @@ export const generatePurchaseBill = async (bill) => {
             doc.text('SR.', margin + 5, currentY + 6, { width: 25, align: 'center' });
             doc.text('PRODUCT DESCRIPTION', margin + 35, currentY + 6, { width: 210 });
             doc.text('PACKING', margin + 250, currentY + 6, { width: 95, align: 'center' });
-            doc.text('P. PRICE (₹)', margin + 350, currentY + 6, { width: 60, align: 'right' });
+            doc.text('P. PRICE (Rs.)', margin + 350, currentY + 6, { width: 60, align: 'right' });
             doc.text('QTY', margin + 415, currentY + 6, { width: 35, align: 'center' });
-            doc.text('TOTAL (₹)', margin + 455, currentY + 6, { width: 85, align: 'right' });
+            doc.text('TOTAL (Rs.)', margin + 455, currentY + 6, { width: 85, align: 'right' });
 
             currentY += thHeight;
 
             const items = bill.items || [];
-            const rowHeight = 22;
 
             items.forEach((it, idx) => {
+                const hasBatch = Boolean(it.batchNumber);
+                const curRowHeight = hasBatch ? 28 : 22;
+
                 // Page overflow check
-                if (currentY > pageHeight - 120) {
+                if (currentY + curRowHeight > pageHeight - 80) {
                     doc.addPage();
                     currentY = 25;
                     // re-draw table header
@@ -473,37 +483,45 @@ export const generatePurchaseBill = async (bill) => {
                     doc.text('SR.', margin + 5, currentY + 6, { width: 25, align: 'center' });
                     doc.text('PRODUCT DESCRIPTION', margin + 35, currentY + 6, { width: 210 });
                     doc.text('PACKING', margin + 250, currentY + 6, { width: 95, align: 'center' });
-                    doc.text('P. PRICE (₹)', margin + 350, currentY + 6, { width: 60, align: 'right' });
+                    doc.text('P. PRICE (Rs.)', margin + 350, currentY + 6, { width: 60, align: 'right' });
                     doc.text('QTY', margin + 415, currentY + 6, { width: 35, align: 'center' });
-                    doc.text('TOTAL (₹)', margin + 455, currentY + 6, { width: 85, align: 'right' });
+                    doc.text('TOTAL (Rs.)', margin + 455, currentY + 6, { width: 85, align: 'right' });
                     currentY += thHeight;
                 }
 
                 const isEven = idx % 2 === 0;
-                doc.rect(margin, currentY, contentWidth, rowHeight).fillAndStroke(isEven ? '#ffffff' : altRowBg, '#e5e2da');
+                doc.rect(margin, currentY, contentWidth, curRowHeight).fillAndStroke(isEven ? '#ffffff' : altRowBg, '#e5e2da');
 
                 doc.fillColor('#333333').fontSize(8).font('Helvetica');
-                doc.text(String(idx + 1), margin + 5, currentY + 7, { width: 25, align: 'center' });
+                doc.text(String(idx + 1), margin + 5, currentY + (hasBatch ? 8 : 6), { width: 25, align: 'center' });
                 
                 const pName = typeof it.productName === 'object' 
                     ? (it.productName?.en || it.productName?.gu || 'Product') 
                     : String(it.productName || 'Product');
                 
-                doc.fillColor(primaryColor).font('Helvetica-Bold').text(pName, margin + 35, currentY + 7, { width: 210, ellipsis: true });
+                doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(8).text(pName, margin + 35, currentY + 4, { width: 210, ellipsis: true });
                 
+                if (hasBatch) {
+                    let expStr = '';
+                    if (it.expiryDate) {
+                        expStr = ` (Exp: ${new Date(it.expiryDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })})`;
+                    }
+                    doc.fillColor('#b45309').font('Helvetica-Bold').fontSize(6.5).text(`Batch: ${it.batchNumber}${expStr}`, margin + 35, currentY + 15, { width: 210, ellipsis: true });
+                }
+
                 const packingStr = String(it.volume || '15 Unit/Carton');
-                doc.fillColor('#555555').font('Helvetica').text(packingStr, margin + 250, currentY + 7, { width: 95, align: 'center', ellipsis: true });
+                doc.fillColor('#555555').font('Helvetica').fontSize(8).text(packingStr, margin + 250, currentY + (hasBatch ? 8 : 6), { width: 95, align: 'center', ellipsis: true });
                 
                 const pPrice = Number(it.purchasePrice || 0).toFixed(2);
-                doc.text(pPrice, margin + 350, currentY + 7, { width: 60, align: 'right' });
+                doc.text(pPrice, margin + 350, currentY + (hasBatch ? 8 : 6), { width: 60, align: 'right' });
                 
                 const qtyVal = String(it.receivedQty !== undefined ? it.receivedQty : it.qty);
-                doc.fillColor(primaryColor).font('Helvetica-Bold').text(qtyVal, margin + 415, currentY + 7, { width: 35, align: 'center' });
+                doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(8).text(qtyVal, margin + 415, currentY + (hasBatch ? 8 : 6), { width: 35, align: 'center' });
                 
                 const totalVal = (Number(it.purchasePrice || 0) * Number(it.qty || 0)).toFixed(2);
-                doc.text(totalVal, margin + 455, currentY + 7, { width: 85, align: 'right' });
+                doc.text(totalVal, margin + 455, currentY + (hasBatch ? 8 : 6), { width: 85, align: 'right' });
 
-                currentY += rowHeight;
+                currentY += curRowHeight;
             });
 
             currentY += 10;
@@ -516,8 +534,8 @@ export const generatePurchaseBill = async (bill) => {
             const totalDarkWidth = 180;
             doc.rect(pageWidth - margin - totalDarkWidth, currentY, totalDarkWidth, totalBoxHeight).fill(primaryColor);
             
-            const formattedTotal = `₹${Number(bill.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold').text(formattedTotal, pageWidth - margin - totalDarkWidth, currentY + 7, { width: totalDarkWidth - 15, align: 'right' });
+            const formattedTotal = `Rs. ${Number(bill.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            doc.fillColor('#ffffff').fontSize(15).font('Helvetica-Bold').text(formattedTotal, pageWidth - margin - totalDarkWidth, currentY + 8, { width: totalDarkWidth - 15, align: 'right' });
 
             currentY += totalBoxHeight + 15;
 
@@ -602,11 +620,19 @@ export const generateVendorOrderInvoice = async (order) => {
             doc.fillColor('#ffffff').fontSize(7).font('Helvetica-Bold').text('ORDER TO (VENDOR)', c1X + 8, currentY + 5);
             
             doc.rect(c1X, currentY + 18, card1Width, cardHeight - 18).fillAndStroke(bgWarm, borderColor);
-            const vendorName = String(order.vendor?.companyName || order.vendor?.name || 'Vendor').toUpperCase();
-            doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text(vendorName, c1X + 8, currentY + 24, { width: card1Width - 16, ellipsis: true });
-            doc.fillColor('#777777').fontSize(6.5).font('Helvetica-Bold').text('VENDOR CONTACT:', c1X + 8, currentY + 44);
+            const companyName = order.vendor?.companyName ? String(order.vendor.companyName).trim() : '';
+            const vendorContactName = order.vendor?.name ? String(order.vendor.name).trim() : '';
+            const displayName = companyName || vendorContactName || 'VENDOR';
+
+            doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text(displayName.toUpperCase(), c1X + 8, currentY + 23, { width: card1Width - 16, ellipsis: true });
+            
+            if (companyName && vendorContactName && companyName.toLowerCase() !== vendorContactName.toLowerCase()) {
+                doc.fillColor('#555555').fontSize(7.5).font('Helvetica-Bold').text(`(${vendorContactName})`, c1X + 8, currentY + 34, { width: card1Width - 16, ellipsis: true });
+            }
+            
+            doc.fillColor('#777777').fontSize(6.5).font('Helvetica-Bold').text('VENDOR CONTACT:', c1X + 8, currentY + 45);
             const phoneStr = order.vendor?.phoneNumber || order.vendor?.whatsappNumber || '-';
-            doc.fillColor('#333333').fontSize(8).font('Helvetica').text(`Tel: ${phoneStr}`, c1X + 8, currentY + 54);
+            doc.fillColor('#333333').fontSize(7.5).font('Helvetica').text(`Tel: ${phoneStr}`, c1X + 8, currentY + 54);
 
             // Card 2: Destination Godown
             const c2X = c1X + card1Width + gap;
@@ -654,19 +680,21 @@ export const generateVendorOrderInvoice = async (order) => {
             doc.text('SR.', margin + 5, currentY + 6, { width: 25, align: 'center' });
             doc.text('PRODUCT DESCRIPTION', margin + 35, currentY + 6, { width: 210 });
             doc.text('PACKING', margin + 250, currentY + 6, { width: 95, align: 'center' });
-            doc.text('PRICE (₹)', margin + 350, currentY + 6, { width: 60, align: 'right' });
+            doc.text('PRICE (Rs.)', margin + 350, currentY + 6, { width: 60, align: 'right' });
             doc.text('QTY', margin + 415, currentY + 6, { width: 35, align: 'center' });
-            doc.text('TOTAL (₹)', margin + 455, currentY + 6, { width: 85, align: 'right' });
+            doc.text('TOTAL (Rs.)', margin + 455, currentY + 6, { width: 85, align: 'right' });
 
             currentY += thHeight;
 
             const items = order.items || [];
-            const rowHeight = 22;
             let totalOrderValue = 0;
 
             items.forEach((it, idx) => {
+                const hasBatch = Boolean(it.batchNumber);
+                const curRowHeight = hasBatch ? 28 : 22;
+
                 // Page overflow check
-                if (currentY > pageHeight - 120) {
+                if (currentY + curRowHeight > pageHeight - 80) {
                     doc.addPage();
                     currentY = 25;
                     doc.rect(margin, currentY, contentWidth, thHeight).fill(primaryColor);
@@ -674,38 +702,46 @@ export const generateVendorOrderInvoice = async (order) => {
                     doc.text('SR.', margin + 5, currentY + 6, { width: 25, align: 'center' });
                     doc.text('PRODUCT DESCRIPTION', margin + 35, currentY + 6, { width: 210 });
                     doc.text('PACKING', margin + 250, currentY + 6, { width: 95, align: 'center' });
-                    doc.text('PRICE (₹)', margin + 350, currentY + 6, { width: 60, align: 'right' });
+                    doc.text('PRICE (Rs.)', margin + 350, currentY + 6, { width: 60, align: 'right' });
                     doc.text('QTY', margin + 415, currentY + 6, { width: 35, align: 'center' });
-                    doc.text('TOTAL (₹)', margin + 455, currentY + 6, { width: 85, align: 'right' });
+                    doc.text('TOTAL (Rs.)', margin + 455, currentY + 6, { width: 85, align: 'right' });
                     currentY += thHeight;
                 }
 
                 const isEven = idx % 2 === 0;
-                doc.rect(margin, currentY, contentWidth, rowHeight).fillAndStroke(isEven ? '#ffffff' : altRowBg, '#e5e2da');
+                doc.rect(margin, currentY, contentWidth, curRowHeight).fillAndStroke(isEven ? '#ffffff' : altRowBg, '#e5e2da');
 
                 doc.fillColor('#333333').fontSize(8).font('Helvetica');
-                doc.text(String(idx + 1), margin + 5, currentY + 7, { width: 25, align: 'center' });
+                doc.text(String(idx + 1), margin + 5, currentY + (hasBatch ? 8 : 6), { width: 25, align: 'center' });
                 
                 const pName = typeof it.productName === 'object' 
                     ? (it.productName?.en || it.productName?.gu || 'Product') 
                     : String(it.productName || 'Product');
                 
-                doc.fillColor(primaryColor).font('Helvetica-Bold').text(pName, margin + 35, currentY + 7, { width: 210, ellipsis: true });
+                doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(8).text(pName, margin + 35, currentY + 4, { width: 210, ellipsis: true });
+
+                if (hasBatch) {
+                    let expStr = '';
+                    if (it.expiryDate) {
+                        expStr = ` (Exp: ${new Date(it.expiryDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })})`;
+                    }
+                    doc.fillColor('#b45309').font('Helvetica-Bold').fontSize(6.5).text(`Batch: ${it.batchNumber}${expStr}`, margin + 35, currentY + 15, { width: 210, ellipsis: true });
+                }
                 
                 const packingStr = String(it.volume || it.unitLabel || '15 Unit/Carton');
-                doc.fillColor('#555555').font('Helvetica').text(packingStr, margin + 250, currentY + 7, { width: 95, align: 'center', ellipsis: true });
+                doc.fillColor('#555555').font('Helvetica').fontSize(8).text(packingStr, margin + 250, currentY + (hasBatch ? 8 : 6), { width: 95, align: 'center', ellipsis: true });
                 
                 const unitPrice = Number(it.quotationPrice || it.purchasePrice || 0);
-                doc.text(unitPrice ? unitPrice.toFixed(2) : '-', margin + 350, currentY + 7, { width: 60, align: 'right' });
+                doc.text(unitPrice ? unitPrice.toFixed(2) : '-', margin + 350, currentY + (hasBatch ? 8 : 6), { width: 60, align: 'right' });
                 
                 const qtyVal = Number(it.qty || 0);
-                doc.fillColor(primaryColor).font('Helvetica-Bold').text(String(qtyVal), margin + 415, currentY + 7, { width: 35, align: 'center' });
+                doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(8).text(String(qtyVal), margin + 415, currentY + (hasBatch ? 8 : 6), { width: 35, align: 'center' });
                 
                 const rowTotal = unitPrice * qtyVal;
                 totalOrderValue += rowTotal;
-                doc.text(rowTotal ? rowTotal.toFixed(2) : '-', margin + 455, currentY + 7, { width: 85, align: 'right' });
+                doc.text(rowTotal ? rowTotal.toFixed(2) : '-', margin + 455, currentY + (hasBatch ? 8 : 6), { width: 85, align: 'right' });
 
-                currentY += rowHeight;
+                currentY += curRowHeight;
             });
 
             currentY += 10;
@@ -718,8 +754,8 @@ export const generateVendorOrderInvoice = async (order) => {
             const totalDarkWidth = 180;
             doc.rect(pageWidth - margin - totalDarkWidth, currentY, totalDarkWidth, totalBoxHeight).fill(primaryColor);
             
-            const formattedTotal = `₹${totalOrderValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold').text(formattedTotal, pageWidth - margin - totalDarkWidth, currentY + 7, { width: totalDarkWidth - 15, align: 'right' });
+            const formattedTotal = `Rs. ${totalOrderValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            doc.fillColor('#ffffff').fontSize(15).font('Helvetica-Bold').text(formattedTotal, pageWidth - margin - totalDarkWidth, currentY + 8, { width: totalDarkWidth - 15, align: 'right' });
 
             currentY += totalBoxHeight + 15;
 
