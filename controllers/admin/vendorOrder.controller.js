@@ -5,6 +5,7 @@ import Product from '../../models/superadmin-models/Product.js';
 import ProductVariant from '../../models/superadmin-models/ProductVariant.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import { getPaginationOptions } from '../../helpers/query.helper.js';
+import { generateVendorOrderInvoice } from '../../utils/invoiceGenerator.js';
 
 // ─── Auto-generate order number ──────────────────────────────────────────────
 async function generateOrderNo() {
@@ -108,6 +109,24 @@ export const createVendorOrder = async (req, res) => {
             items: enrichedItems,
             totalItems,
         });
+
+        // Auto-link any new products in items to the Vendor's productIds
+        if (vendorId && items && items.length > 0) {
+            try {
+                const vendor = await Vendor.findByPk(vendorId);
+                if (vendor) {
+                    const currentProductIds = Array.isArray(vendor.productIds) ? vendor.productIds : [];
+                    const orderProductIds = items.map(i => i.productId).filter(Boolean);
+                    const combinedProductIds = Array.from(new Set([...currentProductIds, ...orderProductIds]));
+
+                    if (combinedProductIds.length > currentProductIds.length) {
+                        await vendor.update({ productIds: combinedProductIds });
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to auto-link products to vendor:", err);
+            }
+        }
 
         const result = await VendorOrder.findByPk(order.id, {
             include: [{ model: Vendor, as: 'vendor' }],
@@ -227,6 +246,24 @@ export const updateVendorOrder = async (req, res) => {
 
         await order.update(updateData);
 
+        // Auto-link any new products in items to the Vendor's productIds
+        if (items && order.vendorId) {
+            try {
+                const vendor = await Vendor.findByPk(order.vendorId);
+                if (vendor) {
+                    const currentProductIds = Array.isArray(vendor.productIds) ? vendor.productIds : [];
+                    const orderProductIds = items.map(i => i.productId).filter(Boolean);
+                    const combinedProductIds = Array.from(new Set([...currentProductIds, ...orderProductIds]));
+
+                    if (combinedProductIds.length > currentProductIds.length) {
+                        await vendor.update({ productIds: combinedProductIds });
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to auto-link products to vendor in update:", err);
+            }
+        }
+
         const result = await VendorOrder.findByPk(id, {
             include: [{ model: Vendor, as: 'vendor' }],
         });
@@ -250,6 +287,28 @@ export const deleteVendorOrder = async (req, res) => {
         await order.destroy();
         res.status(200).json({ status: 'success', message: 'Order deleted successfully' });
     } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const downloadVendorOrder = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const order = await VendorOrder.findByPk(id, {
+            include: [{ model: Vendor, as: 'vendor' }]
+        });
+
+        if (!order) {
+            return res.status(404).json({ message: 'Vendor order not found' });
+        }
+
+        const pdfBuffer = await generateVendorOrderInvoice(order);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename=VendorOrder-${order.orderNo}.pdf`);
+        return res.send(pdfBuffer);
+    } catch (error) {
+        console.error(`[Admin Vendor Order Download Error]: ${error.message}`);
         res.status(500).json({ message: error.message });
     }
 };

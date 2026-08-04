@@ -9,6 +9,7 @@ router.use(protect, admin);
 router.post('/', vendorOrderController.createVendorOrder);
 router.get('/', vendorOrderController.getAllVendorOrders);
 router.get('/:id', vendorOrderController.getVendorOrderById);
+router.get('/:id/download', vendorOrderController.downloadVendorOrder);
 router.put('/:id', vendorOrderController.updateVendorOrder);
 router.delete('/:id', vendorOrderController.deleteVendorOrder);
 
