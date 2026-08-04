@@ -351,6 +351,25 @@ export const generateOrderInvoice = async (order) => {
  * @returns {Promise<Buffer>} - PDF Buffer
  */
 export const generatePurchaseBill = async (bill) => {
+    // Resolve full product names if productName is truncated or missing
+    const rawItems = bill.items || [];
+    const prodIdsToFetch = rawItems
+        .filter(it => it.productId && (!it.productName || String(it.productName).trim().length <= 5 || !String(it.productName).includes(' ')))
+        .map(it => it.productId);
+    
+    let prodMap = new Map();
+    if (prodIdsToFetch.length > 0) {
+        try {
+            const fetchedProds = await Product.findAll({
+                where: { id: prodIdsToFetch },
+                attributes: ['id', 'name']
+            });
+            prodMap = new Map(fetchedProds.map(p => [p.id, p]));
+        } catch (e) {
+            console.error("Failed to prefetch products in generatePurchaseBill:", e);
+        }
+    }
+
     return new Promise((resolve, reject) => {
         try {
             const doc = new PDFKitNative({ 
@@ -468,25 +487,6 @@ export const generatePurchaseBill = async (bill) => {
 
             currentY += thHeight;
 
-            // Resolve full product names if productName is truncated or missing
-            const rawItems = bill.items || [];
-            const prodIdsToFetch = rawItems
-                .filter(it => it.productId && (!it.productName || String(it.productName).trim().length <= 5 || !String(it.productName).includes(' ')))
-                .map(it => it.productId);
-            
-            let prodMap = new Map();
-            if (prodIdsToFetch.length > 0) {
-                try {
-                    const fetchedProds = await Product.findAll({
-                        where: { id: prodIdsToFetch },
-                        attributes: ['id', 'name']
-                    });
-                    prodMap = new Map(fetchedProds.map(p => [p.id, p]));
-                } catch (e) {
-                    console.error("Failed to prefetch products in generatePurchaseBill:", e);
-                }
-            }
-
             const items = rawItems.map(it => {
                 let name = typeof it.productName === 'object'
                     ? (it.productName?.en || it.productName?.gu || Object.values(it.productName || {})[0])
@@ -598,6 +598,25 @@ export const generatePurchaseBill = async (bill) => {
  * @returns {Promise<Buffer>} - PDF Buffer
  */
 export const generateVendorOrderInvoice = async (order) => {
+    // Resolve full product names if productName is truncated or missing
+    const rawItems = order.items || [];
+    const prodIdsToFetch = rawItems
+        .filter(it => it.productId && (!it.productName || String(it.productName).trim().length <= 5 || !String(it.productName).includes(' ')))
+        .map(it => it.productId);
+    
+    let prodMap = new Map();
+    if (prodIdsToFetch.length > 0) {
+        try {
+            const fetchedProds = await Product.findAll({
+                where: { id: prodIdsToFetch },
+                attributes: ['id', 'name']
+            });
+            prodMap = new Map(fetchedProds.map(p => [p.id, p]));
+        } catch (e) {
+            console.error("Failed to prefetch products in generateVendorOrderInvoice:", e);
+        }
+    }
+
     return new Promise((resolve, reject) => {
         try {
             const doc = new PDFKitNative({ 
@@ -719,25 +738,6 @@ export const generateVendorOrderInvoice = async (order) => {
             doc.text('TOTAL (Rs.)', margin + 455, currentY + 6, { width: 85, align: 'right' });
 
             currentY += thHeight;
-
-            // Resolve full product names if productName is truncated or missing
-            const rawItems = order.items || [];
-            const prodIdsToFetch = rawItems
-                .filter(it => it.productId && (!it.productName || String(it.productName).trim().length <= 5 || !String(it.productName).includes(' ')))
-                .map(it => it.productId);
-            
-            let prodMap = new Map();
-            if (prodIdsToFetch.length > 0) {
-                try {
-                    const fetchedProds = await Product.findAll({
-                        where: { id: prodIdsToFetch },
-                        attributes: ['id', 'name']
-                    });
-                    prodMap = new Map(fetchedProds.map(p => [p.id, p]));
-                } catch (e) {
-                    console.error("Failed to prefetch products in generateVendorOrderInvoice:", e);
-                }
-            }
 
             const items = rawItems.map(it => {
                 let name = typeof it.productName === 'object'
