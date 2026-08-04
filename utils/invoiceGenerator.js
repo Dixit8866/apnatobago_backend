@@ -3,6 +3,7 @@ import PDFKitNative from 'pdfkit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import Product from '../models/superadmin-models/Product.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -467,7 +468,40 @@ export const generatePurchaseBill = async (bill) => {
 
             currentY += thHeight;
 
-            const items = bill.items || [];
+            // Resolve full product names if productName is truncated or missing
+            const rawItems = bill.items || [];
+            const prodIdsToFetch = rawItems
+                .filter(it => it.productId && (!it.productName || String(it.productName).trim().length <= 5 || !String(it.productName).includes(' ')))
+                .map(it => it.productId);
+            
+            let prodMap = new Map();
+            if (prodIdsToFetch.length > 0) {
+                try {
+                    const fetchedProds = await Product.findAll({
+                        where: { id: prodIdsToFetch },
+                        attributes: ['id', 'name']
+                    });
+                    prodMap = new Map(fetchedProds.map(p => [p.id, p]));
+                } catch (e) {
+                    console.error("Failed to prefetch products in generatePurchaseBill:", e);
+                }
+            }
+
+            const items = rawItems.map(it => {
+                let name = typeof it.productName === 'object'
+                    ? (it.productName?.en || it.productName?.gu || Object.values(it.productName || {})[0])
+                    : String(it.productName || '');
+                
+                const dbProd = prodMap.get(it.productId);
+                if (dbProd && dbProd.name) {
+                    const full = dbProd.name?.en || dbProd.name?.gu || Object.values(dbProd.name || {})[0];
+                    if (full) name = full;
+                }
+                return {
+                    ...it,
+                    productName: name || 'Product'
+                };
+            });
 
             items.forEach((it, idx) => {
                 const hasBatch = Boolean(it.batchNumber);
@@ -686,7 +720,41 @@ export const generateVendorOrderInvoice = async (order) => {
 
             currentY += thHeight;
 
-            const items = order.items || [];
+            // Resolve full product names if productName is truncated or missing
+            const rawItems = order.items || [];
+            const prodIdsToFetch = rawItems
+                .filter(it => it.productId && (!it.productName || String(it.productName).trim().length <= 5 || !String(it.productName).includes(' ')))
+                .map(it => it.productId);
+            
+            let prodMap = new Map();
+            if (prodIdsToFetch.length > 0) {
+                try {
+                    const fetchedProds = await Product.findAll({
+                        where: { id: prodIdsToFetch },
+                        attributes: ['id', 'name']
+                    });
+                    prodMap = new Map(fetchedProds.map(p => [p.id, p]));
+                } catch (e) {
+                    console.error("Failed to prefetch products in generateVendorOrderInvoice:", e);
+                }
+            }
+
+            const items = rawItems.map(it => {
+                let name = typeof it.productName === 'object'
+                    ? (it.productName?.en || it.productName?.gu || Object.values(it.productName || {})[0])
+                    : String(it.productName || '');
+                
+                const dbProd = prodMap.get(it.productId);
+                if (dbProd && dbProd.name) {
+                    const full = dbProd.name?.en || dbProd.name?.gu || Object.values(dbProd.name || {})[0];
+                    if (full) name = full;
+                }
+                return {
+                    ...it,
+                    productName: name || 'Product'
+                };
+            });
+
             let totalOrderValue = 0;
 
             items.forEach((it, idx) => {
