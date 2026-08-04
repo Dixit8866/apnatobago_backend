@@ -23,6 +23,43 @@ async function generateOrderNo() {
     return `VO-${nextNo}`;
 }
 
+// ─── Helper to ensure full product name on existing items ─────────────────────
+export async function ensureItemProductNames(items) {
+    if (!Array.isArray(items) || items.length === 0) return items;
+
+    const productIdsToFetch = items
+        .filter(it => it.productId && (!it.productName || it.productName.trim().length <= 5 || !it.productName.includes(' ')))
+        .map(it => it.productId);
+
+    if (productIdsToFetch.length === 0) return items;
+
+    try {
+        const products = await Product.findAll({
+            where: { id: productIdsToFetch },
+            attributes: ['id', 'name']
+        });
+        const productMap = new Map(products.map(p => [p.id, p]));
+
+        return items.map(it => {
+            const prod = productMap.get(it.productId);
+            let fullName = it.productName;
+            if (prod && prod.name) {
+                const fetchedName = prod.name?.en || prod.name?.gu || Object.values(prod.name || {})[0] || '';
+                if (fetchedName && fetchedName.trim()) {
+                    fullName = fetchedName;
+                }
+            }
+            return {
+                ...it,
+                productName: fullName || it.productName || 'Product'
+            };
+        });
+    } catch (err) {
+        console.error("Error in ensureItemProductNames:", err);
+        return items;
+    }
+}
+
 // ─── Enrich items: attach productName, volume, unitLabel for display ──────────
 async function enrichItems(rawItems) {
     return await Promise.all(rawItems.map(async (item) => {
@@ -31,13 +68,17 @@ async function enrichItems(rawItems) {
             let volume = item.volume || '';
             let unitLabel = item.unitLabel || '';
 
-            // Only enrich if names are missing
-            if (!productName && item.productId) {
+            // Always fetch Product to guarantee full product name
+            if (item.productId) {
                 const prod = await Product.findByPk(item.productId, { attributes: ['id', 'name'] });
-                if (prod) {
-                    productName = prod.name?.en || Object.values(prod.name || {})[0] || '';
+                if (prod && prod.name) {
+                    const fullName = prod.name?.en || prod.name?.gu || Object.values(prod.name || {})[0] || '';
+                    if (fullName && fullName.trim()) {
+                        productName = fullName;
+                    }
                 }
             }
+
             if (!volume && item.variantId) {
                 const variant = await ProductVariant.findByPk(item.variantId, {
                     attributes: ['id', 'volume', 'baseUnitLabel'],
@@ -57,25 +98,24 @@ async function enrichItems(rawItems) {
                 }
             }
 
-            // Final PDF-safe cleaning
-            const cleanForPDF = (text) => {
+            const cleanText = (text) => {
                 if (!text) return '';
-                let s = String(text)
+                return String(text)
                     .replace(/મિલીલીટર/g, 'ml')
                     .replace(/લીટર/g, 'Litre')
                     .replace(/ગ્રામ/g, 'gm')
                     .replace(/કિલોગ્રામ/g, 'kg')
                     .replace(/નંગ/g, 'pcs')
-                    .replace(/કાર્ટૂન/g, 'Cartoon');
-                return s.replace(/[^\x00-\x7F]/g, "").trim();
+                    .replace(/કાર્ટૂન/g, 'Cartoon')
+                    .trim();
             };
 
             return {
                 productId: item.productId,
-                productName: cleanForPDF(productName),
+                productName: cleanText(productName),
                 variantId: item.variantId,
-                volume: cleanForPDF(volume),
-                unitLabel: cleanForPDF(unitLabel),
+                volume: cleanText(volume),
+                unitLabel: cleanText(unitLabel),
                 quotationPrice: item.quotationPrice !== undefined && item.quotationPrice !== null ? Number(item.quotationPrice) : null,
                 qty: Number(item.qty),
             };
