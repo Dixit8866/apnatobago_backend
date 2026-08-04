@@ -54,6 +54,11 @@ const Vendor = sequelize.define(
             allowNull: true,
             defaultValue: [],
         },
+        orderDays: {
+            type: DataTypes.JSONB,
+            allowNull: true,
+            defaultValue: [],
+        },
     },
     {
         timestamps: true,

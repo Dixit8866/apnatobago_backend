@@ -480,6 +480,10 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Alter users fcmtoken type failed:', e.message); }
 
         try {
+            await sequelize.query('ALTER TABLE vendors ADD COLUMN IF NOT EXISTS "orderDays" JSONB DEFAULT \'[]\'::jsonb');
+        } catch (e) { console.log('[Migration Warning] Vendors orderDays column failed:', e.message); }
+
+        try {
             await sequelize.query('ALTER TABLE admins ADD COLUMN IF NOT EXISTS "fcmtoken" TEXT');
         } catch (e) { console.log('[Migration Warning] Add admins fcmtoken column failed:', e.message); }
 

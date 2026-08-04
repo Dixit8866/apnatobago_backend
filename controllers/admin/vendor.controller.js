@@ -7,7 +7,7 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 
 export const createVendor = async (req, res, next) => {
     try {
-        const { name, companyName, email, whatsappNumber, phoneNumber, address, gstNumber, status, productIds } = req.body;
+        const { name, companyName, email, whatsappNumber, phoneNumber, address, gstNumber, status, productIds, orderDays } = req.body;
 
         if (!name || !name.trim()) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Vendor name is required.');
@@ -28,6 +28,7 @@ export const createVendor = async (req, res, next) => {
             gstNumber: gstNumber ? gstNumber.trim() : null,
             status: status || 'Active',
             productIds: Array.isArray(productIds) ? productIds : [],
+            orderDays: Array.isArray(orderDays) ? orderDays : [],
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Vendor created successfully.', vendor);
@@ -105,7 +106,7 @@ export const getVendorById = async (req, res, next) => {
 export const updateVendor = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, companyName, email, whatsappNumber, phoneNumber, address, gstNumber, status, productIds } = req.body;
+        const { name, companyName, email, whatsappNumber, phoneNumber, address, gstNumber, status, productIds, orderDays } = req.body;
 
         const vendor = await Vendor.findByPk(id);
         if (!vendor) {
@@ -122,6 +123,7 @@ export const updateVendor = async (req, res, next) => {
             gstNumber: gstNumber !== undefined ? gstNumber : vendor.gstNumber,
             status: status || vendor.status,
             productIds: Array.isArray(productIds) ? productIds : vendor.productIds,
+            orderDays: Array.isArray(orderDays) ? orderDays : vendor.orderDays,
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Vendor updated successfully.', vendor);
