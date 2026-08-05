@@ -286,6 +286,13 @@ export const generateOrderInvoice = async (order) => {
                 currentTotalY += 11;
             }
 
+            const orderDiscount = parseFloat(order.discount) || 0;
+            if (orderDiscount > 0) {
+                doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('DISCOUNT: ', doc.page.width - 180, currentTotalY);
+                doc.fillColor('#059669').fontSize(8).font('Helvetica-Bold').text(`-₹${orderDiscount.toFixed(2)}`, doc.page.width - 85, currentTotalY - 1, { width: 60, align: 'right' });
+                currentTotalY += 11;
+            }
+
             const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
             if (deliveryCharge > 0) {
                 doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text('DELIVERY CHARGE: ', doc.page.width - 180, currentTotalY);
