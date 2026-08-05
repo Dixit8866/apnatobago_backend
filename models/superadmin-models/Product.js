@@ -87,6 +87,16 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        mainVolumeId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            defaultValue: null,
+        },
+        mainVolumeQty: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: true,
+            defaultValue: 1,
+        },
     },
     {
         timestamps: true,

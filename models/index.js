@@ -131,6 +131,10 @@ Product.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' 
 CompanyCategory.hasMany(Product, { foreignKey: 'companyCategoryId', as: 'products' });
 Product.belongsTo(CompanyCategory, { foreignKey: 'companyCategoryId', as: 'companyCategory' });
 
+// Product -> Main Volume
+Volume.hasMany(Product, { foreignKey: 'mainVolumeId', as: 'mainVolumeProducts' });
+Product.belongsTo(Volume, { foreignKey: 'mainVolumeId', as: 'mainVolume' });
+
 // CompanyCategory -> Main/Sub Category associations
 MainCategory.hasMany(CompanyCategory, { foreignKey: 'mainCategoryId', as: 'companyCategories' });
 CompanyCategory.belongsTo(MainCategory, { foreignKey: 'mainCategoryId', as: 'mainCategory' });
@@ -509,6 +513,12 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE order_block_settings ADD COLUMN IF NOT EXISTS "title" VARCHAR(255)');
             await sequelize.query('ALTER TABLE order_block_settings ADD COLUMN IF NOT EXISTS "description" TEXT');
         } catch (e) { console.log('[Migration Warning] Order block settings columns migration failed:', e.message); }
+
+        try {
+            // Add mainVolumeId and mainVolumeQty to products table
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "mainVolumeId" UUID REFERENCES volumes(id) ON DELETE SET NULL ON UPDATE CASCADE');
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "mainVolumeQty" NUMERIC(10,2) DEFAULT 1');
+        } catch (e) { console.log('[Migration Warning] Products mainVolume columns migration failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');
 

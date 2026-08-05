@@ -155,6 +155,8 @@ export const createProduct = async (req, res, next) => {
             keywords,
             boxNumber,
             serialNumber,
+            mainVolumeId,
+            mainVolumeQty,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -223,6 +225,8 @@ export const createProduct = async (req, res, next) => {
                 keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : [],
                 boxNumber: boxNumber || null,
                 serialNumber: serialNumber || null,
+                mainVolumeId: mainVolumeId || null,
+                mainVolumeQty: mainVolumeQty ? Number(mainVolumeQty) : 1,
             },
             { transaction: t }
         );
@@ -497,6 +501,7 @@ export const getProducts = async (req, res, next) => {
             { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title'] },
             { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
             { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
+            { model: Volume, as: 'mainVolume', attributes: ['id', 'name'] },
             {
                 model: ProductVariant,
                 as: 'variants',
@@ -581,6 +586,7 @@ export const getProductById = async (req, res, next) => {
                 { model: MainCategory, as: 'mainCategory', attributes: ['id', 'title', 'status'] },
                 { model: SubCategory, as: 'subCategory', attributes: ['id', 'mainCategoryId', 'title', 'status'] },
                 { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title', 'status'] },
+                { model: Volume, as: 'mainVolume', attributes: ['id', 'name', 'status'] },
                 { model: Product, as: 'comboProduct1', attributes: ['id', 'name', 'thumbnail'] },
                 { model: Product, as: 'comboProduct2', attributes: ['id', 'name', 'thumbnail'] },
                 {
@@ -634,6 +640,8 @@ export const updateProduct = async (req, res, next) => {
             keywords,
             boxNumber,
             serialNumber,
+            mainVolumeId,
+            mainVolumeQty,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -763,6 +771,8 @@ export const updateProduct = async (req, res, next) => {
                 keywords: Array.isArray(keywords) ? keywords.map(k => String(k).trim()).filter(Boolean) : (product.keywords || []),
                 boxNumber: boxNumber !== undefined ? boxNumber : product.boxNumber,
                 serialNumber: serialNumber !== undefined ? serialNumber : product.serialNumber,
+                mainVolumeId: mainVolumeId !== undefined ? (mainVolumeId || null) : product.mainVolumeId,
+                mainVolumeQty: mainVolumeQty !== undefined ? (mainVolumeQty ? Number(mainVolumeQty) : 1) : product.mainVolumeQty,
             },
             { transaction: t }
         );
