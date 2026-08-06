@@ -159,6 +159,8 @@ export const createProduct = async (req, res, next) => {
             mainVolumeId,
             mainVolumeQty,
             internalNote,
+            couponPoints,
+            couponPrice,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -231,6 +233,8 @@ export const createProduct = async (req, res, next) => {
                 mainVolumeId: mainVolumeId || null,
                 mainVolumeQty: mainVolumeQty ? Number(mainVolumeQty) : 1,
                 internalNote: internalNote || null,
+                couponPoints: couponPoints !== undefined && couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null,
+                couponPrice: couponPrice !== undefined && couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null,
             },
             { transaction: t }
         );
@@ -648,6 +652,8 @@ export const updateProduct = async (req, res, next) => {
             mainVolumeId,
             mainVolumeQty,
             internalNote,
+            couponPoints,
+            couponPrice,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -781,6 +787,8 @@ export const updateProduct = async (req, res, next) => {
                 mainVolumeId: mainVolumeId !== undefined ? (mainVolumeId || null) : product.mainVolumeId,
                 mainVolumeQty: mainVolumeQty !== undefined ? (mainVolumeQty ? Number(mainVolumeQty) : 1) : product.mainVolumeQty,
                 internalNote: internalNote !== undefined ? (internalNote || null) : product.internalNote,
+                couponPoints: couponPoints !== undefined ? (couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null) : product.couponPoints,
+                couponPrice: couponPrice !== undefined ? (couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null) : product.couponPrice,
             },
             { transaction: t }
         );

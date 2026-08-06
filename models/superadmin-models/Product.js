@@ -107,6 +107,16 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        couponPoints: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            defaultValue: null,
+        },
+        couponPrice: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,
