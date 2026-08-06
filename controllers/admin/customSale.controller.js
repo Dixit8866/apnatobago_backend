@@ -117,7 +117,7 @@ export const createCustomSale = async (req, res) => {
             // Check Min Qty and Max Qty limits
             const minQ = (variant.minQty !== null && variant.minQty !== undefined && variant.minQty !== '') ? Number(variant.minQty) : null;
             const maxQ = (variant.maxQty !== null && variant.maxQty !== undefined && variant.maxQty !== '') ? Number(variant.maxQty) : null;
-            const numQty = Number(quantity);
+            const numQty = parseFloat(quantity || 1);
 
             const prodName = typeof variant.product?.name === 'object'
                 ? (variant.product.name.gu || variant.product.name.en || Object.values(variant.product.name)[0])
@@ -165,18 +165,28 @@ export const createCustomSale = async (req, res) => {
             });
 
             let applicablePricing = null;
+
             if (userAppLevel) {
                 applicablePricing = pricings.find(p =>
                     p.customLevelId === userAppLevel &&
-                    parseFloat(quantity) >= Number(p.minQty) &&
-                    (p.maxQty === null || parseFloat(quantity) <= Number(p.maxQty))
+                    p.minQty !== null && p.minQty !== undefined &&
+                    numQty >= Number(p.minQty) &&
+                    (p.maxQty === null || p.maxQty === undefined || numQty <= Number(p.maxQty))
                 );
                 if (!applicablePricing) {
                     applicablePricing = pricings.find(p => p.customLevelId === userAppLevel);
                 }
             }
+
             if (!applicablePricing && pricings.length > 0) {
-                applicablePricing = pricings[0];
+                applicablePricing = pricings.find(p =>
+                    p.minQty !== null && p.minQty !== undefined &&
+                    numQty >= Number(p.minQty) &&
+                    (p.maxQty === null || p.maxQty === undefined || numQty <= Number(p.maxQty))
+                );
+                if (!applicablePricing) {
+                    applicablePricing = pricings[0];
+                }
             }
 
             let rawPrice = 0;

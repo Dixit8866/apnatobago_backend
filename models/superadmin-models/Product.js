@@ -39,6 +39,11 @@ const Product = sequelize.define(
             allowNull: false,
             defaultValue: true,
         },
+        hasCoupon: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
         productDescription: {
             type: DataTypes.JSONB,
             allowNull: true,
@@ -96,6 +101,11 @@ const Product = sequelize.define(
             type: DataTypes.DECIMAL(10, 2),
             allowNull: true,
             defaultValue: 1,
+        },
+        internalNote: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+            defaultValue: null,
         },
     },
     {

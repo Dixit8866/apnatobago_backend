@@ -149,6 +149,7 @@ export const createProduct = async (req, res, next) => {
             companyCategoryId,
             productDescription,
             isTobaccoProduct,
+            hasCoupon,
             isCombo,
             comboProduct1Id,
             comboProduct2Id,
@@ -157,6 +158,7 @@ export const createProduct = async (req, res, next) => {
             serialNumber,
             mainVolumeId,
             mainVolumeQty,
+            internalNote,
         } = req.body;
 
         if (!hasAnyLangValue(name)) {
@@ -216,6 +218,7 @@ export const createProduct = async (req, res, next) => {
                 subCategoryId,
                 companyCategoryId,
                 isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : true,
+                hasCoupon: hasCoupon !== undefined ? hasCoupon : false,
                 productDescription: normalizeProductDescription(productDescription),
                 status: status || 'Active',
                 isCombo: isCombo !== undefined ? isCombo : false,
@@ -227,6 +230,7 @@ export const createProduct = async (req, res, next) => {
                 serialNumber: serialNumber || null,
                 mainVolumeId: mainVolumeId || null,
                 mainVolumeQty: mainVolumeQty ? Number(mainVolumeQty) : 1,
+                internalNote: internalNote || null,
             },
             { transaction: t }
         );
@@ -634,6 +638,7 @@ export const updateProduct = async (req, res, next) => {
             companyCategoryId,
             productDescription,
             isTobaccoProduct,
+            hasCoupon,
             isCombo,
             comboProduct1Id,
             comboProduct2Id,
@@ -642,6 +647,7 @@ export const updateProduct = async (req, res, next) => {
             serialNumber,
             mainVolumeId,
             mainVolumeQty,
+            internalNote,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -763,6 +769,7 @@ export const updateProduct = async (req, res, next) => {
                 subCategoryId,
                 companyCategoryId,
                 isTobaccoProduct: isTobaccoProduct !== undefined ? isTobaccoProduct : product.isTobaccoProduct,
+                hasCoupon: hasCoupon !== undefined ? hasCoupon : product.hasCoupon,
                 productDescription: normalizeProductDescription(productDescription),
                 status: status || product.status,
                 isCombo: isCombo !== undefined ? isCombo : product.isCombo,
@@ -773,6 +780,7 @@ export const updateProduct = async (req, res, next) => {
                 serialNumber: serialNumber !== undefined ? serialNumber : product.serialNumber,
                 mainVolumeId: mainVolumeId !== undefined ? (mainVolumeId || null) : product.mainVolumeId,
                 mainVolumeQty: mainVolumeQty !== undefined ? (mainVolumeQty ? Number(mainVolumeQty) : 1) : product.mainVolumeQty,
+                internalNote: internalNote !== undefined ? (internalNote || null) : product.internalNote,
             },
             { transaction: t }
         );
