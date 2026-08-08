@@ -1,3 +1,5 @@
+// npm run transfer-50percent:prod
+
 import dotenv from 'dotenv';
 dotenv.config();
 
