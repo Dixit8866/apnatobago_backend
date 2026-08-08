@@ -16,7 +16,9 @@
     "generate:secret": "node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\"",
     "wipe:non-admin": "node scripts/wipe-non-admin.js",
     "assign-godown": "node scripts/assign-godown-all-parties.js",
-    "assign-godown:prod": "NODE_ENV=production node scripts/assign-godown-all-parties.js"
+    "assign-godown:prod": "NODE_ENV=production node scripts/assign-godown-all-parties.js",
+    "transfer-50percent": "node scripts/transfer-50percent-stock.js",
+    "transfer-50percent:prod": "NODE_ENV=production node scripts/transfer-50percent-stock.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1022.0",
