@@ -16,8 +16,8 @@ import {
 } from '../models/index.js';
 
 // Default Target Godown UUIDs provided by user
-const DEFAULT_MASTER_GODOWN_ID = 'f0462476-ff99-4899-93b0-29b1a5c2b012';
-const DEFAULT_VARACHHA_GODOWN_ID = 'f58d9f15-67f2-4f18-b080-f3c032ccebf8';
+const DEFAULT_MASTER_GODOWN_ID = '48180959-1987-473b-b263-19c5b221f198';
+const DEFAULT_VARACHHA_GODOWN_ID = 'a453cdca-2ccf-41b6-8d8a-8fa8741778c8';
 
 async function transferStock() {
     // Parse CLI options / environment variables
