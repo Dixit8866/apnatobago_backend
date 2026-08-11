@@ -481,9 +481,14 @@ export const getGodownStock = async (req, res, next) => {
             // Prioritize last purchase price from godown stock if available
             let itemPurchasePrice = Number(v.purchasePrice || 0);
             if (sData.lastPurchasePricePerBaseUnit > 0) {
-                itemPurchasePrice = sData.lastPurchasePricePerBaseUnit * factor;
+                itemPurchasePrice = Math.round(sData.lastPurchasePricePerBaseUnit * factor * 100) / 100;
             } else if (sData.avgPurchasePricePerBaseUnit > 0) {
-                itemPurchasePrice = sData.avgPurchasePricePerBaseUnit * factor;
+                itemPurchasePrice = Math.round(sData.avgPurchasePricePerBaseUnit * factor * 100) / 100;
+            }
+
+            // Clean up floating point precision artifacts (e.g., 1999.92 -> 2000.00)
+            if (Math.abs(Math.round(itemPurchasePrice) - itemPurchasePrice) < 0.1) {
+                itemPurchasePrice = Math.round(itemPurchasePrice);
             }
 
             options.push({
