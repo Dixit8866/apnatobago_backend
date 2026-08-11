@@ -533,6 +533,7 @@ export const getProducts = async (req, res, next) => {
                     {
                         model: ProductPricing,
                         as: 'pricings',
+                        where: { godownId: null },
                         required: false,
                         include: [
                             { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'] }
@@ -604,6 +605,8 @@ export const getProductById = async (req, res, next) => {
                         {
                             model: ProductPricing,
                             as: 'pricings',
+                            where: { godownId: null },
+                            required: false,
                             include: [
                                 { model: CustomLevel, as: 'customLevel', attributes: ['id', 'name', 'status'] },
                             ],
