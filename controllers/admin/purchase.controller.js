@@ -140,6 +140,15 @@ export const convertToBill = async (req, res, next) => {
                 }
             }
 
+            const existingStockBaseUnits = await InventoryStock.sum('totalBaseUnits', {
+                where: {
+                    productId: item.productId,
+                    variantId: item.variantId,
+                    totalBaseUnits: { [Op.gt]: 0 }
+                },
+                transaction: t
+            }) || 0;
+
             const isLockEnabled = !!item.oldStockLockToggle;
             let oldStockLimitQty = isLockEnabled ? Number(item.oldStockLimitQty || 0) : 0;
 
