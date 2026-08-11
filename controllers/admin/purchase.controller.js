@@ -10,7 +10,10 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 export const convertToBill = async (req, res, next) => {
     const t = await sequelize.transaction();
     try {
-        const { vendorOrderId, receivedDate, receivedBy, godownId, items, note } = req.body;
+        const { vendorOrderId, godownId, items, note } = req.body;
+
+        const receivedDate = req.body.receivedDate || req.body.date || new Date();
+        const receivedBy = req.body.receivedBy || req.body.receivedById || req.admin?.id || null;
 
         const order = await VendorOrder.findByPk(vendorOrderId, { transaction: t });
         if (!order) {
@@ -31,7 +34,7 @@ export const convertToBill = async (req, res, next) => {
         const billItems = validItems.length > 0 ? validItems : items;
 
         // 1. Create Purchase Bill
-        const billNo = `PB-${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
+        const billNo = req.body.billNo || `PB-${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
         const totalAmount = billItems.reduce((sum, item) => {
             const q = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
             return sum + (Number(item.purchasePrice || 0) * q);
@@ -42,11 +45,11 @@ export const convertToBill = async (req, res, next) => {
             vendorOrderId,
             vendorId: order.vendorId,
             receivedDate,
-            receivedBy,
+            receivedBy: receivedBy || order.createdBy || req.admin?.id,
             godownId,
             items: billItems,
             totalAmount,
-            note
+            note: note || req.body.notes
         }, { transaction: t });
 
         // 2. Update Vendor Order and sync totalAmount
