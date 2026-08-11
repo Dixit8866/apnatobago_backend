@@ -380,12 +380,18 @@ export const addToCart = async (req, res) => {
         // last aya change karo cho je koi biji product ma aa issues ave to 
         const deductionRequired = totalProposedQty * bUPP;
 
-        // Check stock first — sum across user's assigned godown
+        // Check stock first — check user's assigned godown first, then fallback to total stock across all godowns
         let availableStock = await getAvailableStock(productId, req.user?.godownId);
+        if (availableStock < deductionRequired) {
+            const globalStock = await getAvailableStock(productId, null);
+            if (globalStock > availableStock) {
+                availableStock = globalStock;
+            }
+        }
 
-        // Check Old Stock Lock Toggle restriction
-        if (variant && variant.oldStockLockToggle) {
-            const lockedBaseUnits = Number(variant.oldStockLimitQty || 0) * bUPP;
+        // Check Old Stock Lock Toggle restriction (only apply if limit > 0)
+        if (variant && variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
+            const lockedBaseUnits = Number(variant.oldStockLimitQty) * bUPP;
             availableStock = Math.min(availableStock, lockedBaseUnits);
         }
 

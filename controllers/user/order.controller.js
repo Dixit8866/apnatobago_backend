@@ -285,7 +285,7 @@ export const createOrder = async (req, res) => {
                 // NORMAL PRODUCT STOCK CHECK
                 let availableStock = 0;
                 if (targetGodownId) {
-                    const totalStock = await InventoryStock.sum('totalBaseUnits', {
+                    const godownStock = await InventoryStock.sum('totalBaseUnits', {
                         where: {
                             productId: item.productId,
                             godownId: targetGodownId,
@@ -293,11 +293,26 @@ export const createOrder = async (req, res) => {
                         },
                         transaction: t
                     });
-                    availableStock = parseFloat(totalStock) || 0;
+                    availableStock = parseFloat(godownStock) || 0;
                 }
 
-                if (variant.oldStockLockToggle) {
-                    const lockedBaseUnits = Number(variant.oldStockLimitQty || 0) * bUPP;
+                // Fallback: If target godown stock is insufficient, check total stock across ALL godowns
+                if (availableStock < deductionRequired) {
+                    const allGodownsStock = await InventoryStock.sum('totalBaseUnits', {
+                        where: {
+                            productId: item.productId,
+                            totalBaseUnits: { [Op.gt]: 0 }
+                        },
+                        transaction: t
+                    });
+                    const globalStock = parseFloat(allGodownsStock) || 0;
+                    if (globalStock > availableStock) {
+                        availableStock = globalStock;
+                    }
+                }
+
+                if (variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
+                    const lockedBaseUnits = Number(variant.oldStockLimitQty) * bUPP;
                     availableStock = Math.min(availableStock, lockedBaseUnits);
                 }
 
@@ -742,16 +757,19 @@ export const createOrder = async (req, res) => {
                         ? Number(item.quantity)
                         : Number(item.quantity) * (variant.baseUnitsPerPack || 1));
 
-                    // Find available stock batches for this variant in the target godown (FIFO)
-                    const stocks = await InventoryStock.findAll({
-                        where: {
-                            productId: item.productId,
-                            godownId: targetGodownId,
-                            totalBaseUnits: { [Op.gt]: 0 }
-                        },
-                        order: [['createdAt', 'ASC']],
-                        transaction: t
-                    });
+                    // First try target godown, then fallback to any godown with stock (FIFO)
+                    let stocks = [];
+                    if (targetGodownId) {
+                        stocks = await InventoryStock.findAll({
+                            where: {
+                                productId: item.productId,
+                                godownId: targetGodownId,
+                                totalBaseUnits: { [Op.gt]: 0 }
+                            },
+                            order: [['createdAt', 'ASC']],
+                            transaction: t
+                        });
+                    }
 
                     let remainingToDeduct = deductionRequired;
                     for (const stock of stocks) {
@@ -767,7 +785,7 @@ export const createOrder = async (req, res) => {
                             stockId: stock.id,
                             productId: item.productId,
                             variantId: item.variantId,
-                            godownId: targetGodownId,
+                            godownId: stock.godownId,
                             type: 'SALE',
                             primaryUnitId: stock.primaryUnitId,
                             secondaryUnitId: stock.secondaryUnitId,
@@ -779,6 +797,44 @@ export const createOrder = async (req, res) => {
                         }, { transaction: t });
 
                         remainingToDeduct -= deductFromThis;
+                    }
+
+                    // Fallback to any godown if target godown didn't have enough base units
+                    if (remainingToDeduct > 0) {
+                        const fallbackStocks = await InventoryStock.findAll({
+                            where: {
+                                productId: item.productId,
+                                totalBaseUnits: { [Op.gt]: 0 }
+                            },
+                            order: [['createdAt', 'ASC']],
+                            transaction: t
+                        });
+
+                        for (const stock of fallbackStocks) {
+                            if (remainingToDeduct <= 0) break;
+
+                            const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                            const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                            await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                            await InventoryTransaction.create({
+                                stockId: stock.id,
+                                productId: item.productId,
+                                variantId: item.variantId,
+                                godownId: stock.godownId,
+                                type: 'SALE',
+                                primaryUnitId: stock.primaryUnitId,
+                                secondaryUnitId: stock.secondaryUnitId,
+                                secondaryPerPrimary: stock.secondaryPerPrimary,
+                                totalQtyBaseUnits: deductFromThis,
+                                balanceAfterBaseUnits: newTotalBaseUnits,
+                                note: `Sales Order #${targetOrder.orderId}`,
+                                createdBy: req.user?.fullname || 'Customer'
+                            }, { transaction: t });
+
+                            remainingToDeduct -= deductFromThis;
+                        }
                     }
 
                     if (remainingToDeduct > 0) {
