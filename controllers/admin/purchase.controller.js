@@ -55,101 +55,89 @@ export const convertToBill = async (req, res, next) => {
         // 2. Update Vendor Order and sync totalAmount
         await order.update({ isConverted: true, status: 'Received', totalAmount }, { transaction: t });
 
-        // 3. Update Inventory
-        for (const item of billItems) {
+        // 3. Update Inventory & Pricing for all volume variants
+        for (const item of items) {
             const variant = await ProductVariant.findByPk(item.variantId, {
                 include: [{ model: Product, as: 'product' }],
                 transaction: t
             });
             if (!variant) continue;
 
-            // Validation: Ensure same batch number isn't used for same product with different details
-            if (item.batchNumber) {
-                const existingBatch = await InventoryStock.findOne({
+            const baseUnitsMultiplier = Number(variant.baseUnitsPerPack || 1);
+            const receivedQty = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
+            const addedBaseUnits = receivedQty * baseUnitsMultiplier;
+            const purchasePricePerBaseUnit = Number(item.purchasePrice || 0) / baseUnitsMultiplier;
+
+            const primaryUnitId = variant.baseUnitLabel || variant.volumeId;
+            const secondaryUnitId = variant.innerUnitLabel || variant.volumeId;
+
+            let stock = null;
+            if (addedBaseUnits > 0) {
+                // Validation: Ensure same batch number isn't used for same product with different details
+                if (item.batchNumber) {
+                    const existingBatch = await InventoryStock.findOne({
+                        where: {
+                            productId: item.productId,
+                            batchNumber: item.batchNumber,
+                            [Op.or]: [
+                                { expiryDate: { [Op.ne]: item.expiryDate || null } },
+                                { variantId: { [Op.ne]: item.variantId } }
+                            ]
+                        },
+                        transaction: t
+                    });
+
+                    if (existingBatch) {
+                        await t.rollback();
+                        return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Batch number "${item.batchNumber}" already exists for this product with different variant or expiry date.`);
+                    }
+                }
+
+                // Find or create stock entry for this variant in this godown + expiryDate + batchNumber
+                stock = await InventoryStock.findOne({
                     where: {
                         productId: item.productId,
-                        batchNumber: item.batchNumber,
-                        [Op.or]: [
-                            { expiryDate: { [Op.ne]: item.expiryDate || null } },
-                            { variantId: { [Op.ne]: item.variantId } }
-                        ]
+                        variantId: item.variantId,
+                        godownId,
+                        expiryDate: item.expiryDate || null,
+                        batchNumber: item.batchNumber || null
                     },
                     transaction: t
                 });
 
-                if (existingBatch) {
-                    await t.rollback();
-                    return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Batch number "${item.batchNumber}" already exists for this product with different variant or expiry date.`);
+                if (!stock) {
+                    stock = await InventoryStock.create({
+                        productId: item.productId,
+                        variantId: item.variantId,
+                        godownId,
+                        primaryUnitId,
+                        secondaryUnitId,
+                        secondaryPerPrimary: baseUnitsMultiplier,
+                        totalBaseUnits: addedBaseUnits,
+                        avgPurchasePricePerBaseUnit: purchasePricePerBaseUnit,
+                        lastPurchasePricePerBaseUnit: purchasePricePerBaseUnit,
+                        expiryDate: item.expiryDate || null,
+                        batchNumber: item.batchNumber || null
+                    }, { transaction: t });
+                } else {
+                    const currentTotalUnits = Number(stock.totalBaseUnits || 0);
+                    const currentAvgPrice = Number(stock.avgPurchasePricePerBaseUnit || 0);
+                    const newTotalUnits = currentTotalUnits + addedBaseUnits;
+
+                    // Calculate new average price
+                    const newAvgPrice = newTotalUnits > 0
+                        ? ((currentAvgPrice * currentTotalUnits) + (purchasePricePerBaseUnit * addedBaseUnits)) / newTotalUnits
+                        : purchasePricePerBaseUnit;
+
+                    await stock.update({
+                        primaryUnitId,
+                        secondaryUnitId,
+                        secondaryPerPrimary: baseUnitsMultiplier,
+                        totalBaseUnits: newTotalUnits,
+                        avgPurchasePricePerBaseUnit: newAvgPrice,
+                        lastPurchasePricePerBaseUnit: purchasePricePerBaseUnit
+                    }, { transaction: t });
                 }
-            }
-
-            // Find or create stock entry for this variant in this godown + expiryDate + batchNumber (Batch tracking)
-            let stock = await InventoryStock.findOne({
-                where: {
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    godownId,
-                    expiryDate: item.expiryDate || null,
-                    batchNumber: item.batchNumber || null
-                },
-                transaction: t
-            });
-
-            // Fix: Use baseUnitsPerPack (e.g. 24) to convert outer units (Cartons) to base units (Pcs)
-            const baseUnitsMultiplier = Number(variant.baseUnitsPerPack || 1);
-
-            const receivedQty = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
-            const addedBaseUnits = receivedQty * baseUnitsMultiplier;
-            const purchasePricePerBaseUnit = Number(item.purchasePrice) / baseUnitsMultiplier;
-
-            // Fix: Use baseUnitLabel (Outer, e.g. Dando) as Primary
-            // and innerUnitLabel (Inner, e.g. Box) as Secondary
-            const primaryUnitId = variant.baseUnitLabel || variant.volumeId;
-            const secondaryUnitId = variant.innerUnitLabel || variant.volumeId;
-
-            // Fetch existing stock for this variant BEFORE adding new purchase bill stock
-            const existingStockBaseUnits = await InventoryStock.sum('totalBaseUnits', {
-                where: {
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    totalBaseUnits: { [Op.gt]: 0 }
-                },
-                transaction: t
-            }) || 0;
-
-            if (!stock) {
-                stock = await InventoryStock.create({
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    godownId,
-                    primaryUnitId,
-                    secondaryUnitId,
-                    secondaryPerPrimary: baseUnitsMultiplier,
-                    totalBaseUnits: addedBaseUnits,
-                    avgPurchasePricePerBaseUnit: purchasePricePerBaseUnit,
-                    lastPurchasePricePerBaseUnit: purchasePricePerBaseUnit,
-                    expiryDate: item.expiryDate || null,
-                    batchNumber: item.batchNumber || null
-                }, { transaction: t });
-            } else {
-                const currentTotalUnits = Number(stock.totalBaseUnits || 0);
-                const currentAvgPrice = Number(stock.avgPurchasePricePerBaseUnit || 0);
-                const newTotalUnits = currentTotalUnits + addedBaseUnits;
-
-                // Calculate new average price
-                const newAvgPrice = newTotalUnits > 0
-                    ? ((currentAvgPrice * currentTotalUnits) + (purchasePricePerBaseUnit * addedBaseUnits)) / newTotalUnits
-                    : purchasePricePerBaseUnit;
-
-                // Update stock units and factor as well to ensure latest variant config is used
-                await stock.update({
-                    primaryUnitId,
-                    secondaryUnitId,
-                    secondaryPerPrimary: baseUnitsMultiplier,
-                    totalBaseUnits: newTotalUnits,
-                    avgPurchasePricePerBaseUnit: newAvgPrice,
-                    lastPurchasePricePerBaseUnit: purchasePricePerBaseUnit
-                }, { transaction: t });
             }
 
             const isLockEnabled = !!item.oldStockLockToggle;
@@ -278,25 +266,27 @@ export const convertToBill = async (req, res, next) => {
                 }
             }
 
-            // Create Inventory Transaction
-            await InventoryTransaction.create({
-                stockId: stock.id,
-                productId: item.productId,
-                variantId: item.variantId,
-                godownId,
-                type: 'PURCHASE',
-                primaryUnitId,
-                secondaryUnitId,
-                secondaryPerPrimary: baseUnitsMultiplier,
-                qtyPrimary: receivedQty, // E.g. 20 dando
-                qtySecondary: 0,
-                totalQtyBaseUnits: addedBaseUnits, // E.g. 400 box
-                purchasePricePerBaseUnit: purchasePricePerBaseUnit,
-                avgPriceAfterTxn: stock.avgPurchasePricePerBaseUnit,
-                balanceAfterBaseUnits: stock.totalBaseUnits,
-                note: note || `Purchase Bill ${billNo}`,
-                createdBy: req.user?.name || 'Admin'
-            }, { transaction: t });
+            // Create Inventory Transaction if stock was received
+            if (stock && addedBaseUnits > 0) {
+                await InventoryTransaction.create({
+                    stockId: stock.id,
+                    productId: item.productId,
+                    variantId: item.variantId,
+                    godownId,
+                    type: 'PURCHASE',
+                    primaryUnitId,
+                    secondaryUnitId,
+                    secondaryPerPrimary: baseUnitsMultiplier,
+                    qtyPrimary: receivedQty, // E.g. 20 dando
+                    qtySecondary: 0,
+                    totalQtyBaseUnits: addedBaseUnits, // E.g. 400 box
+                    purchasePricePerBaseUnit: purchasePricePerBaseUnit,
+                    avgPriceAfterTxn: stock.avgPurchasePricePerBaseUnit,
+                    balanceAfterBaseUnits: stock.totalBaseUnits,
+                    note: note || `Purchase Bill ${billNo}`,
+                    createdBy: req.user?.name || 'Admin'
+                }, { transaction: t });
+            }
         }
 
         await t.commit();
