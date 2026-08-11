@@ -143,7 +143,7 @@ export const convertToBill = async (req, res, next) => {
             const oldStockLimitQty = isLockEnabled ? Number(item.oldStockLimitQty || 0) : 0;
             const newPricingsPayload = (isLockEnabled && item.pricings && Array.isArray(item.pricings)) ? item.pricings : null;
 
-            if (isLockEnabled) {
+            if (isLockEnabled && oldStockLimitQty > 0) {
                 await ProductVariant.update(
                     {
                         purchasePrice: item.purchasePrice,
@@ -153,7 +153,7 @@ export const convertToBill = async (req, res, next) => {
                     },
                     { where: { id: item.variantId }, transaction: t }
                 );
-                // When Old Stock Lock Toggle is enabled, keep existing active ProductPricing intact
+                // When Old Stock Lock Toggle is enabled with old stock > 0, keep existing active ProductPricing intact
                 // for the remaining old stock. New pricing will be automatically applied when old stock limit hits 0.
             } else {
                 await ProductVariant.update(
