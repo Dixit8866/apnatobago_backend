@@ -104,6 +104,16 @@ export const convertToBill = async (req, res, next) => {
             const primaryUnitId = variant.baseUnitLabel || variant.volumeId;
             const secondaryUnitId = variant.innerUnitLabel || variant.volumeId;
 
+            // Fetch existing stock for this variant BEFORE adding new purchase bill stock
+            const existingStockBaseUnits = await InventoryStock.sum('totalBaseUnits', {
+                where: {
+                    productId: item.productId,
+                    variantId: item.variantId,
+                    totalBaseUnits: { [Op.gt]: 0 }
+                },
+                transaction: t
+            }) || 0;
+
             if (!stock) {
                 stock = await InventoryStock.create({
                     productId: item.productId,
@@ -140,7 +150,14 @@ export const convertToBill = async (req, res, next) => {
             }
 
             const isLockEnabled = !!item.oldStockLockToggle;
-            const oldStockLimitQty = isLockEnabled ? Number(item.oldStockLimitQty || 0) : 0;
+            let oldStockLimitQty = isLockEnabled ? Number(item.oldStockLimitQty || 0) : 0;
+
+            // If lock toggle is ON and limit is 0, auto-default to existing physical inventory stock (in Packs/Cartons)
+            if (isLockEnabled && oldStockLimitQty <= 0 && existingStockBaseUnits > 0) {
+                const bUPP = Number(variant.baseUnitsPerPack || 1);
+                oldStockLimitQty = bUPP > 0 ? Math.floor(existingStockBaseUnits / bUPP) : existingStockBaseUnits;
+            }
+
             const newPricingsPayload = (isLockEnabled && item.pricings && Array.isArray(item.pricings)) ? item.pricings : null;
 
             if (isLockEnabled && oldStockLimitQty > 0) {
