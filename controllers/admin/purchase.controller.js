@@ -22,9 +22,20 @@ export const convertToBill = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'This order has already been converted to a bill');
         }
 
+        // Filter items to ensure only items with qty > 0 are saved in bill & inventory
+        const validItems = (items || []).filter(item => {
+            const q = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
+            return q > 0;
+        });
+
+        const billItems = validItems.length > 0 ? validItems : items;
+
         // 1. Create Purchase Bill
         const billNo = `PB-${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
-        const totalAmount = items.reduce((sum, item) => sum + (Number(item.purchasePrice) * Number(item.qty)), 0);
+        const totalAmount = billItems.reduce((sum, item) => {
+            const q = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
+            return sum + (Number(item.purchasePrice || 0) * q);
+        }, 0);
 
         const bill = await PurchaseBill.create({
             billNo,
@@ -33,16 +44,16 @@ export const convertToBill = async (req, res, next) => {
             receivedDate,
             receivedBy,
             godownId,
-            items,
+            items: billItems,
             totalAmount,
             note
         }, { transaction: t });
 
-        // 2. Update Vendor Order
-        await order.update({ isConverted: true, status: 'Received' }, { transaction: t });
+        // 2. Update Vendor Order and sync totalAmount
+        await order.update({ isConverted: true, status: 'Received', totalAmount }, { transaction: t });
 
         // 3. Update Inventory
-        for (const item of items) {
+        for (const item of billItems) {
             const variant = await ProductVariant.findByPk(item.variantId, {
                 include: [{ model: Product, as: 'product' }],
                 transaction: t
