@@ -10,6 +10,7 @@ import {
     Godown,
     Product,
     ProductVariant,
+    ProductPricing,
     Volume
 } from '../../models/index.js';
 
@@ -341,6 +342,51 @@ export const updateTransferStatus = async (req, res, next) => {
 
                 const newDestQty = Number(destStock.totalBaseUnits) + qtyInBaseUnits;
                 await destStock.update({ totalBaseUnits: newDestQty }, { transaction: t });
+
+                // Sync level pricing from source godown (or global) to destination godown
+                try {
+                    const sourcePricings = await ProductPricing.findAll({
+                        where: {
+                            variantId: item.variantId,
+                            [Op.or]: [
+                                { godownId: transfer.fromGodownId },
+                                { godownId: null }
+                            ]
+                        },
+                        transaction: t
+                    });
+
+                    if (sourcePricings && sourcePricings.length > 0) {
+                        const pricingMap = new Map();
+                        for (const p of sourcePricings) {
+                            if (!pricingMap.has(p.customLevelId) || p.godownId) {
+                                pricingMap.set(p.customLevelId, p);
+                            }
+                        }
+
+                        await ProductPricing.destroy({
+                            where: { variantId: item.variantId, godownId: transfer.toGodownId },
+                            transaction: t
+                        });
+
+                        for (const p of pricingMap.values()) {
+                            await ProductPricing.create({
+                                variantId: item.variantId,
+                                godownId: transfer.toGodownId,
+                                customLevelId: p.customLevelId,
+                                quantityRange: p.quantityRange,
+                                minQty: p.minQty,
+                                maxQty: p.maxQty,
+                                purchasePrice: p.purchasePrice,
+                                price: p.price,
+                                mrp: p.mrp,
+                                status: 'Active'
+                            }, { transaction: t });
+                        }
+                    }
+                } catch (pErr) {
+                    console.error("Error syncing destination godown pricing during transfer:", pErr);
+                }
 
                 // Log InventoryTransaction for Incoming
                 await InventoryTransaction.create({
