@@ -198,16 +198,21 @@ export const createTransfer = async (req, res, next) => {
             const factor = Number(variant?.baseUnitsPerPack || 1);
             const qtyInBaseUnits = Number(qty) * factor;
 
-            // Check if there is a valid stock record for this item in the source godown
-            const sourceStock = await InventoryStock.findOne({
+            // Sum total available stock in source godown across all stock records
+            const totalStockBaseUnits = parseFloat(await InventoryStock.sum('totalBaseUnits', {
                 where: { productId, variantId, godownId: fromGodownId },
                 transaction: t
-            });
+            })) || 0;
 
-            if (!sourceStock || Number(sourceStock.totalBaseUnits || 0) < qtyInBaseUnits) {
+            const maxAvailablePacks = totalStockBaseUnits / factor;
+
+            console.log(`[CREATE_TRANSFER_CHECK] Product: ${productId}, Variant: ${variantId}, FromGodown: ${fromGodownId}, ToGodown: ${toGodownId}`);
+            console.log(`  -> Requested Qty: ${qty} packs, factor (bUPP): ${factor}, qtyInBaseUnits: ${qtyInBaseUnits}`);
+            console.log(`  -> Total Stock Base Units in Source Godown: ${totalStockBaseUnits}, Max Available Packs: ${maxAvailablePacks}`);
+
+            if (totalStockBaseUnits < qtyInBaseUnits) {
                 await t.rollback();
                 const vol = variant ? variant.volume : '';
-                const maxAvailablePacks = sourceStock ? (Number(sourceStock.totalBaseUnits) / factor) : 0;
                 return sendErrorResponse(
                     res,
                     HTTP_STATUS.BAD_REQUEST,
@@ -284,12 +289,12 @@ export const updateTransferStatus = async (req, res, next) => {
                 const qtyInBaseUnits = Number(item.qty) * factor;
 
                 // 1. Decrement source stock
-                const sourceStock = await InventoryStock.findOne({
+                const totalSourceStockUnits = parseFloat(await InventoryStock.sum('totalBaseUnits', {
                     where: { productId: item.productId, variantId: item.variantId, godownId: transfer.fromGodownId },
                     transaction: t
-                });
+                })) || 0;
 
-                if (!sourceStock || Number(sourceStock.totalBaseUnits || 0) < qtyInBaseUnits) {
+                if (totalSourceStockUnits < qtyInBaseUnits) {
                     await t.rollback();
                     return sendErrorResponse(
                         res,
@@ -297,6 +302,12 @@ export const updateTransferStatus = async (req, res, next) => {
                         `Insufficient stock in source godown to complete receipt for product ID ${item.productId}.`
                     );
                 }
+
+                let sourceStock = await InventoryStock.findOne({
+                    where: { productId: item.productId, variantId: item.variantId, godownId: transfer.fromGodownId },
+                    order: [['totalBaseUnits', 'DESC']],
+                    transaction: t
+                });
 
                 const newSourceQty = Number(sourceStock.totalBaseUnits) - qtyInBaseUnits;
                 await sourceStock.update({ totalBaseUnits: newSourceQty }, { transaction: t });
