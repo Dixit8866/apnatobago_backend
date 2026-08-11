@@ -17,6 +17,11 @@ const ProductPricing = sequelize.define(
             type: DataTypes.UUID,
             allowNull: false,
         },
+        godownId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            defaultValue: null,
+        },
         quantityRange: {
             type: DataTypes.STRING,
             allowNull: true,

@@ -370,25 +370,36 @@ export const createOrder = async (req, res) => {
 
             const bUPP = Number(variant.baseUnitsPerPack || 1);
 
-            // Fetch all pricings for this variant
+            // Fetch pricings for this variant matching user's godownId or null
             const pricings = await ProductPricing.findAll({
-                where: { variantId },
+                where: {
+                    variantId,
+                    ...(targetGodownId ? {
+                        [Op.or]: [
+                            { godownId: targetGodownId },
+                            { godownId: null }
+                        ]
+                    } : { godownId: null })
+                },
                 order: [['minQty', 'ASC']]
             });
 
             // Find applicable pricing based on user's applevel and quantity
-            let applicablePricing = pricings.find(p =>
+            let matchedPricings = pricings.filter(p =>
                 p.customLevelId === userAppLevel &&
                 quantity >= Number(p.minQty) &&
                 (p.maxQty === null || quantity <= Number(p.maxQty))
             );
 
+            let applicablePricing = matchedPricings.find(p => p.godownId && String(p.godownId) === String(targetGodownId))
+                || matchedPricings.find(p => !p.godownId);
+
             // Fallback logic
             if (!applicablePricing) {
-                applicablePricing = pricings.find(p => p.customLevelId === userAppLevel);
-            }
-            if (!applicablePricing && pricings.length > 0) {
-                applicablePricing = pricings[0];
+                let levelPricings = pricings.filter(p => p.customLevelId === userAppLevel);
+                applicablePricing = levelPricings.find(p => p.godownId && String(p.godownId) === String(targetGodownId))
+                    || levelPricings.find(p => !p.godownId)
+                    || pricings[0];
             }
 
             let rawPrice = 0;
@@ -654,6 +665,7 @@ export const createOrder = async (req, res) => {
                             for (const p of newPricings) {
                                 await ProductPricing.create({
                                     variantId: variant.id,
+                                    godownId: targetGodownId || null,
                                     customLevelId: p.customLevelId,
                                     quantityRange: `${p.minQty}-${p.maxQty}`,
                                     minQty: p.minQty,

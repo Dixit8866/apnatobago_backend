@@ -152,6 +152,9 @@ InventoryStock.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant
 Godown.hasMany(InventoryStock, { foreignKey: 'godownId', as: 'inventoryStocks' });
 InventoryStock.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
 
+Godown.hasMany(ProductPricing, { foreignKey: 'godownId', as: 'pricings' });
+ProductPricing.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
+
 // Inventory transactions
 InventoryStock.hasMany(InventoryTransaction, { foreignKey: 'stockId', as: 'transactions' });
 InventoryTransaction.belongsTo(InventoryStock, { foreignKey: 'stockId', as: 'stock' });

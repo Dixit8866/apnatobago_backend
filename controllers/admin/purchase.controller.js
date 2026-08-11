@@ -188,16 +188,20 @@ export const convertToBill = async (req, res, next) => {
                     { where: { id: item.variantId }, transaction: t }
                 );
 
-                // Update Level Wise Pricing immediately if provided
+                // Update Level Wise Pricing for this target godown immediately if provided
                 if (item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
                     await ProductPricing.destroy({
-                        where: { variantId: item.variantId },
+                        where: {
+                            variantId: item.variantId,
+                            ...(godownId ? { godownId } : { godownId: null })
+                        },
                         transaction: t
                     });
 
                     for (const p of item.pricings) {
                         await ProductPricing.create({
                             variantId: item.variantId,
+                            godownId: godownId || null,
                             customLevelId: p.customLevelId,
                             quantityRange: `${p.minQty}-${p.maxQty}`,
                             minQty: p.minQty,
