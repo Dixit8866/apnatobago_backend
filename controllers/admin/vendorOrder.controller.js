@@ -286,6 +286,52 @@ export const updateVendorOrder = async (req, res) => {
 
         await order.update(updateData);
 
+        // Update ProductVariant purchase prices and ProductPricing selling prices in DB if edited in variantsData
+        if (items && Array.isArray(items)) {
+            for (const item of items) {
+                if (item.variantsData && Array.isArray(item.variantsData)) {
+                    for (const vData of item.variantsData) {
+                        if (vData.variantId) {
+                            const pVal = Number(vData.purchasePrice);
+                            if (!isNaN(pVal) && pVal > 0) {
+                                await ProductVariant.update(
+                                    { purchasePrice: pVal },
+                                    { where: { id: vData.variantId } }
+                                );
+                            }
+
+                            if (vData.pricings && Array.isArray(vData.pricings)) {
+                                for (const p of vData.pricings) {
+                                    const prcVal = Number(p.price);
+                                    if (p.customLevelId && !isNaN(prcVal) && prcVal > 0) {
+                                        const existingP = await ProductPricing.findOne({
+                                            where: {
+                                                variantId: vData.variantId,
+                                                customLevelId: p.customLevelId
+                                            }
+                                        });
+                                        if (existingP) {
+                                            await existingP.update({ price: prcVal });
+                                        } else {
+                                            await ProductPricing.create({
+                                                productId: item.productId,
+                                                variantId: vData.variantId,
+                                                customLevelId: p.customLevelId,
+                                                minQty: p.minQty || 1,
+                                                maxQty: p.maxQty || 99,
+                                                price: prcVal,
+                                                mrp: p.mrp || 0
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Auto-link any new products in items to the Vendor's productIds
         if (items && order.vendorId) {
             try {
