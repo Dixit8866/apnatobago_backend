@@ -4,6 +4,9 @@ import Vendor from '../../models/superadmin-models/Vendor.js';
 import Product from '../../models/superadmin-models/Product.js';
 import ProductVariant from '../../models/superadmin-models/ProductVariant.js';
 import Volume from '../../models/superadmin-models/Volume.js';
+import PurchaseBill from '../../models/superadmin-models/PurchaseBill.js';
+import Admin from '../../models/superadmin-models/Admin.js';
+import Godown from '../../models/superadmin-models/Godown.js';
 import { getPaginationOptions } from '../../helpers/query.helper.js';
 import { generateVendorOrderInvoice } from '../../utils/invoiceGenerator.js';
 
@@ -217,7 +220,18 @@ export const getAllVendorOrders = async (req, res) => {
 
         const { count, rows: orders } = await VendorOrder.findAndCountAll({
             where,
-            include: [vendorInclude],
+            include: [
+                vendorInclude,
+                {
+                    model: PurchaseBill,
+                    as: 'bill',
+                    attributes: ['id', 'billNo', 'receivedDate', 'receivedBy', 'godownId', 'totalAmount'],
+                    include: [
+                        { model: Admin, as: 'receiver', attributes: ['id', 'name'] },
+                        { model: Godown, as: 'godown', attributes: ['id', 'name'] }
+                    ]
+                }
+            ],
             order: [['createdAt', 'DESC']],
             limit,
             offset,
@@ -257,7 +271,18 @@ export const getAllVendorOrders = async (req, res) => {
 export const getVendorOrderById = async (req, res) => {
     try {
         const order = await VendorOrder.findByPk(req.params.id, {
-            include: [{ model: Vendor, as: 'vendor' }],
+            include: [
+                { model: Vendor, as: 'vendor' },
+                {
+                    model: PurchaseBill,
+                    as: 'bill',
+                    attributes: ['id', 'billNo', 'receivedDate', 'receivedBy', 'godownId', 'totalAmount'],
+                    include: [
+                        { model: Admin, as: 'receiver', attributes: ['id', 'name'] },
+                        { model: Godown, as: 'godown', attributes: ['id', 'name'] }
+                    ]
+                }
+            ],
         });
         if (!order) return res.status(404).json({ message: 'Order not found' });
         res.status(200).json({ status: 'success', data: order });
