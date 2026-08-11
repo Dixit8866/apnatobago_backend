@@ -163,7 +163,9 @@ export const convertToBill = async (req, res, next) => {
                 console.log(`  -> Auto-calculated oldStockLimitQty from existing stock: ${oldStockLimitQty} packs`);
             }
 
-            const newPricingsPayload = (isLockEnabled && item.pricings && Array.isArray(item.pricings)) ? item.pricings : null;
+            const newPricingsPayload = (isLockEnabled && item.pricings && Array.isArray(item.pricings))
+                ? item.pricings.map(p => ({ ...p, purchasePrice: item.purchasePrice }))
+                : null;
 
             if (isLockEnabled && oldStockLimitQty > 0) {
                 console.log(`  -> Setting ProductVariant oldStockLockToggle=true, oldStockLimitQty=${oldStockLimitQty}`);

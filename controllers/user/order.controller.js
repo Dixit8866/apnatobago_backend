@@ -654,31 +654,73 @@ export const createOrder = async (req, res) => {
                     const currentLimit = Number(variant.oldStockLimitQty || 0);
                     const newLimit = currentLimit - purchasedPacks;
 
+                    /*
+                    ================================================================================
+                    TEMPORARY AUTO-PRICE UPDATE SOLUTION ON OLD STOCK EXCLUSION (OLD STOCK LOCK = 0):
+                    --------------------------------------------------------------------------------
+                    When the old stock limit quantity reaches 0 (all old stock at old price is sold out):
+                    1. Automatically update ProductVariant.purchasePrice to the new purchase price.
+                    2. Update default global ProductPricing (godownId = null) & godown pricing with new prices.
+                    3. Turn off oldStockLockToggle (set to false) and set oldStockLimitQty = 0.
+                    ================================================================================
+                    */
                     if (newLimit <= 0) {
                         const newPricings = variant.newPricingData;
+                        let newPurchasePrice = variant.purchasePrice;
+
                         if (newPricings && Array.isArray(newPricings) && newPricings.length > 0) {
+                            if (newPricings[0]?.purchasePrice && Number(newPricings[0].purchasePrice) > 0) {
+                                newPurchasePrice = Number(newPricings[0].purchasePrice);
+                            }
+
+                            // Clean up default global pricing rows (godownId = null)
                             await ProductPricing.destroy({
-                                where: { variantId: variant.id },
+                                where: { variantId: variant.id, godownId: null },
                                 transaction: t
                             });
 
+                            // Clean up target godown pricing rows if present
+                            if (targetGodownId) {
+                                await ProductPricing.destroy({
+                                    where: { variantId: variant.id, godownId: targetGodownId },
+                                    transaction: t
+                                });
+                            }
+
+                            // Re-create default global pricing rows with new selling prices
                             for (const p of newPricings) {
                                 await ProductPricing.create({
                                     variantId: variant.id,
-                                    godownId: targetGodownId || null,
+                                    godownId: null,
                                     customLevelId: p.customLevelId,
                                     quantityRange: `${p.minQty}-${p.maxQty}`,
                                     minQty: p.minQty,
                                     maxQty: p.maxQty,
-                                    purchasePrice: variant.purchasePrice,
+                                    purchasePrice: newPurchasePrice,
                                     price: p.price,
                                     mrp: p.mrp,
                                     status: 'Active'
                                 }, { transaction: t });
+
+                                if (targetGodownId) {
+                                    await ProductPricing.create({
+                                        variantId: variant.id,
+                                        godownId: targetGodownId,
+                                        customLevelId: p.customLevelId,
+                                        quantityRange: `${p.minQty}-${p.maxQty}`,
+                                        minQty: p.minQty,
+                                        maxQty: p.maxQty,
+                                        purchasePrice: newPurchasePrice,
+                                        price: p.price,
+                                        mrp: p.mrp,
+                                        status: 'Active'
+                                    }, { transaction: t });
+                                }
                             }
                         }
 
                         await variant.update({
+                            purchasePrice: newPurchasePrice,
                             oldStockLockToggle: false,
                             oldStockLimitQty: 0,
                             newPricingData: null
