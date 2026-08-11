@@ -447,19 +447,25 @@ export const getGodownStock = async (req, res, next) => {
 
         const stocks = await InventoryStock.findAll({
             where: { godownId },
-            attributes: ['productId', 'variantId', 'totalBaseUnits']
+            attributes: ['productId', 'variantId', 'totalBaseUnits', 'lastPurchasePricePerBaseUnit', 'avgPurchasePricePerBaseUnit']
         });
 
         const stockMap = {};
         stocks.forEach(s => {
-            stockMap[`${s.productId}_${s.variantId}`] = s.totalBaseUnits || 0;
+            const key = `${s.productId}_${s.variantId}`;
+            stockMap[key] = {
+                totalBaseUnits: s.totalBaseUnits || 0,
+                lastPurchasePricePerBaseUnit: parseFloat(s.lastPurchasePricePerBaseUnit) || 0,
+                avgPurchasePricePerBaseUnit: parseFloat(s.avgPurchasePricePerBaseUnit) || 0
+            };
         });
 
         const options = [];
         variants.forEach(v => {
             if (!v.product) return;
             const key = `${v.productId}_${v.id}`;
-            const qtyAvailableBase = stockMap[key] || 0;
+            const sData = stockMap[key] || { totalBaseUnits: 0, lastPurchasePricePerBaseUnit: 0, avgPurchasePricePerBaseUnit: 0 };
+            const qtyAvailableBase = sData.totalBaseUnits;
             const factor = Number(v.baseUnitsPerPack || 1);
             const qtyAvailable = qtyAvailableBase / factor;
             
@@ -472,6 +478,14 @@ export const getGodownStock = async (req, res, next) => {
             const volGu = typeof volObj === 'object' && volObj !== null ? (volObj.gu || volObj.GU || '') : '';
             const volLabel = volGu ? `${volEn} (${volGu})` : volEn;
 
+            // Prioritize last purchase price from godown stock if available
+            let itemPurchasePrice = Number(v.purchasePrice || 0);
+            if (sData.lastPurchasePricePerBaseUnit > 0) {
+                itemPurchasePrice = sData.lastPurchasePricePerBaseUnit * factor;
+            } else if (sData.avgPurchasePricePerBaseUnit > 0) {
+                itemPurchasePrice = sData.avgPurchasePricePerBaseUnit * factor;
+            }
+
             options.push({
                 productId: v.productId,
                 variantId: v.id,
@@ -480,7 +494,7 @@ export const getGodownStock = async (req, res, next) => {
                 volume: volLabel,
                 volumeGu: volGu || volEn,
                 qtyAvailable,
-                price: Number(v.purchasePrice || 0)
+                price: itemPurchasePrice
             });
         });
 
