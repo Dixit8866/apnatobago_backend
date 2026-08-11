@@ -298,36 +298,16 @@ export const createOrder = async (req, res) => {
                     availableStock = userGodownStock;
                 }
 
-                // Fallback: If target godown stock is insufficient, check total stock across ALL godowns
-                if (availableStock < deductionRequired) {
-                    const allGodownsStock = await InventoryStock.sum('totalBaseUnits', {
-                        where: {
-                            productId: item.productId,
-                            totalBaseUnits: { [Op.gt]: 0 }
-                        },
-                        transaction: t
-                    });
-                    const globalStock = parseFloat(allGodownsStock) || 0;
-                    if (globalStock > availableStock) {
-                        availableStock = globalStock;
-                    }
-                }
-
                 console.log(`[CREATE_ORDER_STOCK_CHECK] Product: ${item.productId}, Variant: ${variant?.id}`);
                 console.log(`  -> bUPP: ${bUPP}, requestedQty: ${item.quantity}, deductionRequiredBaseUnits: ${deductionRequired}`);
-                console.log(`  -> godownId: ${targetGodownId}, userGodownStock: ${userGodownStock}, availableStock: ${availableStock}`);
+                console.log(`  -> godownId: ${targetGodownId}, availableStockInAssignedGodown: ${availableStock}`);
                 console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
 
-                if (variant.oldStockLockToggle) {
-                    const limitQty = Number(variant.oldStockLimitQty || 0);
-                    if (limitQty > 0) {
-                        const lockedBaseUnits = limitQty * bUPP;
-                        console.log(`  -> Lock active in createOrder! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
-                        availableStock = Math.min(availableStock, lockedBaseUnits);
-                    } else if (userGodownStock > 0) {
-                        console.log(`  -> Lock active (default 0 limit)! Capping availableStock to userGodownStock: ${userGodownStock}`);
-                        availableStock = userGodownStock;
-                    }
+                if (variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
+                    const limitQty = Number(variant.oldStockLimitQty);
+                    const lockedBaseUnits = limitQty * bUPP;
+                    console.log(`  -> Lock active in createOrder! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
+                    availableStock = Math.min(availableStock, lockedBaseUnits);
                     console.log(`  -> availableStock after lock cap: ${availableStock}`);
                 }
 

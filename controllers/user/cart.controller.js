@@ -379,29 +379,21 @@ export const addToCart = async (req, res) => {
 
         const deductionRequired = totalProposedQty * bUPP;
 
-        // Check stock first — check user's assigned godown first, then fallback to total stock across all godowns
-        let userGodownStock = await getAvailableStock(productId, req.user?.godownId);
-        let globalStock = await getAvailableStock(productId, null);
-        let availableStock = Math.max(userGodownStock, globalStock);
+        // Check stock strictly for user's assigned godown (or all godowns if no godown assigned)
+        let availableStock = await getAvailableStock(productId, req.user?.godownId);
 
         console.log(`[ADD_TO_CART_STOCK_CHECK] Product: ${productId}, Variant: ${variant?.id}`);
         console.log(`  -> bUPP: ${bUPP}, currentCartQty: ${currentCartQty}, qtyToAdd: ${qtyToAdd}, totalProposedQty: ${totalProposedQty}`);
         console.log(`  -> deductionRequiredBaseUnits: ${deductionRequired}`);
-        console.log(`  -> userGodownStock: ${userGodownStock}, globalStock: ${globalStock}, availableStock: ${availableStock}`);
+        console.log(`  -> userGodownId: ${req.user?.godownId}, availableStockInAssignedGodown: ${availableStock}`);
         console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
 
         // Check Old Stock Lock Toggle restriction
-        if (variant && variant.oldStockLockToggle) {
-            const limitQty = Number(variant.oldStockLimitQty || 0);
-            if (limitQty > 0) {
-                const lockedBaseUnits = limitQty * bUPP;
-                console.log(`  -> Lock active in addToCart! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
-                availableStock = Math.min(availableStock, lockedBaseUnits);
-            } else if (userGodownStock > 0) {
-                // When Lock Toggle is ON but limit is 0/default, strictly cap to old stock in user's assigned godown
-                console.log(`  -> Lock active (default 0 limit)! Capping availableStock to userGodownStock: ${userGodownStock}`);
-                availableStock = userGodownStock;
-            }
+        if (variant && variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
+            const limitQty = Number(variant.oldStockLimitQty);
+            const lockedBaseUnits = limitQty * bUPP;
+            console.log(`  -> Lock active in addToCart! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
+            availableStock = Math.min(availableStock, lockedBaseUnits);
             console.log(`  -> availableStock after lock cap: ${availableStock}`);
         }
 
@@ -534,26 +526,18 @@ export const updateCartItem = async (req, res) => {
             const bUPP = variant ? Number(variant.baseUnitsPerPack || 1) : 1;
             const deductionRequired = proposedQty * bUPP;
 
-            let userGodownStock = await getAvailableStock(cartItem.productId, req.user?.godownId);
-            let globalStock = await getAvailableStock(cartItem.productId, null);
-            let availableStock = Math.max(userGodownStock, globalStock);
+            let availableStock = await getAvailableStock(cartItem.productId, req.user?.godownId);
 
             console.log(`[UPDATE_CART_STOCK_CHECK] Product: ${cartItem.productId}, Variant: ${variant?.id}`);
             console.log(`  -> bUPP: ${bUPP}, proposedQty: ${proposedQty}, deductionRequiredBaseUnits: ${deductionRequired}`);
-            console.log(`  -> userGodownStock: ${userGodownStock}, globalStock: ${globalStock}, availableStock: ${availableStock}`);
+            console.log(`  -> userGodownId: ${req.user?.godownId}, availableStockInAssignedGodown: ${availableStock}`);
             console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
 
-            if (variant && variant.oldStockLockToggle) {
-                const limitQty = Number(variant.oldStockLimitQty || 0);
-                if (limitQty > 0) {
-                    const lockedBaseUnits = limitQty * bUPP;
-                    console.log(`  -> Lock active in updateCart! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
-                    availableStock = Math.min(availableStock, lockedBaseUnits);
-                } else if (userGodownStock > 0) {
-                    // When Lock Toggle is ON but limit is 0/default, strictly cap to old stock in user's assigned godown
-                    console.log(`  -> Lock active (default 0 limit)! Capping availableStock to userGodownStock: ${userGodownStock}`);
-                    availableStock = userGodownStock;
-                }
+            if (variant && variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
+                const limitQty = Number(variant.oldStockLimitQty);
+                const lockedBaseUnits = limitQty * bUPP;
+                console.log(`  -> Lock active in updateCart! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
+                availableStock = Math.min(availableStock, lockedBaseUnits);
                 console.log(`  -> availableStock after lock cap: ${availableStock}`);
             }
 
