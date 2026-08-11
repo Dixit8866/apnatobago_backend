@@ -167,6 +167,65 @@ export const convertToBill = async (req, res, next) => {
                 ? item.pricings.map(p => ({ ...p, purchasePrice: item.purchasePrice }))
                 : null;
 
+            const shouldUpdateLivePricing = !!item.updateLiveProductPricing;
+
+            if (shouldUpdateLivePricing) {
+                console.log(`  -> Immediately updating live ProductVariant purchasePrice & default global/godown ProductPricing for variant ${item.variantId}`);
+                await ProductVariant.update(
+                    {
+                        purchasePrice: item.purchasePrice,
+                        ...(item.mrp ? { mrp: item.mrp } : {})
+                    },
+                    { where: { id: item.variantId }, transaction: t }
+                );
+
+                if (item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
+                    // Update default global level pricing (godownId = null)
+                    await ProductPricing.destroy({
+                        where: { variantId: item.variantId, godownId: null },
+                        transaction: t
+                    });
+
+                    for (const p of item.pricings) {
+                        await ProductPricing.create({
+                            variantId: item.variantId,
+                            godownId: null,
+                            customLevelId: p.customLevelId,
+                            quantityRange: `${p.minQty}-${p.maxQty}`,
+                            minQty: p.minQty,
+                            maxQty: p.maxQty,
+                            purchasePrice: item.purchasePrice,
+                            price: p.price,
+                            mrp: p.mrp || p.price,
+                            status: 'Active'
+                        }, { transaction: t });
+                    }
+
+                    // Also update godown-specific level pricing if godownId is provided
+                    if (godownId) {
+                        await ProductPricing.destroy({
+                            where: { variantId: item.variantId, godownId },
+                            transaction: t
+                        });
+
+                        for (const p of item.pricings) {
+                            await ProductPricing.create({
+                                variantId: item.variantId,
+                                godownId,
+                                customLevelId: p.customLevelId,
+                                quantityRange: `${p.minQty}-${p.maxQty}`,
+                                minQty: p.minQty,
+                                maxQty: p.maxQty,
+                                purchasePrice: item.purchasePrice,
+                                price: p.price,
+                                mrp: p.mrp || p.price,
+                                status: 'Active'
+                            }, { transaction: t });
+                        }
+                    }
+                }
+            }
+
             if (isLockEnabled && oldStockLimitQty > 0) {
                 console.log(`  -> Setting ProductVariant oldStockLockToggle=true, oldStockLimitQty=${oldStockLimitQty}`);
                 await ProductVariant.update(
@@ -190,8 +249,7 @@ export const convertToBill = async (req, res, next) => {
                     { where: { id: item.variantId }, transaction: t }
                 );
 
-                // Update Level Wise Pricing for this target godown immediately if provided
-                if (item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
+                if (!shouldUpdateLivePricing && item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
                     await ProductPricing.destroy({
                         where: {
                             variantId: item.variantId,
