@@ -293,7 +293,7 @@ export const getAssignmentDetails = async (req, res) => {
                             model: OrderItem,
                             as: 'items',
                             include: [
-                                { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                                { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'hasCoupon', 'couponPoints', 'couponPrice'] },
                                 {
                                     model: ProductVariant,
                                     as: 'variant',
@@ -337,9 +337,25 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
         }
 
-        // Sanitize variantInfo in items
+        // Sanitize variantInfo in items & extract couponProducts
+        const couponProducts = [];
+        let totalOrderCouponPoints = 0;
+        let totalOrderCouponPrice = 0;
+
         if (data.order && data.order.items) {
             data.order.items.forEach(itemData => {
+                const p = itemData.product || {};
+                const hasC = p.hasCoupon === true || p.hasCoupon === 'true';
+                const cPoints = Number(p.couponPoints || 0);
+                const cPrice = Number(p.couponPrice || 0);
+                const qty = Number(itemData.quantity || 1);
+
+                itemData.hasCoupon = hasC;
+                itemData.couponPoints = cPoints;
+                itemData.couponPrice = cPrice.toFixed(2);
+                itemData.totalCouponPoints = hasC ? (cPoints * qty) : 0;
+                itemData.totalCouponPrice = hasC ? (cPrice * qty).toFixed(2) : "0.00";
+
                 if (itemData.variantInfo) {
                     if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
                         itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
@@ -347,7 +363,48 @@ export const getAssignmentDetails = async (req, res) => {
                     if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
                     if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
                 }
+
+                if (hasC) {
+                    const itemTotPts = cPoints * qty;
+                    const itemTotPrc = cPrice * qty;
+                    totalOrderCouponPoints += itemTotPts;
+                    totalOrderCouponPrice += itemTotPrc;
+
+                    let pName = p.name;
+                    if (typeof pName === 'object' && pName !== null) {
+                        pName = pName.en || Object.values(pName)[0] || 'Product';
+                    }
+
+                    const extraVal = (itemData.variantInfo?.extra || itemData.variantInfo?.extraName || itemData.extra || '').trim();
+                    const volVal = (itemData.variantInfo?.volume || itemData.volume || '').trim();
+                    const fullVolDisplay = extraVal ? `${extraVal} - ${volVal}` : volVal;
+
+                    couponProducts.push({
+                        id: itemData.productId,
+                        itemId: itemData.id,
+                        name: pName || itemData.productName || 'Product',
+                        image: p.thumbnail || '',
+                        volume: fullVolDisplay,
+                        quantity: qty,
+                        couponPoints: cPoints,
+                        couponPrice: cPrice.toFixed(2),
+                        totalCouponPoints: itemTotPts,
+                        totalCouponPrice: itemTotPrc.toFixed(2)
+                    });
+                }
             });
+        }
+
+        data.couponProducts = couponProducts;
+        data.totalCouponProductsCount = couponProducts.length;
+        data.totalOrderCouponPoints = totalOrderCouponPoints;
+        data.totalOrderCouponPrice = totalOrderCouponPrice.toFixed(2);
+
+        if (data.order) {
+            data.order.couponProducts = couponProducts;
+            data.order.totalCouponProductsCount = couponProducts.length;
+            data.order.totalOrderCouponPoints = totalOrderCouponPoints;
+            data.order.totalOrderCouponPrice = totalOrderCouponPrice.toFixed(2);
         }
 
         // Dynamically adjust CREDIT payments based on real (CASH/ONLINE) repayments
