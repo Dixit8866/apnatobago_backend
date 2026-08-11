@@ -226,7 +226,7 @@ export const getAllVendorOrders = async (req, res) => {
                 {
                     model: PurchaseBill,
                     as: 'bill',
-                    attributes: ['id', 'billNo', 'receivedDate', 'receivedBy', 'godownId', 'totalAmount'],
+                    attributes: ['id', 'billNo', 'receivedDate', 'receivedBy', 'godownId', 'totalAmount', 'createdAt'],
                     include: [
                         { model: Admin, as: 'receiver', attributes: ['id', 'name'] },
                         { model: Godown, as: 'godown', attributes: ['id', 'name'] }
