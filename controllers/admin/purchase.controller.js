@@ -152,15 +152,21 @@ export const convertToBill = async (req, res, next) => {
             const isLockEnabled = !!item.oldStockLockToggle;
             let oldStockLimitQty = isLockEnabled ? Number(item.oldStockLimitQty || 0) : 0;
 
+            console.log(`[CONVERT_TO_BILL_ITEM] Product: ${item.productId}, Variant: ${item.variantId}`);
+            console.log(`  -> item.oldStockLockToggle: ${item.oldStockLockToggle}, item.oldStockLimitQty: ${item.oldStockLimitQty}`);
+            console.log(`  -> existingStockBaseUnits: ${existingStockBaseUnits}`);
+
             // If lock toggle is ON and limit is 0, auto-default to existing physical inventory stock (in Packs/Cartons)
             if (isLockEnabled && oldStockLimitQty <= 0 && existingStockBaseUnits > 0) {
                 const bUPP = Number(variant.baseUnitsPerPack || 1);
                 oldStockLimitQty = bUPP > 0 ? Math.floor(existingStockBaseUnits / bUPP) : existingStockBaseUnits;
+                console.log(`  -> Auto-calculated oldStockLimitQty from existing stock: ${oldStockLimitQty} packs`);
             }
 
             const newPricingsPayload = (isLockEnabled && item.pricings && Array.isArray(item.pricings)) ? item.pricings : null;
 
             if (isLockEnabled && oldStockLimitQty > 0) {
+                console.log(`  -> Setting ProductVariant oldStockLockToggle=true, oldStockLimitQty=${oldStockLimitQty}`);
                 await ProductVariant.update(
                     {
                         purchasePrice: item.purchasePrice,
@@ -170,9 +176,8 @@ export const convertToBill = async (req, res, next) => {
                     },
                     { where: { id: item.variantId }, transaction: t }
                 );
-                // When Old Stock Lock Toggle is enabled with old stock > 0, keep existing active ProductPricing intact
-                // for the remaining old stock. New pricing will be automatically applied when old stock limit hits 0.
             } else {
+                console.log(`  -> Setting ProductVariant oldStockLockToggle=false, oldStockLimitQty=0, immediately updating pricings`);
                 await ProductVariant.update(
                     {
                         purchasePrice: item.purchasePrice,

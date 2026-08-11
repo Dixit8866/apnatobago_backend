@@ -377,22 +377,25 @@ export const addToCart = async (req, res) => {
         const currentCartQty = cartItem ? Number(cartItem.quantity) : 0;
         const totalProposedQty = currentCartQty + qtyToAdd;
 
-        // last aya change karo cho je koi biji product ma aa issues ave to 
         const deductionRequired = totalProposedQty * bUPP;
 
         // Check stock first — check user's assigned godown first, then fallback to total stock across all godowns
-        let availableStock = await getAvailableStock(productId, req.user?.godownId);
-        if (availableStock < deductionRequired) {
-            const globalStock = await getAvailableStock(productId, null);
-            if (globalStock > availableStock) {
-                availableStock = globalStock;
-            }
-        }
+        let userGodownStock = await getAvailableStock(productId, req.user?.godownId);
+        let globalStock = await getAvailableStock(productId, null);
+        let availableStock = Math.max(userGodownStock, globalStock);
+
+        console.log(`[ADD_TO_CART_STOCK_CHECK] Product: ${productId}, Variant: ${variant?.id}`);
+        console.log(`  -> bUPP: ${bUPP}, currentCartQty: ${currentCartQty}, qtyToAdd: ${qtyToAdd}, totalProposedQty: ${totalProposedQty}`);
+        console.log(`  -> deductionRequiredBaseUnits: ${deductionRequired}`);
+        console.log(`  -> userGodownStock: ${userGodownStock}, globalStock: ${globalStock}, availableStock: ${availableStock}`);
+        console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
 
         // Check Old Stock Lock Toggle restriction (only apply if limit > 0)
         if (variant && variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
             const lockedBaseUnits = Number(variant.oldStockLimitQty) * bUPP;
+            console.log(`  -> Lock active! lockedBaseUnits: ${lockedBaseUnits} (limit: ${variant.oldStockLimitQty} packs)`);
             availableStock = Math.min(availableStock, lockedBaseUnits);
+            console.log(`  -> availableStock after lock cap: ${availableStock}`);
         }
 
         if (deductionRequired > availableStock) {

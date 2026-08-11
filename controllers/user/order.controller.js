@@ -311,9 +311,16 @@ export const createOrder = async (req, res) => {
                     }
                 }
 
+                console.log(`[CREATE_ORDER_STOCK_CHECK] Product: ${item.productId}, Variant: ${variant?.id}`);
+                console.log(`  -> bUPP: ${bUPP}, requestedQty: ${item.quantity}, deductionRequiredBaseUnits: ${deductionRequired}`);
+                console.log(`  -> godownId: ${targetGodownId}, availableStock: ${availableStock}`);
+                console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
+
                 if (variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
                     const lockedBaseUnits = Number(variant.oldStockLimitQty) * bUPP;
+                    console.log(`  -> Lock active in createOrder! lockedBaseUnits: ${lockedBaseUnits} (limit: ${variant.oldStockLimitQty} packs)`);
                     availableStock = Math.min(availableStock, lockedBaseUnits);
+                    console.log(`  -> availableStock after lock cap: ${availableStock}`);
                 }
 
                 if (deductionRequired > availableStock) {
