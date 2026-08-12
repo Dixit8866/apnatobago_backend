@@ -146,22 +146,23 @@ export const getAllOrders = async (req, res) => {
             baseWhere.userId = userId;
         }
 
-        if (search) {
-            const searchPattern = `%${search}%`;
-            searchClause = {
-                [Op.or]: [
-                    { orderId: { [Op.iLike]: searchPattern } },
-                    { customerName: { [Op.iLike]: searchPattern } },
-                    { customerNumber: { [Op.iLike]: searchPattern } },
-                    { '$user.fullname$': { [Op.iLike]: searchPattern } },
-                    { '$user.number$': { [Op.iLike]: searchPattern } },
-                    { '$user.city$': { [Op.iLike]: searchPattern } },
-                    { '$user.businessProfile.shopName$': { [Op.iLike]: searchPattern } },
-                    { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: searchPattern } },
-                    { '$assignment.deliveryBoy.name$': { [Op.iLike]: searchPattern } },
-                    { '$assignment.deliveryBoy.phone$': { [Op.iLike]: searchPattern } }
-                ]
-            };
+        if (search && String(search).trim() !== '') {
+            const term = String(search).trim();
+            const searchPattern = `%${term}%`;
+            const escapedSearch = sequelize.escape(searchPattern);
+            
+            searchClause = sequelize.literal(`(
+                CAST("Order"."orderId" AS TEXT) ILIKE ${escapedSearch}
+                OR COALESCE("Order"."customerName", '') ILIKE ${escapedSearch}
+                OR COALESCE("Order"."customerNumber", '') ILIKE ${escapedSearch}
+                OR COALESCE("user"."fullname", '') ILIKE ${escapedSearch}
+                OR COALESCE("user"."number", '') ILIKE ${escapedSearch}
+                OR COALESCE("user"."city", '') ILIKE ${escapedSearch}
+                OR COALESCE("user->businessProfile"."shopName", '') ILIKE ${escapedSearch}
+                OR COALESCE("user->businessProfile"."shopNameAlt", '') ILIKE ${escapedSearch}
+                OR COALESCE("assignment->deliveryBoy"."name", '') ILIKE ${escapedSearch}
+                OR COALESCE("assignment->deliveryBoy"."phone", '') ILIKE ${escapedSearch}
+            )`);
         }
 
         // Helper to get today's 24-hour date range in India Standard Time (IST)
