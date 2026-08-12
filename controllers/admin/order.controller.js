@@ -581,39 +581,48 @@ export const getAllOrders = async (req, res) => {
             cancelledCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
         }
 
+        const countOptions = (whereObj) => ({
+            where: whereObj,
+            include: countInclude,
+            distinct: true,
+            col: 'id'
+        });
+
         const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, paymentVerifyCount, cancelledCount, todayCount, salesReturnCount, pendingDueCount, userCartCount] = await Promise.all([
-            Order.count({ where: pendingCountWhere, include: countInclude }),
-            Order.count({ where: packagingCountWhere, include: countInclude }),
-            Order.count({ where: packedCountWhere, include: countInclude }),
-            Order.count({ where: shippingCountWhere, include: countInclude }),
-            Order.count({ where: deliveredCountWhere, include: countInclude }),
-            Order.count({ where: paymentCollectCountWhere, include: countInclude }),
-            Order.count({ where: paymentVerifyCountWhere, include: countInclude }),
-            Order.count({ where: cancelledCountWhere, include: countInclude }),
-            Order.count({ where: { ...countWhere, createdAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }, include: countInclude }),
+            Order.count(countOptions(pendingCountWhere)),
+            Order.count(countOptions(packagingCountWhere)),
+            Order.count(countOptions(packedCountWhere)),
+            Order.count(countOptions(shippingCountWhere)),
+            Order.count(countOptions(deliveredCountWhere)),
+            Order.count(countOptions(paymentCollectCountWhere)),
+            Order.count(countOptions(paymentVerifyCountWhere)),
+            Order.count(countOptions(cancelledCountWhere)),
+            Order.count(countOptions({ ...countWhere, createdAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } })),
             SalesReturn.count({ where: deliveryBoyId ? { deliveryBoyId } : {} }),
-            Order.count({ where: pendingDueCountWhere, include: countInclude }),
+            Order.count(countOptions(pendingDueCountWhere)),
             Cart.count({ distinct: true, col: 'userId' })
         ]);
 
         // Calculate dynamic order counts by routeCategory for the currently active tab status and date filter
         const routeCountWhere = buildWhereClause({ includeRoute: false, includeTiming: true });
-        routeCountWhere.routeCategoryId = { [Op.ne]: null };
+        routeCountWhere['$Order.routeCategoryId$'] = { [Op.ne]: null };
 
         const routeCountInclude = search ? searchIncludes : (deliveryBoyId ? [{ model: OrderAssignment, as: 'assignment' }] : []);
 
         const routeCountsRaw = await Order.count({
             where: routeCountWhere,
             include: routeCountInclude,
-            group: ['routeCategoryId']
+            group: [sequelize.col('Order.routeCategoryId')],
+            distinct: true,
+            col: 'id'
         });
 
         const routeCounts = {};
         if (Array.isArray(routeCountsRaw)) {
             routeCountsRaw.forEach(r => {
-                const id = r.routeCategoryId;
+                const id = r.routeCategoryId || r.dataValues?.routeCategoryId || r['Order.routeCategoryId'];
                 if (id) {
-                    routeCounts[id] = parseInt(r.count || 0, 10);
+                    routeCounts[id] = parseInt(r.count || r.dataValues?.count || 0, 10);
                 }
             });
         }
@@ -628,12 +637,16 @@ export const getAllOrders = async (req, res) => {
             Order.count({
                 where: { ...timingBaseWhere, deliveryMode: 'Express' },
                 include: timingCountsInclude,
+                distinct: true,
+                col: 'id',
                 subQuery: false
             }),
             Order.count({
                 where: { ...timingBaseWhere, deliveryMode: 'Round' },
                 include: timingCountsInclude,
-                group: ['deliveryRoundId', 'deliveryRoundTiming'],
+                group: [sequelize.col('Order.deliveryRoundId'), sequelize.col('Order.deliveryRoundTiming')],
+                distinct: true,
+                col: 'id',
                 subQuery: false
             })
         ]);
