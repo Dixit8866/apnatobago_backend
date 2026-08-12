@@ -123,6 +123,7 @@ export const downloadDeliveryLabel = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
     try {
+        console.log('[BACKEND getAllOrders] Incoming req.query:', req.query);
         const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming, godownId } = req.query;
         const baseWhere = {};
         let searchClause = null;
@@ -148,6 +149,7 @@ export const getAllOrders = async (req, res) => {
 
         if (search && String(search).trim() !== '') {
             const term = String(search).trim();
+            console.log('[BACKEND getAllOrders] Applying search filter for term:', term);
             const searchPattern = `%${term}%`;
             const escapedSearch = sequelize.escape(searchPattern);
             
@@ -381,6 +383,8 @@ export const getAllOrders = async (req, res) => {
             distinct: true,
             subQuery: false
         });
+
+        console.log(`[BACKEND getAllOrders] Query returned ${result.rows.length} rows (totalRecords: ${result.count}). Order IDs:`, result.rows.map(o => o.orderId));
 
         // Fetch and attach one-to-many associations (items and payments) for the paginated subset of orders
         if (result.rows.length > 0) {
