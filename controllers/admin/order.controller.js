@@ -470,11 +470,34 @@ export const getAllOrders = async (req, res) => {
         }
 
         // ── Calculate Dynamic Status Counts for Tab Badges ────────────────────────
+        const searchIncludes = [
+            {
+                model: User,
+                as: 'user',
+                required: false,
+                attributes: ['id', 'fullname', 'number', 'city'],
+                include: [
+                    {
+                        model: BusinessProfile,
+                        as: 'businessProfile',
+                        required: false,
+                        attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
+                    }
+                ]
+            },
+            {
+                model: OrderAssignment,
+                as: 'assignment',
+                required: false,
+                include: [{ model: DeliveryBoy, as: 'deliveryBoy', required: false, attributes: ['id', 'name', 'phone'] }]
+            }
+        ];
+
         const countWhere = {};
         if (godownId) {
             countWhere.godownId = godownId;
         }
-        const countInclude = [];
+        const countInclude = search ? searchIncludes : [];
 
         if (routeCategoryId) {
             countWhere.routeCategoryId = routeCategoryId;
@@ -482,10 +505,12 @@ export const getAllOrders = async (req, res) => {
 
         if (deliveryBoyId) {
             countWhere['$assignment.deliveryBoyId$'] = deliveryBoyId;
-            countInclude.push({
-                model: OrderAssignment,
-                as: 'assignment'
-            });
+            if (!search) {
+                countInclude.push({
+                    model: OrderAssignment,
+                    as: 'assignment'
+                });
+            }
         }
 
         let countDateRange = null;
@@ -575,13 +600,7 @@ export const getAllOrders = async (req, res) => {
         const routeCountWhere = buildWhereClause({ includeRoute: false, includeTiming: true });
         routeCountWhere.routeCategoryId = { [Op.ne]: null };
 
-        const routeCountInclude = [];
-        if (deliveryBoyId) {
-            routeCountInclude.push({
-                model: OrderAssignment,
-                as: 'assignment'
-            });
-        }
+        const routeCountInclude = search ? searchIncludes : (deliveryBoyId ? [{ model: OrderAssignment, as: 'assignment' }] : []);
 
         const routeCountsRaw = await Order.count({
             where: routeCountWhere,
@@ -603,10 +622,7 @@ export const getAllOrders = async (req, res) => {
         // (excluding the timing filter itself, so all slots show their counts)
         const timingBaseWhere = buildWhereClause({ includeRoute: true, includeTiming: false });
 
-        const timingCountsInclude = [];
-        if (deliveryBoyId) {
-            timingCountsInclude.push({ model: OrderAssignment, as: 'assignment' });
-        }
+        const timingCountsInclude = search ? searchIncludes : (deliveryBoyId ? [{ model: OrderAssignment, as: 'assignment' }] : []);
 
         const [expressTimingCount, roundTimingCountsRaw] = await Promise.all([
             Order.count({
