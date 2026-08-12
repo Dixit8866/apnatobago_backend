@@ -427,7 +427,9 @@ export const getCustomSales = async (req, res) => {
                 { customerName: { [Op.iLike]: `%${search}%` } },
                 { customerNumber: { [Op.iLike]: `%${search}%` } },
                 { '$user.fullname$': { [Op.iLike]: `%${search}%` } },
-                { '$user.number$': { [Op.iLike]: `%${search}%` } }
+                { '$user.number$': { [Op.iLike]: `%${search}%` } },
+                { '$user.businessProfile.shopName$': { [Op.iLike]: `%${search}%` } },
+                { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: `%${search}%` } }
             ];
         } else {
             // Only filter by tab status and date when there is no active search query
@@ -450,7 +452,19 @@ export const getCustomSales = async (req, res) => {
         const result = await Order.findAndCountAll({
             where,
             include: [
-                { model: User, as: 'user', attributes: ['id', 'fullname', 'number'] },
+                { 
+                    model: User, 
+                    as: 'user', 
+                    attributes: ['id', 'fullname', 'number'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            required: false,
+                            attributes: ['id', 'shopName', 'shopNameAlt']
+                        }
+                    ]
+                },
                 { 
                     model: OrderItem, 
                     as: 'items',

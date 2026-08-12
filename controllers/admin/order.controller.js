@@ -147,19 +147,21 @@ export const getAllOrders = async (req, res) => {
         }
 
         if (search) {
-            const escapedSearch = sequelize.escape(`%${search}%`);
-            searchClause = sequelize.literal(`(
-                "Order"."orderId" ILIKE ${escapedSearch}
-                OR "Order"."customerName" ILIKE ${escapedSearch}
-                OR "Order"."customerNumber" ILIKE ${escapedSearch}
-                OR "user"."fullname" ILIKE ${escapedSearch}
-                OR "user"."number" ILIKE ${escapedSearch}
-                OR "user"."city" ILIKE ${escapedSearch}
-                OR "user->businessProfile"."shopName" ILIKE ${escapedSearch}
-                OR "user->businessProfile"."shopNameAlt" ILIKE ${escapedSearch}
-                OR "assignment->deliveryBoy"."name" ILIKE ${escapedSearch}
-                OR "assignment->deliveryBoy"."phone" ILIKE ${escapedSearch}
-            )`);
+            const searchPattern = `%${search}%`;
+            searchClause = {
+                [Op.or]: [
+                    { orderId: { [Op.iLike]: searchPattern } },
+                    { customerName: { [Op.iLike]: searchPattern } },
+                    { customerNumber: { [Op.iLike]: searchPattern } },
+                    { '$user.fullname$': { [Op.iLike]: searchPattern } },
+                    { '$user.number$': { [Op.iLike]: searchPattern } },
+                    { '$user.city$': { [Op.iLike]: searchPattern } },
+                    { '$user.businessProfile.shopName$': { [Op.iLike]: searchPattern } },
+                    { '$user.businessProfile.shopNameAlt$': { [Op.iLike]: searchPattern } },
+                    { '$assignment.deliveryBoy.name$': { [Op.iLike]: searchPattern } },
+                    { '$assignment.deliveryBoy.phone$': { [Op.iLike]: searchPattern } }
+                ]
+            };
         }
 
         // Helper to get today's 24-hour date range in India Standard Time (IST)
