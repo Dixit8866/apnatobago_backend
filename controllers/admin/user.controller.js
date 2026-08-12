@@ -189,6 +189,28 @@ export const getAllUsers = async (req, res, next) => {
             });
         }
 
+        // Calculate user counts by godownId
+        const godownCountWhere = { ...where };
+        delete godownCountWhere.godownId;
+        godownCountWhere.godownId = { [Op.ne]: null };
+
+        const godownCountsRaw = await User.count({
+            where: godownCountWhere,
+            include,
+            distinct: true,
+            group: ['godownId']
+        });
+
+        const godownCounts = {};
+        if (Array.isArray(godownCountsRaw)) {
+            godownCountsRaw.forEach(r => {
+                const id = r.godownId;
+                if (id) {
+                    godownCounts[id] = parseInt(r.count || 0, 10);
+                }
+            });
+        }
+
         if (req.query.paginate === 'false') {
             const users = await User.findAll({ 
                 where, 
@@ -215,7 +237,8 @@ export const getAllUsers = async (req, res, next) => {
             ...responseData,
             statusCounts,
             routeCounts,
-            timingCounts
+            timingCounts,
+            godownCounts
         });
     } catch (error) {
         next(error);
