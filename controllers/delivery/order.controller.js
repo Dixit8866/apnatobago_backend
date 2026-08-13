@@ -391,18 +391,10 @@ export const getAssignmentDetails = async (req, res) => {
         const payableAmt = Math.max(0, fullTotal - orderCouponPriceVal);
 
         data.couponProducts = couponProducts;
-        data.couponPoints = orderCouponPts;
-        data.couponPrice = orderCouponPriceVal.toFixed(2);
-        data.couponDiscount = orderCouponPriceVal.toFixed(2);
-        data.discountType = orderCouponPts > 0 ? (assignment.order?.discountType || "Coupon Discount") : null;
         data.payableAmount = payableAmt.toFixed(2);
 
         if (data.order) {
             data.order.couponProducts = couponProducts;
-            data.order.couponPoints = orderCouponPts;
-            data.order.couponPrice = orderCouponPriceVal.toFixed(2);
-            data.order.couponDiscount = orderCouponPriceVal.toFixed(2);
-            data.order.discountType = orderCouponPts > 0 ? (assignment.order?.discountType || "Coupon Discount") : null;
             data.order.payableAmount = payableAmt.toFixed(2);
         }
 
