@@ -67,9 +67,10 @@ const adjustOrderPayments = (order) => {
 
     const fullTotal = parseFloat(rowData.totalAmount || 0);
     const couponDisc = parseFloat(rowData.couponDiscount || 0);
-    rowData.couponPoints = Number(rowData.couponPoints || 0);
+    const couponPts = Number(rowData.couponPoints || 0);
+    rowData.couponPoints = couponPts;
     rowData.couponDiscount = couponDisc.toFixed(2);
-    rowData.discountType = rowData.discountType || (couponDisc > 0 ? 'Coupon Discount' : null);
+    rowData.discountType = (couponPts > 0 || couponDisc > 0) ? (rowData.discountType || 'Coupon Discount') : null;
     rowData.payableAmount = Math.max(0, fullTotal - couponDisc).toFixed(2);
 
     return rowData;

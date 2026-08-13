@@ -1239,9 +1239,10 @@ export const getOrderDetails = async (req, res) => {
             orderData.paidAmount = roundTotal(orderData.paidAmount);
             const fullTotal1 = parseFloat(orderData.totalAmount || 0);
             const couponDisc1 = parseFloat(orderData.couponDiscount || 0);
-            orderData.couponPoints = Number(orderData.couponPoints || 0);
+            const couponPts1 = Number(orderData.couponPoints || 0);
+            orderData.couponPoints = couponPts1;
             orderData.couponDiscount = couponDisc1.toFixed(2);
-            orderData.discountType = orderData.discountType || (couponDisc1 > 0 ? 'Coupon Discount' : null);
+            orderData.discountType = (couponPts1 > 0 || couponDisc1 > 0) ? (orderData.discountType || 'Coupon Discount') : null;
             orderData.payableAmount = roundTotal(Math.max(0, fullTotal1 - couponDisc1));
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
@@ -1305,9 +1306,10 @@ export const getOrderDetails = async (req, res) => {
             orderData.paidAmount = roundTotal(orderData.paidAmount);
             const fullTotal2 = parseFloat(orderData.totalAmount || 0);
             const couponDisc2 = parseFloat(orderData.couponDiscount || 0);
-            orderData.couponPoints = Number(orderData.couponPoints || 0);
+            const couponPts2 = Number(orderData.couponPoints || 0);
+            orderData.couponPoints = couponPts2;
             orderData.couponDiscount = couponDisc2.toFixed(2);
-            orderData.discountType = orderData.discountType || (couponDisc2 > 0 ? 'Coupon Discount' : null);
+            orderData.discountType = (couponPts2 > 0 || couponDisc2 > 0) ? (orderData.discountType || 'Coupon Discount') : null;
             orderData.payableAmount = roundTotal(Math.max(0, fullTotal2 - couponDisc2));
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';

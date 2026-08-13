@@ -150,7 +150,7 @@ const Order = sequelize.define(
         discountType: {
             type: DataTypes.STRING,
             allowNull: true,
-            defaultValue: 'Coupon Discount',
+            defaultValue: null,
         },
         isMerged: {
             type: DataTypes.BOOLEAN,
