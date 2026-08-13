@@ -187,8 +187,8 @@ export const getActivityLogStats = async (req, res) => {
 export const getActivityLogUsers = async (req, res) => {
     try {
         const [admins, staffMembers, deliveryBoys, loggedUsers] = await Promise.all([
-            Admin.findAll({ attributes: ['id', 'name', 'username', 'role'], raw: true }),
-            GodownStaff.findAll({ attributes: ['id', 'name', 'username', 'role'], raw: true }),
+            Admin.findAll({ attributes: ['id', 'name', 'email', 'role'], raw: true }),
+            GodownStaff.findAll({ attributes: ['id', 'name', 'email', 'role'], raw: true }),
             DeliveryBoy.findAll({ attributes: ['id', 'name', 'phone'], raw: true }),
             ActivityLog.findAll({
                 attributes: ['userId', 'userName', 'userRole', 'userType'],
@@ -201,7 +201,7 @@ export const getActivityLogUsers = async (req, res) => {
 
         // 1. Add all Admins
         admins.forEach(a => {
-            const label = a.name || a.username || 'Admin';
+            const label = a.name || a.email || 'Admin';
             combinedMap.set(String(a.id), {
                 userId: String(a.id),
                 userName: label,
@@ -212,7 +212,7 @@ export const getActivityLogUsers = async (req, res) => {
 
         // 2. Add all Godown Staff
         staffMembers.forEach(s => {
-            const label = s.name || s.username || 'Godown Staff';
+            const label = s.name || s.email || 'Godown Staff';
             combinedMap.set(String(s.id), {
                 userId: String(s.id),
                 userName: label,
