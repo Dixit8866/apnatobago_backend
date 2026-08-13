@@ -8,6 +8,7 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML } from '../../utils/invoiceGenerator.js';
 import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -936,6 +937,13 @@ export const updateOrderStatus = async (req, res) => {
                 console.error('[Update Order Status Push Error]:', pushErr);
             }
         }
+
+        logActivity(req, {
+            module: 'Order List',
+            action: orderStatus !== prevStatus ? 'STATUS_CHANGE' : 'UPDATE',
+            description: `Updated Order #${order.orderId} status to "${order.orderStatus}" (Payment: ${order.paymentStatus})`,
+            metadata: { orderId: order.id, orderNo: order.orderId, prevStatus, newStatus: order.orderStatus, paymentStatus: order.paymentStatus }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", order);
     } catch (error) {

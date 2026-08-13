@@ -6,6 +6,7 @@ import sequelize from '../../config/db.js';
 import { Op } from 'sequelize';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { roundTotal } from '../../utils/roundHelper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 /**
  * Generate a unique human-readable Order ID for Direct Sales
@@ -398,6 +399,12 @@ export const createCustomSale = async (req, res) => {
         }
 
         await t.commit();
+        logActivity(req, {
+            module: 'Custom Sales',
+            action: 'CREATE',
+            description: `Created Custom Sale #${newSale.orderId} for customer ${newSale.customerName || 'Customer'} (Total: ₹${newSale.totalAmount})`,
+            metadata: { orderId: newSale.id, orderNo: newSale.orderId, totalAmount: newSale.totalAmount }
+        });
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Custom sale recorded successfully.", newSale);
     } catch (error) {
         if (t) await t.rollback();

@@ -43,6 +43,7 @@ import RouteCategory from './superadmin-models/RouteCategory.js';
 import BankSetting from './superadmin-models/BankSetting.js';
 import AdminRole from './superadmin-models/AdminRole.js';
 import StockTransfer from './superadmin-models/StockTransfer.js';
+import ActivityLog from './superadmin-models/ActivityLog.js';
 import StockTransferItem from './superadmin-models/StockTransferItem.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
@@ -617,5 +618,6 @@ export {
     AdminRole,
     StockTransfer,
     StockTransferItem,
+    ActivityLog,
     runManualMigrations
 };

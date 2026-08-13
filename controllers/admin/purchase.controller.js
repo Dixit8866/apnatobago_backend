@@ -6,6 +6,7 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
 import { generatePurchaseBill } from '../../utils/invoiceGenerator.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 export const convertToBill = async (req, res, next) => {
     const t = await sequelize.transaction();
@@ -299,6 +300,12 @@ export const convertToBill = async (req, res, next) => {
         }
 
         await t.commit();
+        logActivity(req, {
+            module: 'Order Received Bill',
+            action: 'CREATE',
+            description: `Converted Vendor Order to Purchase Bill #${bill?.billNo || billNo || 'Bill'}`,
+            metadata: { billId: bill?.id, billNo: bill?.billNo || billNo, totalAmount: bill?.totalAmount }
+        });
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Order converted to Purchase Bill successfully', bill);
     } catch (error) {
         await t.rollback();

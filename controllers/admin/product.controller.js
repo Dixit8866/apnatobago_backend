@@ -12,6 +12,7 @@ import SubCategory from '../../models/superadmin-models/SubCategory.js';
 import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 function hasAnyLangValue(obj) {
     return !!(obj && typeof obj === 'object' && Object.values(obj).some((v) => String(v || '').trim()));
