@@ -766,13 +766,24 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         const totalOrderCouponPts = allOrderItems.reduce((sum, item) => sum + Number(item.couponPoints || 0), 0);
         const totalOrderCouponDisc = allOrderItems.reduce((sum, item) => sum + parseFloat(item.couponPrice || 0), 0);
 
-        if (assignment.order) {
-            assignment.order.couponPoints = totalOrderCouponPts;
-            assignment.order.couponDiscount = totalOrderCouponDisc.toFixed(2);
-            assignment.order.discountType = (totalOrderCouponPts > 0 || totalOrderCouponDisc > 0) ? (discountType || 'Coupon Discount') : null;
+        // Check if top-level coupon parameters were sent in req.body
+        const passedDisc = couponDiscount !== undefined ? parseFloat(couponDiscount) : (totalCouponPrice !== undefined ? parseFloat(totalCouponPrice) : (couponPrice !== undefined ? parseFloat(couponPrice) : 0));
+        const passedPts = couponPoints !== undefined ? Number(couponPoints) : (totalCouponPoints !== undefined ? Number(totalCouponPoints) : 0);
 
-            // Adjust order's dueAmount to reflect net bill after total coupon discount
-            const netPayableBill = Math.max(0, parseFloat(assignment.order.totalAmount || 0) - totalOrderCouponDisc);
+        const existingCouponPts = Number(assignment.order?.couponPoints || 0);
+        const existingCouponDisc = parseFloat(assignment.order?.couponDiscount || 0);
+
+        // Final coupon discount is either sum of all items or accumulated top-level discount
+        const finalCouponPts = Math.max(totalOrderCouponPts, existingCouponPts + passedPts);
+        const finalCouponDisc = Math.max(totalOrderCouponDisc, existingCouponDisc + passedDisc);
+
+        if (assignment.order) {
+            assignment.order.couponPoints = finalCouponPts;
+            assignment.order.couponDiscount = finalCouponDisc.toFixed(2);
+            assignment.order.discountType = (finalCouponPts > 0 || finalCouponDisc > 0) ? (discountType || 'Coupon Discount') : null;
+
+            // Adjust order's dueAmount to reflect net bill after total cumulative coupon discount
+            const netPayableBill = Math.max(0, parseFloat(assignment.order.totalAmount || 0) - finalCouponDisc);
             const netDueBeforePayment = Math.max(0, netPayableBill - parseFloat(assignment.order.paidAmount || 0));
             assignment.order.dueAmount = netDueBeforePayment.toFixed(2);
             await assignment.order.save({ transaction: t });
