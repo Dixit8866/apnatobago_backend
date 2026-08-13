@@ -4,11 +4,11 @@ import {
     getActivityLogModules,
     getActivityLogStats
 } from '../../controllers/admin/activityLog.controller.js';
-import { authenticateSuperAdmin } from '../../middlewares/superadmin.middleware.js';
+import { protect, admin } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
-router.use(authenticateSuperAdmin);
+router.use(protect, admin);
 
 router.get('/', getActivityLogs);
 router.get('/modules', getActivityLogModules);
