@@ -353,8 +353,6 @@ export const getAssignmentDetails = async (req, res) => {
                 itemData.hasCoupon = hasC;
                 itemData.couponPoints = cPoints;
                 itemData.couponPrice = cPrice.toFixed(2);
-                itemData.totalCouponPoints = hasC ? (cPoints * qty) : 0;
-                itemData.totalCouponPrice = hasC ? (cPrice * qty).toFixed(2) : "0.00";
 
                 if (itemData.variantInfo) {
                     if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
@@ -375,21 +373,13 @@ export const getAssignmentDetails = async (req, res) => {
                         pName = pName.en || Object.values(pName)[0] || 'Product';
                     }
 
-                    const extraVal = (itemData.variantInfo?.extra || itemData.variantInfo?.extraName || itemData.extra || '').trim();
-                    const volVal = (itemData.variantInfo?.volume || itemData.volume || '').trim();
-                    const fullVolDisplay = extraVal ? `${extraVal} - ${volVal}` : volVal;
-
                     couponProducts.push({
                         id: itemData.productId,
                         itemId: itemData.id,
                         name: pName || itemData.productName || 'Product',
                         image: p.thumbnail || '',
-                        volume: fullVolDisplay,
-                        quantity: qty,
                         couponPoints: cPoints,
-                        couponPrice: cPrice.toFixed(2),
-                        totalCouponPoints: itemTotPts,
-                        totalCouponPrice: itemTotPrc.toFixed(2)
+                        couponPrice: cPrice.toFixed(2)
                     });
                 }
             });
@@ -401,20 +391,16 @@ export const getAssignmentDetails = async (req, res) => {
         const payableAmt = Math.max(0, fullTotal - orderCouponPriceVal);
 
         data.couponProducts = couponProducts;
-        data.totalCouponProductsCount = couponProducts.length;
-        data.totalOrderCouponPoints = orderCouponPts;
-        data.totalOrderCouponPrice = orderCouponPriceVal.toFixed(2);
         data.couponPoints = orderCouponPts;
+        data.couponPrice = orderCouponPriceVal.toFixed(2);
         data.couponDiscount = orderCouponPriceVal.toFixed(2);
         data.discountType = orderCouponPts > 0 ? (assignment.order?.discountType || "Coupon Discount") : null;
         data.payableAmount = payableAmt.toFixed(2);
 
         if (data.order) {
             data.order.couponProducts = couponProducts;
-            data.order.totalCouponProductsCount = couponProducts.length;
-            data.order.totalOrderCouponPoints = orderCouponPts;
-            data.order.totalOrderCouponPrice = orderCouponPriceVal.toFixed(2);
             data.order.couponPoints = orderCouponPts;
+            data.order.couponPrice = orderCouponPriceVal.toFixed(2);
             data.order.couponDiscount = orderCouponPriceVal.toFixed(2);
             data.order.discountType = orderCouponPts > 0 ? (assignment.order?.discountType || "Coupon Discount") : null;
             data.order.payableAmount = payableAmt.toFixed(2);
