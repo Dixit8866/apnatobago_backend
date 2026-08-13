@@ -417,24 +417,15 @@ export const createOrder = async (req, res) => {
             const itemSubtotal = itemPrice * parseFloat(quantity);
             calculatedSubtotal += itemSubtotal;
 
-            const p = variant.product || {};
-            const hasC = p.hasCoupon === true || p.hasCoupon === 'true';
-            const cPoints = Number(p.couponPoints || 0);
-            const cPrice = Number(p.couponPrice || 0);
-            if (hasC) {
-                totalOrderCouponPoints += (cPoints * Number(quantity || 1));
-                totalOrderCouponPrice += (cPrice * Number(quantity || 1));
-            }
-
             orderItemsData.push({
                 productId,
                 variantId,
                 quantity,
                 price: itemPrice,
                 sellUnit, // Important: Store the unit purchased
-                hasCoupon: hasC,
-                couponPoints: hasC ? cPoints : 0,
-                couponPrice: hasC ? cPrice : 0,
+                hasCoupon: false,
+                couponPoints: 0,
+                couponPrice: 0,
                 variantInfo: {
                     productName: variant.product.name,
                     volume: variant.volume,

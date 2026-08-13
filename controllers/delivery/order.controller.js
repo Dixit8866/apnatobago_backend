@@ -379,13 +379,13 @@ export const getAssignmentDetails = async (req, res) => {
             });
         }
 
-        const savedCouponPts = Number(assignment.order?.couponPoints || 0);
-        const savedCouponDisc = parseFloat(assignment.order?.couponDiscount || 0);
+        const isSettled = ['Delivered', 'Payment Collect', 'Payment Verify'].includes(assignment.order?.orderStatus);
+        const savedCouponPts = isSettled ? Number(assignment.order?.couponPoints || 0) : 0;
+        const savedCouponDisc = isSettled ? parseFloat(assignment.order?.couponDiscount || 0) : 0;
         const fullTotal = parseFloat(assignment.order?.totalAmount || 0);
-        const currentDue = parseFloat(assignment.order?.dueAmount || fullTotal);
-        const payableAmt = Math.max(0, currentDue - savedCouponDisc);
+        const payableAmt = Math.max(0, fullTotal - savedCouponDisc);
 
-        data.payableAmount = payableAmt.toFixed(2);
+        delete data.payableAmount; // Remove duplicate top-level field
 
         if (data.order) {
             data.order.couponPoints = savedCouponPts;
