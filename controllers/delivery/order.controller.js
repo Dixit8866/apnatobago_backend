@@ -383,7 +383,9 @@ export const getAssignmentDetails = async (req, res) => {
         const savedCouponPts = isSettled ? Number(assignment.order?.couponPoints || 0) : 0;
         const savedCouponDisc = isSettled ? parseFloat(assignment.order?.couponDiscount || 0) : 0;
         const fullTotal = parseFloat(assignment.order?.totalAmount || 0);
+        const paidAmount = parseFloat(assignment.order?.paidAmount || 0);
         const payableAmt = Math.max(0, fullTotal - savedCouponDisc);
+        const calculatedDueAmt = Math.max(0, payableAmt - paidAmount);
 
         delete data.payableAmount; // Remove duplicate top-level field
 
@@ -393,7 +395,8 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (assignment.order?.discountType || 'Coupon Discount') : null;
             data.order.couponProducts = couponProducts;
             data.order.payableAmount = payableAmt.toFixed(2);
-            data.order.dueAmount = payableAmt.toFixed(2);
+            data.order.paidAmount = paidAmount.toFixed(2);
+            data.order.dueAmount = calculatedDueAmt.toFixed(2);
             data.order.totalAmount = fullTotal.toFixed(2);
         }
 
@@ -422,8 +425,8 @@ export const getAssignmentDetails = async (req, res) => {
 
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.currentOrderAmount = payableAmt.toFixed(2);
-        data.grandTotalAmount = (parseFloat(totalPastDueAmount) + payableAmt).toFixed(2);
+        data.currentOrderAmount = calculatedDueAmt.toFixed(2);
+        data.grandTotalAmount = (parseFloat(totalPastDueAmount) + calculatedDueAmt).toFixed(2);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", data);
     } catch (error) {
