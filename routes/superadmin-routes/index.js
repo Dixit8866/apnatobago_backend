@@ -33,6 +33,8 @@ import routeCategoryRoutes from './routeCategory.routes.js';
 import bankSettingRoutes from './bankSetting.routes.js';
 import partyCallingRoutes from './partyCalling.routes.js';
 import paymentRoutes from './payment.routes.js';
+import adminRoleRoutes from './adminRole.routes.js';
+import transferRoutes from './transfers.routes.js';
 import activityLogRoutes from '../admin/activityLog.routes.js';
 
 const router = express.Router();
