@@ -4,6 +4,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 /**
  * @desc    Get all payments for admin
@@ -245,6 +246,12 @@ export const updatePaymentSubmission = async (req, res) => {
         }
 
         await t.commit();
+        logActivity(req, {
+            module: 'Payment',
+            action: 'UPDATE',
+            description: `Payment ${payment.id} status updated to ${isSubmitted ? 'Verified' : 'Unverified'} (Amount: ₹${payment.amount})`,
+            metadata: { paymentId: payment.id, orderId: payment.orderId, amount: payment.amount, isSubmitted }
+        });
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment submission status updated successfully.", payment);
     } catch (error) {
         if (t) await t.rollback();

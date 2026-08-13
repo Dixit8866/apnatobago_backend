@@ -52,7 +52,7 @@ const AVAILABLE_MODULES = [
  */
 export const getActivityLogs = async (req, res) => {
     try {
-        const { search, module, action, startDate, endDate, userType } = req.query;
+        const { search, module, action, startDate, endDate, userType, userId, staff } = req.query;
         const { limit, offset, page } = getPaginationOptions(req.query);
 
         const where = {};
@@ -75,6 +75,15 @@ export const getActivityLogs = async (req, res) => {
 
         if (userType && userType !== 'ALL') {
             where.userType = userType;
+        }
+
+        if (userId && userId !== 'ALL') {
+            where.userId = userId;
+        } else if (staff && staff !== 'ALL') {
+            where[Op.or] = [
+                { userId: staff },
+                { userName: staff }
+            ];
         }
 
         if (startDate || endDate) {
@@ -165,6 +174,27 @@ export const getActivityLogStats = async (req, res) => {
         });
     } catch (error) {
         logger.error(`[Get Activity Log Stats Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get list of unique users/staff who have logged activity
+ * @route   GET /api/admin/activity-logs/users
+ * @access  Private (Admin)
+ */
+export const getActivityLogUsers = async (req, res) => {
+    try {
+        const users = await ActivityLog.findAll({
+            attributes: ['userId', 'userName', 'userRole', 'userType'],
+            group: ['userId', 'userName', 'userRole', 'userType'],
+            order: [['userName', 'ASC']],
+            raw: true
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Activity log users fetched', users);
+    } catch (error) {
+        logger.error(`[Get Activity Log Users Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
