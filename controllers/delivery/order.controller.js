@@ -339,20 +339,15 @@ export const getAssignmentDetails = async (req, res) => {
 
         // Sanitize variantInfo in items & extract couponProducts
         const couponProducts = [];
-        let totalOrderCouponPoints = 0;
-        let totalOrderCouponPrice = 0;
 
         if (data.order && data.order.items) {
             data.order.items.forEach(itemData => {
                 const p = itemData.product || {};
-                const hasC = itemData.hasCoupon === true || itemData.hasCoupon === 'true' || p.hasCoupon === true || p.hasCoupon === 'true';
-                const cPoints = Number(itemData.couponPoints !== undefined && itemData.couponPoints !== null && Number(itemData.couponPoints) > 0 ? itemData.couponPoints : (p.couponPoints || 0));
-                const cPrice = Number(itemData.couponPrice !== undefined && itemData.couponPrice !== null && Number(itemData.couponPrice) > 0 ? itemData.couponPrice : (p.couponPrice || 0));
-                const qty = Number(itemData.quantity || 1);
-
-                itemData.hasCoupon = hasC;
-                itemData.couponPoints = cPoints;
-                itemData.couponPrice = cPrice.toFixed(2);
+                const isItemCouponApplied = itemData.hasCoupon === true || itemData.hasCoupon === 'true';
+                
+                itemData.hasCoupon = isItemCouponApplied;
+                itemData.couponPoints = isItemCouponApplied ? Number(itemData.couponPoints || 0) : 0;
+                itemData.couponPrice = isItemCouponApplied ? parseFloat(itemData.couponPrice || 0).toFixed(2) : "0.00";
 
                 if (itemData.variantInfo) {
                     if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
@@ -362,11 +357,10 @@ export const getAssignmentDetails = async (req, res) => {
                     if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
                 }
 
-                if (hasC) {
-                    const itemTotPts = cPoints * qty;
-                    const itemTotPrc = cPrice * qty;
-                    totalOrderCouponPoints += itemTotPts;
-                    totalOrderCouponPrice += itemTotPrc;
+                const masterHasCoupon = p.hasCoupon === true || p.hasCoupon === 'true';
+                if (masterHasCoupon) {
+                    const masterPts = Number(p.couponPoints || 0);
+                    const masterPrice = Number(p.couponPrice || 0);
 
                     let pName = p.name;
                     if (typeof pName === 'object' && pName !== null) {
@@ -378,21 +372,24 @@ export const getAssignmentDetails = async (req, res) => {
                         itemId: itemData.id,
                         name: pName || itemData.productName || 'Product',
                         image: p.thumbnail || '',
-                        couponPoints: cPoints,
-                        couponPrice: cPrice.toFixed(2)
+                        couponPoints: masterPts,
+                        couponPrice: masterPrice.toFixed(2)
                     });
                 }
             });
         }
 
-        const orderCouponPts = Number(assignment.order?.couponPoints || totalOrderCouponPoints || 0);
-        const orderCouponPriceVal = parseFloat(assignment.order?.couponDiscount || totalOrderCouponPrice || 0);
+        const savedCouponPts = Number(assignment.order?.couponPoints || 0);
+        const savedCouponDisc = parseFloat(assignment.order?.couponDiscount || 0);
         const fullTotal = parseFloat(assignment.order?.totalAmount || 0);
-        const payableAmt = Math.max(0, fullTotal - orderCouponPriceVal);
+        const payableAmt = Math.max(0, fullTotal - savedCouponDisc);
 
         data.payableAmount = payableAmt.toFixed(2);
 
         if (data.order) {
+            data.order.couponPoints = savedCouponPts;
+            data.order.couponDiscount = savedCouponDisc.toFixed(2);
+            data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (assignment.order?.discountType || 'Coupon Discount') : null;
             data.order.couponProducts = couponProducts;
             data.order.payableAmount = payableAmt.toFixed(2);
         }
