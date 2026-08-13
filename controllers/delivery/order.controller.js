@@ -382,7 +382,8 @@ export const getAssignmentDetails = async (req, res) => {
         const savedCouponPts = Number(assignment.order?.couponPoints || 0);
         const savedCouponDisc = parseFloat(assignment.order?.couponDiscount || 0);
         const fullTotal = parseFloat(assignment.order?.totalAmount || 0);
-        const payableAmt = Math.max(0, fullTotal - savedCouponDisc);
+        const currentDue = parseFloat(assignment.order?.dueAmount || fullTotal);
+        const payableAmt = Math.max(0, currentDue - savedCouponDisc);
 
         data.payableAmount = payableAmt.toFixed(2);
 
@@ -392,6 +393,8 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (assignment.order?.discountType || 'Coupon Discount') : null;
             data.order.couponProducts = couponProducts;
             data.order.payableAmount = payableAmt.toFixed(2);
+            data.order.dueAmount = payableAmt.toFixed(2);
+            data.order.totalAmount = fullTotal.toFixed(2);
         }
 
         // Dynamically adjust CREDIT payments based on real (CASH/ONLINE) repayments
@@ -419,13 +422,8 @@ export const getAssignmentDetails = async (req, res) => {
 
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.currentOrderAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
-        data.grandTotalAmount = (parseFloat(totalPastDueAmount) + parseFloat(assignment.order.dueAmount)).toFixed(2);
-
-        // Force the mobile app to display the remaining due amount instead of the full bill amount
-        if (data.order) {
-            data.order.totalAmount = parseFloat(assignment.order.dueAmount).toFixed(2);
-        }
+        data.currentOrderAmount = payableAmt.toFixed(2);
+        data.grandTotalAmount = (parseFloat(totalPastDueAmount) + payableAmt).toFixed(2);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", data);
     } catch (error) {

@@ -599,14 +599,13 @@ export const createOrder = async (req, res) => {
             const mergedTotal = roundTotal(mergedSubtotal + mergedDeliveryCharge);
 
             logger.info(`[Create Order] Updating existing order: ${existingOrder.id} with total: ${mergedTotal}`);
-            const netMergedDue = Math.max(0, mergedTotal - totalOrderCouponPrice);
             // Update the existing order details
             await existingOrder.update({
                 totalAmount: mergedTotal,
-                dueAmount: netMergedDue,
-                couponPoints: totalOrderCouponPoints,
-                couponDiscount: totalOrderCouponPrice,
-                discountType: totalOrderCouponPoints > 0 ? 'Coupon Discount' : null,
+                dueAmount: mergedTotal,
+                couponPoints: 0,
+                couponDiscount: 0,
+                discountType: null,
                 deliveryCharge: mergedDeliveryCharge,
                 deliveryMode,
                 deliveryRoundId,
@@ -617,16 +616,16 @@ export const createOrder = async (req, res) => {
 
         } else {
             logger.info(`[Create Order] Creating new order. totalAmount: ${finalTotal}, paymentMethod: ${paymentMethod}`);
-            const netPayableDue = paymentStatus === 'Paid' ? 0 : Math.max(0, finalTotal - totalOrderCouponPrice);
+            const netPayableDue = paymentStatus === 'Paid' ? 0 : finalTotal;
             // Create a new Order
             const newOrder = await Order.create({
                 orderId: await generateUniqueOrderId(),
                 userId,
                 totalAmount: finalTotal,
-                couponPoints: totalOrderCouponPoints,
-                couponDiscount: totalOrderCouponPrice,
-                discountType: totalOrderCouponPoints > 0 ? 'Coupon Discount' : null,
-                paidAmount: paymentStatus === 'Paid' ? Math.max(0, finalTotal - totalOrderCouponPrice) : 0,
+                couponPoints: 0,
+                couponDiscount: 0,
+                discountType: null,
+                paidAmount: paymentStatus === 'Paid' ? finalTotal : 0,
                 dueAmount: netPayableDue,
                 paymentMethod,
                 paymentStatus,
