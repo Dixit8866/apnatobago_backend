@@ -63,6 +63,14 @@ const adjustOrderPayments = (order) => {
     }).filter(p => parseFloat(p.amount) > 0);
 
     rowData.payments = adjustedPayments;
+
+    const fullTotal = parseFloat(rowData.totalAmount || 0);
+    const couponDisc = parseFloat(rowData.couponDiscount || 0);
+    rowData.couponPoints = Number(rowData.couponPoints || 0);
+    rowData.couponDiscount = couponDisc.toFixed(2);
+    rowData.discountType = rowData.discountType || (couponDisc > 0 ? 'Coupon Discount' : null);
+    rowData.payableAmount = Math.max(0, fullTotal - couponDisc).toFixed(2);
+
     return rowData;
 };
 

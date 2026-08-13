@@ -62,6 +62,18 @@ const OrderPayment = sequelize.define('OrderPayment', {
     onlineType: {
         type: DataTypes.STRING, // 'Razorpay' | 'Bank Account'
         allowNull: true,
+    },
+    couponPoints: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+    },
+    couponDiscount: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+    },
+    discountType: {
+        type: DataTypes.STRING,
+        allowNull: true,
     }
 }, {
     timestamps: true,

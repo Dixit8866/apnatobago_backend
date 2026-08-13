@@ -395,16 +395,29 @@ export const getAssignmentDetails = async (req, res) => {
             });
         }
 
+        const orderCouponPts = Number(assignment.order?.couponPoints || totalOrderCouponPoints || 0);
+        const orderCouponPriceVal = parseFloat(assignment.order?.couponDiscount || totalOrderCouponPrice || 0);
+        const fullTotal = parseFloat(assignment.order?.totalAmount || 0);
+        const payableAmt = Math.max(0, fullTotal - orderCouponPriceVal);
+
         data.couponProducts = couponProducts;
         data.totalCouponProductsCount = couponProducts.length;
-        data.totalOrderCouponPoints = totalOrderCouponPoints;
-        data.totalOrderCouponPrice = totalOrderCouponPrice.toFixed(2);
+        data.totalOrderCouponPoints = orderCouponPts;
+        data.totalOrderCouponPrice = orderCouponPriceVal.toFixed(2);
+        data.couponPoints = orderCouponPts;
+        data.couponDiscount = orderCouponPriceVal.toFixed(2);
+        data.discountType = orderCouponPts > 0 ? (assignment.order?.discountType || "Coupon Discount") : null;
+        data.payableAmount = payableAmt.toFixed(2);
 
         if (data.order) {
             data.order.couponProducts = couponProducts;
             data.order.totalCouponProductsCount = couponProducts.length;
-            data.order.totalOrderCouponPoints = totalOrderCouponPoints;
-            data.order.totalOrderCouponPrice = totalOrderCouponPrice.toFixed(2);
+            data.order.totalOrderCouponPoints = orderCouponPts;
+            data.order.totalOrderCouponPrice = orderCouponPriceVal.toFixed(2);
+            data.order.couponPoints = orderCouponPts;
+            data.order.couponDiscount = orderCouponPriceVal.toFixed(2);
+            data.order.discountType = orderCouponPts > 0 ? (assignment.order?.discountType || "Coupon Discount") : null;
+            data.order.payableAmount = payableAmt.toFixed(2);
         }
 
         // Dynamically adjust CREDIT payments based on real (CASH/ONLINE) repayments

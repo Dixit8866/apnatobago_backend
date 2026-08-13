@@ -166,6 +166,8 @@ export const createOrder = async (req, res) => {
         }
 
         let calculatedSubtotal = 0;
+        let totalOrderCouponPoints = 0;
+        let totalOrderCouponPrice = 0;
         const orderItemsData = [];
         const outOfStockItems = [];
 
@@ -415,6 +417,15 @@ export const createOrder = async (req, res) => {
             const itemSubtotal = itemPrice * parseFloat(quantity);
             calculatedSubtotal += itemSubtotal;
 
+            const p = variant.product || {};
+            const hasC = p.hasCoupon === true || p.hasCoupon === 'true';
+            if (hasC) {
+                const cPoints = Number(p.couponPoints || 0);
+                const cPrice = Number(p.couponPrice || 0);
+                totalOrderCouponPoints += (cPoints * Number(quantity || 1));
+                totalOrderCouponPrice += (cPrice * Number(quantity || 1));
+            }
+
             orderItemsData.push({
                 productId,
                 variantId,
@@ -585,10 +596,14 @@ export const createOrder = async (req, res) => {
             const mergedTotal = roundTotal(mergedSubtotal + mergedDeliveryCharge);
 
             logger.info(`[Create Order] Updating existing order: ${existingOrder.id} with total: ${mergedTotal}`);
+            const netMergedDue = Math.max(0, mergedTotal - totalOrderCouponPrice);
             // Update the existing order details
             await existingOrder.update({
                 totalAmount: mergedTotal,
-                dueAmount: mergedTotal,
+                dueAmount: netMergedDue,
+                couponPoints: totalOrderCouponPoints,
+                couponDiscount: totalOrderCouponPrice,
+                discountType: totalOrderCouponPoints > 0 ? 'Coupon Discount' : null,
                 deliveryCharge: mergedDeliveryCharge,
                 deliveryMode,
                 deliveryRoundId,
@@ -599,13 +614,17 @@ export const createOrder = async (req, res) => {
 
         } else {
             logger.info(`[Create Order] Creating new order. totalAmount: ${finalTotal}, paymentMethod: ${paymentMethod}`);
+            const netPayableDue = paymentStatus === 'Paid' ? 0 : Math.max(0, finalTotal - totalOrderCouponPrice);
             // Create a new Order
             const newOrder = await Order.create({
                 orderId: await generateUniqueOrderId(),
                 userId,
                 totalAmount: finalTotal,
-                paidAmount: paymentStatus === 'Paid' ? finalTotal : 0,
-                dueAmount: paymentStatus === 'Paid' ? 0 : finalTotal,
+                couponPoints: totalOrderCouponPoints,
+                couponDiscount: totalOrderCouponPrice,
+                discountType: totalOrderCouponPoints > 0 ? 'Coupon Discount' : null,
+                paidAmount: paymentStatus === 'Paid' ? Math.max(0, finalTotal - totalOrderCouponPrice) : 0,
+                dueAmount: netPayableDue,
                 paymentMethod,
                 paymentStatus,
                 orderStatus: 'Pending',
@@ -1215,6 +1234,12 @@ export const getOrderDetails = async (req, res) => {
             orderData.totalAmount = roundTotal(orderData.totalAmount);
             orderData.dueAmount = roundTotal(orderData.dueAmount);
             orderData.paidAmount = roundTotal(orderData.paidAmount);
+            const fullTotal1 = parseFloat(orderData.totalAmount || 0);
+            const couponDisc1 = parseFloat(orderData.couponDiscount || 0);
+            orderData.couponPoints = Number(orderData.couponPoints || 0);
+            orderData.couponDiscount = couponDisc1.toFixed(2);
+            orderData.discountType = orderData.discountType || (couponDisc1 > 0 ? 'Coupon Discount' : null);
+            orderData.payableAmount = roundTotal(Math.max(0, fullTotal1 - couponDisc1));
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }
@@ -1275,6 +1300,12 @@ export const getOrderDetails = async (req, res) => {
             orderData.totalAmount = roundTotal(orderData.totalAmount);
             orderData.dueAmount = roundTotal(orderData.dueAmount);
             orderData.paidAmount = roundTotal(orderData.paidAmount);
+            const fullTotal2 = parseFloat(orderData.totalAmount || 0);
+            const couponDisc2 = parseFloat(orderData.couponDiscount || 0);
+            orderData.couponPoints = Number(orderData.couponPoints || 0);
+            orderData.couponDiscount = couponDisc2.toFixed(2);
+            orderData.discountType = orderData.discountType || (couponDisc2 > 0 ? 'Coupon Discount' : null);
+            orderData.payableAmount = roundTotal(Math.max(0, fullTotal2 - couponDisc2));
             if (orderData.orderStatus === 'Payment Collect' || orderData.orderStatus === 'Payment Verify') {
                 orderData.orderStatus = 'Delivered';
             }

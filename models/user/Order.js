@@ -139,6 +139,19 @@ const Order = sequelize.define(
             type: DataTypes.DECIMAL(10, 2),
             defaultValue: 0,
         },
+        couponPoints: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0,
+        },
+        couponDiscount: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
+        },
+        discountType: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: 'Coupon Discount',
+        },
         isMerged: {
             type: DataTypes.BOOLEAN,
             defaultValue: false,

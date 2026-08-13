@@ -85,7 +85,7 @@ export const getAllPayments = async (req, res) => {
                 {
                     model: Order,
                     as: 'order',
-                    attributes: ['id', 'orderId', 'totalAmount', 'paymentMethod', 'paymentStatus', 'customerName', 'customerNumber'],
+                    attributes: ['id', 'orderId', 'totalAmount', 'paymentMethod', 'paymentStatus', 'customerName', 'customerNumber', 'couponPoints', 'couponDiscount', 'discountType', 'discount'],
                     include: [
                         {
                             model: User,
@@ -136,6 +136,21 @@ export const getAllPayments = async (req, res) => {
         ]);
 
         const responseData = formatPaginatedResponse(result, page, limit);
+
+        if (Array.isArray(responseData.data)) {
+            responseData.data = responseData.data.map(payment => {
+                const p = payment.toJSON ? payment.toJSON() : payment;
+                if (p.order) {
+                    const totalAmt = parseFloat(p.order.totalAmount || 0);
+                    const couponDisc = parseFloat(p.order.couponDiscount || 0);
+                    p.order.payableAmount = Math.max(0, totalAmt - couponDisc).toFixed(2);
+                    p.order.couponPoints = Number(p.order.couponPoints || 0);
+                    p.order.couponDiscount = couponDisc.toFixed(2);
+                    p.order.discountType = p.order.discountType || (couponDisc > 0 ? 'Coupon Discount' : null);
+                }
+                return p;
+            });
+        }
 
         responseData.statusCounts = {
             '': responseData.totalRecords, // All payments count
