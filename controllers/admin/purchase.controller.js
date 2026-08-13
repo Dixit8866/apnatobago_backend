@@ -301,7 +301,7 @@ export const convertToBill = async (req, res, next) => {
 
         await t.commit();
         logActivity(req, {
-            module: 'Order Received Bill',
+            module: 'Purchase Bill',
             action: 'CREATE',
             description: `Converted Vendor Order to Purchase Bill #${bill?.billNo || billNo || 'Bill'}`,
             metadata: { billId: bill?.id, billNo: bill?.billNo || billNo, totalAmount: bill?.totalAmount }

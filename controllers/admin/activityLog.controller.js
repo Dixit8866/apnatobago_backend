@@ -58,7 +58,15 @@ export const getActivityLogs = async (req, res) => {
         const where = {};
 
         if (module && module !== 'ALL') {
-            where.module = module;
+            if (module === 'Purchase Bill' || module === 'Order Received Bill') {
+                where.module = { [Op.in]: ['Purchase Bill', 'Order Received Bill'] };
+            } else if (module === 'Products' || module === 'Product') {
+                where.module = { [Op.in]: ['Products', 'Product'] };
+            } else if (module === 'User Order List' || module === 'Order List') {
+                where.module = { [Op.in]: ['User Order List', 'Order List'] };
+            } else {
+                where.module = module;
+            }
         }
 
         if (action && action !== 'ALL') {
