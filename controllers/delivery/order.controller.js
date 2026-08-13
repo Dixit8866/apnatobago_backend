@@ -345,9 +345,9 @@ export const getAssignmentDetails = async (req, res) => {
         if (data.order && data.order.items) {
             data.order.items.forEach(itemData => {
                 const p = itemData.product || {};
-                const hasC = p.hasCoupon === true || p.hasCoupon === 'true';
-                const cPoints = Number(p.couponPoints || 0);
-                const cPrice = Number(p.couponPrice || 0);
+                const hasC = itemData.hasCoupon === true || itemData.hasCoupon === 'true' || p.hasCoupon === true || p.hasCoupon === 'true';
+                const cPoints = Number(itemData.couponPoints !== undefined && itemData.couponPoints !== null && Number(itemData.couponPoints) > 0 ? itemData.couponPoints : (p.couponPoints || 0));
+                const cPrice = Number(itemData.couponPrice !== undefined && itemData.couponPrice !== null && Number(itemData.couponPrice) > 0 ? itemData.couponPrice : (p.couponPrice || 0));
                 const qty = Number(itemData.quantity || 1);
 
                 itemData.hasCoupon = hasC;
@@ -710,7 +710,14 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             onlineAmount = 0,
             creditAmount = 0,
             onlineTransactionId,
-            notes
+            notes,
+            totalCouponPoints,
+            couponPoints,
+            totalCouponPrice,
+            couponDiscount,
+            couponPrice,
+            discountType,
+            couponItems
         } = req.body;
         const deliveryBoyId = req.user.id;
 
@@ -727,6 +734,55 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         }
 
         logger.info(`[Complete Order Settle]: Starting settlement for assignment ${assignmentId}, delivery boy ${deliveryBoyId}`);
+
+        // Handle product-wise coupon items if sent by Delivery Boy App
+        let calcCouponPts = null;
+        let calcCouponDisc = null;
+
+        if (Array.isArray(couponItems) && couponItems.length > 0) {
+            calcCouponPts = 0;
+            calcCouponDisc = 0;
+            for (const cItem of couponItems) {
+                const itemPts = Number(cItem.couponPoints || cItem.points || 0);
+                const itemDisc = parseFloat(cItem.couponPrice || cItem.discount || cItem.price || 0);
+                calcCouponPts += itemPts;
+                calcCouponDisc += itemDisc;
+
+                const whereCond = { orderId: assignment.order.id };
+                if (cItem.itemId || cItem.id) whereCond.id = cItem.itemId || cItem.id;
+                else if (cItem.productId) whereCond.productId = cItem.productId;
+
+                await OrderItem.update({
+                    hasCoupon: itemPts > 0 || itemDisc > 0,
+                    couponPoints: itemPts,
+                    couponPrice: itemDisc
+                }, {
+                    where: whereCond,
+                    transaction: t
+                });
+            }
+        }
+
+        // Extract passed coupon points and discount amount if sent by App
+        const reqPts = couponPoints !== undefined ? Number(couponPoints) : (totalCouponPoints !== undefined ? Number(totalCouponPoints) : calcCouponPts);
+        const reqDisc = couponDiscount !== undefined ? parseFloat(couponDiscount) : (totalCouponPrice !== undefined ? parseFloat(totalCouponPrice) : (couponPrice !== undefined ? parseFloat(couponPrice) : calcCouponDisc));
+
+        if (assignment.order) {
+            const finalCouponPts = reqPts !== null ? reqPts : Number(assignment.order.couponPoints || 0);
+            const finalCouponDisc = reqDisc !== null ? reqDisc : parseFloat(assignment.order.couponDiscount || 0);
+
+            assignment.order.couponPoints = finalCouponPts;
+            assignment.order.couponDiscount = finalCouponDisc.toFixed(2);
+            if (finalCouponPts > 0 || finalCouponDisc > 0) {
+                assignment.order.discountType = discountType || 'Coupon Discount';
+            }
+
+            // Adjust order's dueAmount to reflect net bill after coupon discount (e.g. 4000 - 50 = 3950)
+            const netPayableBill = Math.max(0, parseFloat(assignment.order.totalAmount || 0) - finalCouponDisc);
+            const netDueBeforePayment = Math.max(0, netPayableBill - parseFloat(assignment.order.paidAmount || 0));
+            assignment.order.dueAmount = netDueBeforePayment.toFixed(2);
+            await assignment.order.save({ transaction: t });
+        }
 
         const userId = assignment.order.userId;
 

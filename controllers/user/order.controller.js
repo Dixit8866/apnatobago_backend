@@ -419,9 +419,9 @@ export const createOrder = async (req, res) => {
 
             const p = variant.product || {};
             const hasC = p.hasCoupon === true || p.hasCoupon === 'true';
+            const cPoints = Number(p.couponPoints || 0);
+            const cPrice = Number(p.couponPrice || 0);
             if (hasC) {
-                const cPoints = Number(p.couponPoints || 0);
-                const cPrice = Number(p.couponPrice || 0);
                 totalOrderCouponPoints += (cPoints * Number(quantity || 1));
                 totalOrderCouponPrice += (cPrice * Number(quantity || 1));
             }
@@ -432,6 +432,9 @@ export const createOrder = async (req, res) => {
                 quantity,
                 price: itemPrice,
                 sellUnit, // Important: Store the unit purchased
+                hasCoupon: hasC,
+                couponPoints: hasC ? cPoints : 0,
+                couponPrice: hasC ? cPrice : 0,
                 variantInfo: {
                     productName: variant.product.name,
                     volume: variant.volume,

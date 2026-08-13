@@ -47,6 +47,18 @@ const OrderItem = sequelize.define(
             type: DataTypes.DECIMAL(10, 2),
             defaultValue: 0,
         },
+        hasCoupon: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false,
+        },
+        couponPoints: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0,
+        },
+        couponPrice: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
+        },
     },
     {
         timestamps: true,
