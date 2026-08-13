@@ -390,7 +390,6 @@ export const getAssignmentDetails = async (req, res) => {
         const fullTotal = parseFloat(assignment.order?.totalAmount || 0);
         const payableAmt = Math.max(0, fullTotal - orderCouponPriceVal);
 
-        data.couponProducts = couponProducts;
         data.payableAmount = payableAmt.toFixed(2);
 
         if (data.order) {
