@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import ActivityLog from '../../models/superadmin-models/ActivityLog.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
-import { sendSuccessResponse, sendErrorResponse } from '../../helpers/response.helper.js';
+import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 
 const AVAILABLE_MODULES = [
@@ -92,14 +92,14 @@ export const getActivityLogs = async (req, res) => {
             ];
         }
 
-        const { rows: logs, count: totalItems } = await ActivityLog.findAndCountAll({
+        const result = await ActivityLog.findAndCountAll({
             where,
             limit,
             offset,
             order: [['createdAt', 'DESC']]
         });
 
-        const paginated = formatPaginatedResponse(logs, totalItems, page, limit);
+        const paginated = formatPaginatedResponse(result, page, limit);
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Activity logs fetched successfully', paginated);
     } catch (error) {
         logger.error(`[Get Activity Logs Error]: ${error.message}`);
