@@ -1156,6 +1156,13 @@ export const bulkVerifyPayments = async (req, res) => {
             );
         }
 
+        logActivity(req, {
+            module: 'Payment',
+            action: 'UPDATE',
+            description: `Verified payments for ${orders.length} order(s)`,
+            metadata: { orderIds, count: orders.length, note }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payments verified and orders moved to Delivered successfully.");
     } catch (error) {
         logger.error(`[Admin Bulk Verify Payments Error]: ${error.message}`);

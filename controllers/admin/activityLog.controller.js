@@ -1,5 +1,6 @@
 import { Op } from 'sequelize';
 import ActivityLog from '../../models/superadmin-models/ActivityLog.js';
+import { Admin, GodownStaff, DeliveryBoy } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
@@ -179,20 +180,74 @@ export const getActivityLogStats = async (req, res) => {
 };
 
 /**
- * @desc    Get list of unique users/staff who have logged activity
+ * @desc    Get list of unique users/staff who have logged activity or exist in database
  * @route   GET /api/admin/activity-logs/users
  * @access  Private (Admin)
  */
 export const getActivityLogUsers = async (req, res) => {
     try {
-        const users = await ActivityLog.findAll({
-            attributes: ['userId', 'userName', 'userRole', 'userType'],
-            group: ['userId', 'userName', 'userRole', 'userType'],
-            order: [['userName', 'ASC']],
-            raw: true
+        const [admins, staffMembers, deliveryBoys, loggedUsers] = await Promise.all([
+            Admin.findAll({ attributes: ['id', 'name', 'username', 'role'], raw: true }),
+            GodownStaff.findAll({ attributes: ['id', 'name', 'username', 'role'], raw: true }),
+            DeliveryBoy.findAll({ attributes: ['id', 'name', 'phone'], raw: true }),
+            ActivityLog.findAll({
+                attributes: ['userId', 'userName', 'userRole', 'userType'],
+                group: ['userId', 'userName', 'userRole', 'userType'],
+                raw: true
+            })
+        ]);
+
+        const combinedMap = new Map();
+
+        // 1. Add all Admins
+        admins.forEach(a => {
+            const label = a.name || a.username || 'Admin';
+            combinedMap.set(String(a.id), {
+                userId: String(a.id),
+                userName: label,
+                userRole: a.role || 'Admin',
+                userType: 'Admin'
+            });
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Activity log users fetched', users);
+        // 2. Add all Godown Staff
+        staffMembers.forEach(s => {
+            const label = s.name || s.username || 'Godown Staff';
+            combinedMap.set(String(s.id), {
+                userId: String(s.id),
+                userName: label,
+                userRole: s.role || 'GodownStaff',
+                userType: 'GodownStaff'
+            });
+        });
+
+        // 3. Add all Delivery Boys
+        deliveryBoys.forEach(d => {
+            const label = d.name || d.phone || 'Delivery Boy';
+            combinedMap.set(String(d.id), {
+                userId: String(d.id),
+                userName: label,
+                userRole: 'DeliveryBoy',
+                userType: 'DeliveryBoy'
+            });
+        });
+
+        // 4. Add any logged users from ActivityLog table not already present
+        loggedUsers.forEach(u => {
+            const key = u.userId ? String(u.userId) : String(u.userName);
+            if (key && !combinedMap.has(key)) {
+                combinedMap.set(key, {
+                    userId: u.userId || key,
+                    userName: u.userName || key,
+                    userRole: u.userRole || 'Staff',
+                    userType: u.userType || 'Staff'
+                });
+            }
+        });
+
+        const usersList = Array.from(combinedMap.values()).sort((a, b) => a.userName.localeCompare(b.userName));
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Activity log users fetched', usersList);
     } catch (error) {
         logger.error(`[Get Activity Log Users Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
