@@ -386,12 +386,86 @@ export const updateOutletOrderStatus = async (req, res) => {
         }
 
         const oldStatus = order.orderStatus;
+
+        // If order status is changed to Cancelled from an active status, restore stock to inventory
+        const isNewCancelled = orderStatus === 'Cancelled' || orderStatus === 'Admin Cancel' || String(orderStatus).includes('Cancel');
+        const wasOldCancelled = oldStatus === 'Cancelled' || oldStatus === 'Admin Cancel' || String(oldStatus).includes('Cancel');
+
+        if (isNewCancelled && !wasOldCancelled) {
+            const items = await OutletOrderItem.findAll({
+                where: { outletOrderId: order.id }
+            });
+
+            for (const item of items) {
+                const variant = await ProductVariant.findByPk(item.variantId);
+                const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
+                const qtyToRestore = Math.round(item.sellUnit === 'Inner'
+                    ? Number(item.quantity)
+                    : Number(item.quantity) * bUPP);
+
+                let stock = await InventoryStock.findOne({
+                    where: {
+                        productId: item.productId,
+                        godownId: order.godownId
+                    },
+                    order: [['createdAt', 'DESC']]
+                });
+
+                if (stock) {
+                    const newTotalBaseUnits = Number(stock.totalBaseUnits || 0) + qtyToRestore;
+                    await stock.update({ totalBaseUnits: newTotalBaseUnits });
+
+                    await InventoryTransaction.create({
+                        stockId: stock.id,
+                        productId: item.productId,
+                        variantId: item.variantId,
+                        godownId: order.godownId,
+                        type: 'ADJUSTMENT',
+                        primaryUnitId: stock.primaryUnitId,
+                        secondaryUnitId: stock.secondaryUnitId,
+                        secondaryPerPrimary: stock.secondaryPerPrimary,
+                        totalQtyBaseUnits: qtyToRestore,
+                        balanceAfterBaseUnits: newTotalBaseUnits,
+                        note: `Cancelled Outlet Order #${order.orderId} Stock Restored`,
+                        createdBy: req.user?.fullname || 'Admin'
+                    });
+                } else {
+                    const newStock = await InventoryStock.create({
+                        productId: item.productId,
+                        variantId: item.variantId,
+                        godownId: order.godownId,
+                        primaryUnitId: variant?.volumeId || null,
+                        secondaryUnitId: null,
+                        secondaryPerPrimary: bUPP,
+                        totalBaseUnits: qtyToRestore,
+                        avgPurchasePricePerBaseUnit: item.price || 0,
+                        lastPurchasePricePerBaseUnit: item.price || 0
+                    });
+
+                    await InventoryTransaction.create({
+                        stockId: newStock.id,
+                        productId: item.productId,
+                        variantId: item.variantId,
+                        godownId: order.godownId,
+                        type: 'ADJUSTMENT',
+                        primaryUnitId: newStock.primaryUnitId,
+                        secondaryUnitId: newStock.secondaryUnitId,
+                        secondaryPerPrimary: newStock.secondaryPerPrimary,
+                        totalQtyBaseUnits: qtyToRestore,
+                        balanceAfterBaseUnits: qtyToRestore,
+                        note: `Cancelled Outlet Order #${order.orderId} Stock Restored`,
+                        createdBy: req.user?.fullname || 'Admin'
+                    });
+                }
+            }
+        }
+
         await order.update({ orderStatus });
 
         logActivity(req, {
             module: 'Outlet Orders',
             action: 'STATUS_CHANGE',
-            description: `Updated status of Outlet Order #${order.orderId} from ${oldStatus} to ${orderStatus}`,
+            description: `Updated status of Outlet Order #${order.orderId} from ${oldStatus} to ${orderStatus}${isNewCancelled ? ' (Stock Restored)' : ''}`,
             metadata: { orderId: order.id, oldStatus, newStatus: orderStatus }
         });
 

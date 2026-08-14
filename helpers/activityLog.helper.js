@@ -21,6 +21,13 @@ export const logActivity = async (req, { module, action, description, metadata =
 
         const ipAddress = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || req?.ip || '';
 
+        let safeDescription = description;
+        if (typeof safeDescription === 'object' && safeDescription !== null) {
+            safeDescription = safeDescription.en || safeDescription.gu || safeDescription.hn || Object.values(safeDescription).find(v => typeof v === 'string') || JSON.stringify(safeDescription);
+        } else {
+            safeDescription = String(safeDescription || '');
+        }
+
         await ActivityLog.create({
             userId,
             userType,
@@ -28,7 +35,7 @@ export const logActivity = async (req, { module, action, description, metadata =
             userRole,
             module,
             action,
-            description,
+            description: safeDescription,
             metadata,
             ipAddress
         });
