@@ -5,6 +5,7 @@ import logger from '../../logger/apiLogger.js';
 import sequelize from '../../config/db.js';
 import { Op } from 'sequelize';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 /**
  * Generate a unique human-readable Order ID for Outlet Orders (e.g. OTL-100001)
@@ -62,7 +63,8 @@ export const createOutletOrder = async (req, res) => {
             paidAmount = 0,
             paymentMode = 'Cash',
             deliveryDate = null,
-            fulfillmentMode = 'ROUND',
+            fulfillmentMode = 'Outlet',
+            orderStatus = 'Completed',
             note = '',
             discountAmount = 0
         } = req.body;
@@ -141,15 +143,19 @@ export const createOutletOrder = async (req, res) => {
             paymentStatus = 'Partial';
         }
 
+        const finalCustomerName = (customerName && customerName.trim()) ? customerName.trim() : (userObj?.fullname || 'Guest');
+        const finalCustomerPhone = customerPhone || userObj?.mobileNumber || '';
+        const finalShopName = shopName || userObj?.shopName || 'Direct Outlet';
+
         // 2. Create OutletOrder record
         const newOutletOrder = await OutletOrder.create({
             orderId: generatedOrderId,
             userId: userId || null,
-            customerName: (customerName && customerName.trim()) ? customerName.trim() : (userObj?.fullname || 'Guest'),
-            customerPhone: customerPhone || userObj?.mobileNumber || '',
-            shopName: shopName || userObj?.shopName || 'Direct Outlet',
+            customerName: finalCustomerName,
+            customerPhone: finalCustomerPhone,
+            shopName: finalShopName,
             godownId: targetGodownId,
-            orderStatus: 'Completed',
+            orderStatus: orderStatus || 'Completed',
             fulfillmentStatus: 'Fulfilled',
             paymentStatus,
             totalAmount: totalOrderAmount,
@@ -226,6 +232,20 @@ export const createOutletOrder = async (req, res) => {
 
         await t.commit();
 
+        // 4. Log Activity for Activity Monitoring
+        logActivity(req, {
+            module: 'Outlet Orders',
+            action: 'CREATE',
+            description: `Created Outlet Order #${generatedOrderId} for ${finalCustomerName} (${finalShopName}) with amount ₹${finalGrandTotal}`,
+            metadata: {
+                orderId: newOutletOrder.id,
+                generatedOrderId,
+                grandTotal: finalGrandTotal,
+                godownId: targetGodownId,
+                itemsCount: processedItems.length
+            }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Outlet order created successfully.', {
             order: newOutletOrder
         });
@@ -237,13 +257,13 @@ export const createOutletOrder = async (req, res) => {
 };
 
 /**
- * @desc    Get List of Outlet Orders (Paginated & Filtered)
+ * @desc    Get List of Outlet Orders (Paginated, Filtered & Status Counts)
  * @route   GET /api/admin/outlet-orders
  * @access  Private (Admin)
  */
 export const getOutletOrders = async (req, res) => {
     try {
-        const { search, godownId, paymentStatus, startDate, endDate } = req.query;
+        const { search, godownId, paymentStatus, status, date, startDate, endDate } = req.query;
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
@@ -264,12 +284,23 @@ export const getOutletOrders = async (req, res) => {
                 { customerPhone: { [Op.iLike]: `%${search}%` } },
                 { shopName: { [Op.iLike]: `%${search}%` } }
             ];
-        }
+        } else {
+            if (status && status !== 'All' && status !== 'Today') {
+                whereCondition.orderStatus = status;
+            }
 
-        if (startDate && endDate) {
-            whereCondition.createdAt = {
-                [Op.between]: [new Date(startDate), new Date(`${endDate}T23:59:59.999Z`)]
-            };
+            if (date || status === 'Today') {
+                const targetDateStr = date || new Date().toISOString().split('T')[0];
+                const startOfDay = new Date(targetDateStr);
+                startOfDay.setHours(0, 0, 0, 0);
+                const endOfDay = new Date(targetDateStr);
+                endOfDay.setHours(23, 59, 59, 999);
+                whereCondition.createdAt = { [Op.between]: [startOfDay, endOfDay] };
+            } else if (startDate && endDate) {
+                whereCondition.createdAt = {
+                    [Op.between]: [new Date(startDate), new Date(`${endDate}T23:59:59.999Z`)]
+                };
+            }
         }
 
         const result = await OutletOrder.findAndCountAll({
@@ -289,14 +320,93 @@ export const getOutletOrders = async (req, res) => {
             limit,
             offset,
             order: [['createdAt', 'DESC']],
-            distinct: true
+            distinct: true,
+            subQuery: false
         });
 
+        // Calculate Status Counts for Tab Badges
+        const todayStr = new Date().toISOString().split('T')[0];
+        const startOfToday = new Date(todayStr);
+        startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date(todayStr);
+        endOfToday.setHours(23, 59, 59, 999);
+
+        const baseCountWhere = godownId ? { godownId } : {};
+
+        const [
+            todayCount,
+            pendingCount,
+            packagingCount,
+            packedCount,
+            shippingCount,
+            deliveredCount,
+            paymentCollectCount,
+            cancelledCount,
+            completedCount
+        ] = await Promise.all([
+            OutletOrder.count({ where: { ...baseCountWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Pending' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Packaging' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Packed' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Shipping' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Delivered' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Payment Collect' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Cancelled' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Completed' } })
+        ]);
+
+        const statusCounts = {
+          Today: todayCount,
+          Pending: pendingCount,
+          Packaging: packagingCount,
+          Packed: packedCount,
+          Shipping: shippingCount,
+          Delivered: deliveredCount,
+          'Payment Collect': paymentCollectCount,
+          Cancelled: cancelledCount,
+          Completed: completedCount
+        };
+
         const formatted = formatPaginatedResponse(result, page, limit);
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Outlet orders fetched successfully.', formatted);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Outlet orders fetched successfully.', {
+            ...formatted,
+            statusCounts
+        });
     } catch (error) {
         logger.error(`[getOutletOrders Error]: ${error.message}`, { stack: error.stack });
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to fetch outlet orders.', error.message);
+    }
+};
+
+/**
+ * @desc    Update Outlet Order Status
+ * @route   PUT /api/admin/outlet-orders/:id/status
+ * @access  Private (Admin)
+ */
+export const updateOutletOrderStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { orderStatus } = req.body;
+
+        const order = await OutletOrder.findByPk(id);
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Outlet order not found.');
+        }
+
+        const oldStatus = order.orderStatus;
+        await order.update({ orderStatus });
+
+        logActivity(req, {
+            module: 'Outlet Orders',
+            action: 'STATUS_CHANGE',
+            description: `Updated status of Outlet Order #${order.orderId} from ${oldStatus} to ${orderStatus}`,
+            metadata: { orderId: order.id, oldStatus, newStatus: orderStatus }
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Outlet order status updated successfully.', order);
+    } catch (error) {
+        logger.error(`[updateOutletOrderStatus Error]: ${error.message}`, { stack: error.stack });
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to update outlet order status.', error.message);
     }
 };
 
