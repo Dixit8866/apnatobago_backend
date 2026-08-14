@@ -1,6 +1,6 @@
 import express from 'express';
 import { createOutletOrder, getOutletOrders, getOutletOrderById } from '../../controllers/admin/outletOrder.controller.js';
-import { protect, admin } from '../../middleware/auth.middleware.js';
+import { protect, admin } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
