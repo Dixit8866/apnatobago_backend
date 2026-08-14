@@ -144,7 +144,7 @@ export const createOutletOrder = async (req, res) => {
         }
 
         const finalCustomerName = (customerName && customerName.trim()) ? customerName.trim() : (userObj?.fullname || 'Guest');
-        const finalCustomerPhone = customerPhone || userObj?.mobileNumber || '';
+        const finalCustomerPhone = customerPhone || userObj?.number || '';
         const finalShopName = shopName || userObj?.shopName || 'Direct Outlet';
 
         // 2. Create OutletOrder record
@@ -263,7 +263,7 @@ export const createOutletOrder = async (req, res) => {
  */
 export const getOutletOrders = async (req, res) => {
     try {
-        const { search, godownId, paymentStatus, status, date, startDate, endDate } = req.query;
+        const { search, godownId, paymentStatus, status, date, startDate, endDate, today } = req.query;
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
@@ -289,8 +289,8 @@ export const getOutletOrders = async (req, res) => {
                 whereCondition.orderStatus = status;
             }
 
-            if (date || status === 'Today') {
-                const targetDateStr = date || new Date().toISOString().split('T')[0];
+            if (today === 'true' || date || status === 'Today') {
+                const targetDateStr = (date && date !== 'undefined') ? date : new Date().toISOString().split('T')[0];
                 const startOfDay = new Date(targetDateStr);
                 startOfDay.setHours(0, 0, 0, 0);
                 const endOfDay = new Date(targetDateStr);
@@ -306,14 +306,15 @@ export const getOutletOrders = async (req, res) => {
         const result = await OutletOrder.findAndCountAll({
             where: whereCondition,
             include: [
-                { model: Godown, as: 'godown', attributes: ['id', 'name'] },
-                { model: User, as: 'user', attributes: ['id', 'fullname', 'mobileNumber', 'shopName'] },
+                { model: Godown, as: 'godown', attributes: ['id', 'name'], required: false },
+                { model: User, as: 'user', attributes: ['id', 'fullname', 'number'], required: false },
                 {
                     model: OutletOrderItem,
                     as: 'items',
+                    required: false,
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra'] }
+                        { model: Product, as: 'product', attributes: ['id', 'name'], required: false },
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra'], required: false }
                     ]
                 }
             ],
@@ -338,33 +339,24 @@ export const getOutletOrders = async (req, res) => {
             pendingCount,
             packagingCount,
             packedCount,
-            shippingCount,
-            deliveredCount,
-            paymentCollectCount,
-            cancelledCount,
-            completedCount
+            completedCount,
+            cancelledCount
         ] = await Promise.all([
             OutletOrder.count({ where: { ...baseCountWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } } }),
             OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Pending' } }),
             OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Packaging' } }),
             OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Packed' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Shipping' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Delivered' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Payment Collect' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Cancelled' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Completed' } })
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Completed' } }),
+            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Cancelled' } })
         ]);
 
         const statusCounts = {
-          Today: todayCount,
-          Pending: pendingCount,
-          Packaging: packagingCount,
-          Packed: packedCount,
-          Shipping: shippingCount,
-          Delivered: deliveredCount,
-          'Payment Collect': paymentCollectCount,
-          Cancelled: cancelledCount,
-          Completed: completedCount
+            Today: todayCount,
+            Pending: pendingCount,
+            Packaging: packagingCount,
+            Packed: packedCount,
+            Completed: completedCount,
+            Cancelled: cancelledCount
         };
 
         const formatted = formatPaginatedResponse(result, page, limit);
@@ -422,7 +414,7 @@ export const getOutletOrderById = async (req, res) => {
         const order = await OutletOrder.findByPk(id, {
             include: [
                 { model: Godown, as: 'godown', attributes: ['id', 'name'] },
-                { model: User, as: 'user', attributes: ['id', 'fullname', 'mobileNumber', 'shopName', 'address', 'city', 'pincode'] },
+                { model: User, as: 'user', attributes: ['id', 'fullname', 'number'] },
                 {
                     model: OutletOrderItem,
                     as: 'items',
