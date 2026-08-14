@@ -45,6 +45,8 @@ import AdminRole from './superadmin-models/AdminRole.js';
 import StockTransfer from './superadmin-models/StockTransfer.js';
 import ActivityLog from './superadmin-models/ActivityLog.js';
 import StockTransferItem from './superadmin-models/StockTransferItem.js';
+import OutletOrder from './superadmin-models/OutletOrder.js';
+import OutletOrderItem from './superadmin-models/OutletOrderItem.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -543,6 +545,16 @@ StockTransferItem.belongsTo(StockTransfer, { foreignKey: 'stockTransferId', as: 
 StockTransferItem.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 StockTransferItem.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
 
+// OutletOrder Associations
+OutletOrder.hasMany(OutletOrderItem, { foreignKey: 'outletOrderId', as: 'items' });
+OutletOrderItem.belongsTo(OutletOrder, { foreignKey: 'outletOrderId', as: 'order' });
+
+OutletOrder.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+OutletOrder.belongsTo(Godown, { foreignKey: 'godownId', as: 'godown' });
+
+OutletOrderItem.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+OutletOrderItem.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
+
 // ─── Realtime Database Hooks ───────────────────────────────────────────────
 import { emitAdminNotification } from '../socket.js';
 
@@ -619,5 +631,7 @@ export {
     StockTransfer,
     StockTransferItem,
     ActivityLog,
+    OutletOrder,
+    OutletOrderItem,
     runManualMigrations
 };
