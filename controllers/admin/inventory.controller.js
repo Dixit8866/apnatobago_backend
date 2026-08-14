@@ -10,6 +10,7 @@ import InventoryTransaction from '../../models/superadmin-models/InventoryTransa
 import Godown from '../../models/superadmin-models/Godown.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 function normalizeInt(val) {
     const num = Number(val);
@@ -520,6 +521,14 @@ export const createPurchaseTransaction = async (req, res, next) => {
         );
 
         await t.commit();
+
+        logActivity(req, {
+            module: 'Stock Inventory',
+            action: 'STOCK_UPDATE',
+            description: `Added Stock Purchase of ${qtyTotalBaseUnits} base units for product ID #${productId}`,
+            metadata: { productId, variantId, godownId, qtyTotalBaseUnits }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Purchase transaction saved successfully.', transaction);
     } catch (error) {
         await t.rollback();
@@ -535,12 +544,13 @@ export const createSaleTransaction = async (req, res, next) => {
             variantId,
             godownId,
             primaryUnitId,
-            secondaryUnitId = null,
-            secondaryPerPrimary = 1,
+            secondaryUnitId,
+            secondaryPerPrimary,
             qtyPrimary = 0,
             qtySecondary = 0,
             note,
         } = req.body;
+
         const qtyTotalBaseUnits = qtyToBaseUnits(qtyPrimary, qtySecondary, secondaryPerPrimary);
 
         if (!productId || !variantId || !godownId || !primaryUnitId) {
@@ -552,31 +562,44 @@ export const createSaleTransaction = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Sale quantity must be greater than zero.');
         }
 
+        const valid = await validateProductVariant(productId, variantId, t);
+        if (!valid) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid product/variant selection.');
+        }
+
         const validGodown = await validateGodown(godownId, t);
         if (!validGodown) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid godown selection.');
         }
-        const stock = await InventoryStock.findOne({ where: { productId, variantId, godownId }, transaction: t });
-        if (!stock) {
+
+        const validUnits = await validateVolumeIds({ primaryUnitId, secondaryUnitId, transaction: t });
+        if (!validUnits) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Stock not found for selected product variant.');
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Invalid unit selection.');
         }
 
-        const currentQty = Number(stock.totalBaseUnits || 0);
-        if (qtyTotalBaseUnits > currentQty) {
+        const stock = await InventoryStock.findOne({
+            where: { productId, variantId, godownId },
+            transaction: t,
+        });
+
+        if (!stock || stock.totalBaseUnits < qtyTotalBaseUnits) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Insufficient stock for sale.');
+            return sendErrorResponse(
+                res,
+                HTTP_STATUS.BAD_REQUEST,
+                `Insufficient stock to complete sale transaction. Available: ${stock ? stock.totalBaseUnits : 0} base units.`
+            );
         }
 
-        const newQty = currentQty - qtyTotalBaseUnits;
-        const avgPrice = Number(stock.avgPurchasePricePerBaseUnit || 0);
-        const nextAvg = newQty === 0 ? 0 : avgPrice;
+        const newQty = stock.totalBaseUnits - qtyTotalBaseUnits;
+        const nextAvg = Number(stock.avgPurchasePricePerBaseUnit || 0);
 
         await stock.update(
             {
                 totalBaseUnits: newQty,
-                avgPurchasePricePerBaseUnit: nextAvg,
             },
             { transaction: t }
         );
@@ -589,8 +612,8 @@ export const createSaleTransaction = async (req, res, next) => {
                 godownId,
                 type: 'SALE',
                 primaryUnitId,
-                secondaryUnitId,
-                secondaryPerPrimary: Number(secondaryPerPrimary || stock.secondaryPerPrimary || 1),
+                secondaryUnitId: secondaryUnitId || null,
+                secondaryPerPrimary: Number(secondaryPerPrimary || 1),
                 qtyPrimary: Number(qtyPrimary || 0),
                 qtySecondary: Number(qtySecondary || 0),
                 totalQtyBaseUnits: qtyTotalBaseUnits,
@@ -603,6 +626,14 @@ export const createSaleTransaction = async (req, res, next) => {
         );
 
         await t.commit();
+
+        logActivity(req, {
+            module: 'Stock Inventory',
+            action: 'STOCK_UPDATE',
+            description: `Recorded Manual Stock Sale of ${qtyTotalBaseUnits} base units for product ID #${productId}`,
+            metadata: { productId, variantId, godownId, qtyTotalBaseUnits }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Sale transaction saved successfully.', transaction);
     } catch (error) {
         await t.rollback();
@@ -721,6 +752,14 @@ export const updateInventoryStock = async (req, res, next) => {
         );
 
         await t.commit();
+
+        logActivity(req, {
+            module: 'Stock Inventory',
+            action: 'STOCK_UPDATE',
+            description: `Adjusted Stock Inventory for product ID #${stock.productId} to ${qtyTotalBaseUnits} base units`,
+            metadata: { stockId: stock.id, productId, godownId, qtyTotalBaseUnits }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Inventory stock updated successfully.', stock);
     } catch (error) {
         await t.rollback();
@@ -735,7 +774,17 @@ export const deleteInventoryStock = async (req, res, next) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Inventory stock not found.');
         }
 
+        const stockId = stock.id;
+        const prodId = stock.productId;
         await stock.destroy();
+
+        logActivity(req, {
+            module: 'Stock Inventory',
+            action: 'DELETE',
+            description: `Deleted Stock Inventory entry #${stockId} for product ID #${prodId}`,
+            metadata: { stockId, productId: prodId }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Inventory stock deleted successfully.');
     } catch (error) {
         next(error);

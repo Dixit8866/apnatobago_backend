@@ -9,6 +9,7 @@ import Admin from '../../models/superadmin-models/Admin.js';
 import Godown from '../../models/superadmin-models/Godown.js';
 import { getPaginationOptions } from '../../helpers/query.helper.js';
 import { generateVendorOrderInvoice } from '../../utils/invoiceGenerator.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 // ─── Auto-generate order number ──────────────────────────────────────────────
 async function generateOrderNo() {
@@ -176,6 +177,13 @@ export const createVendorOrder = async (req, res) => {
             include: [{ model: Vendor, as: 'vendor' }],
         });
 
+        logActivity(req, {
+            module: 'Purchase Orders',
+            action: 'CREATE',
+            description: `Created Vendor Order #${orderNo}`,
+            metadata: { orderId: order.id, orderNo }
+        });
+
         res.status(201).json({
             status: 'success',
             message: 'Vendor order created successfully',
@@ -239,7 +247,6 @@ export const getAllVendorOrders = async (req, res) => {
             distinct: true,
         });
 
-        // ─── Status Counts ───────────────────────────────────────────────────
         const startToday = new Date();
         startToday.setHours(0, 0, 0, 0);
         const endToday = new Date();
@@ -312,7 +319,6 @@ export const updateVendorOrder = async (req, res) => {
 
         await order.update(updateData);
 
-        // Auto-link any new products in items to the Vendor's productIds
         if (items && order.vendorId) {
             try {
                 const vendor = await Vendor.findByPk(order.vendorId);
@@ -334,6 +340,13 @@ export const updateVendorOrder = async (req, res) => {
             include: [{ model: Vendor, as: 'vendor' }],
         });
 
+        logActivity(req, {
+            module: 'Purchase Orders',
+            action: 'UPDATE',
+            description: `Updated Vendor Order #${order.orderNo}`,
+            metadata: { orderId: order.id }
+        });
+
         res.status(200).json({
             status: 'success',
             message: 'Order updated successfully',
@@ -350,7 +363,16 @@ export const deleteVendorOrder = async (req, res) => {
         const order = await VendorOrder.findByPk(req.params.id);
         if (!order) return res.status(404).json({ message: 'Order not found' });
 
+        const orderNo = order.orderNo;
         await order.destroy();
+
+        logActivity(req, {
+            module: 'Purchase Orders',
+            action: 'DELETE',
+            description: `Deleted Vendor Order #${orderNo}`,
+            metadata: { orderId: req.params.id }
+        });
+
         res.status(200).json({ status: 'success', message: 'Order deleted successfully' });
     } catch (error) {
         res.status(500).json({ message: error.message });

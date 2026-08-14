@@ -333,6 +333,14 @@ export const createProduct = async (req, res, next) => {
         }
 
         await t.commit();
+
+        logActivity(req, {
+            module: 'Products',
+            action: 'CREATE',
+            description: `Created Product "${getLocalizedText(product.name)}"`,
+            metadata: { productId: product.id }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Product created successfully.', product);
     } catch (error) {
         await t.rollback();
@@ -937,6 +945,14 @@ export const updateProduct = async (req, res, next) => {
         }
 
         await t.commit();
+
+        logActivity(req, {
+            module: 'Products',
+            action: 'UPDATE',
+            description: `Updated Product "${getLocalizedText(product.name)}"`,
+            metadata: { productId: product.id }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product updated successfully.', product);
     } catch (error) {
         await t.rollback();
@@ -965,6 +981,13 @@ export const deleteProduct = async (req, res, next) => {
 
         product.status = 'Deleted';
         await product.save();
+
+        logActivity(req, {
+            module: 'Products',
+            action: 'DELETE',
+            description: `Deleted Product "${getLocalizedText(product.name)}"`,
+            metadata: { productId: product.id }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Product deleted successfully.');
     } catch (error) {
@@ -1148,6 +1171,14 @@ export const updateProductPrices = async (req, res, next) => {
         }
 
         await t.commit();
+
+        logActivity(req, {
+            module: 'Products',
+            action: 'UPDATE',
+            description: `Updated prices for Product ID #${productId || 'bulk'}`,
+            metadata: { productId }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Prices updated successfully.');
     } catch (error) {
         await t.rollback();

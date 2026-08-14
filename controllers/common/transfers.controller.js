@@ -15,6 +15,7 @@ import {
 } from '../../models/index.js';
 
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 export const getTransfers = async (req, res, next) => {
     try {
@@ -233,11 +234,21 @@ export const createTransfer = async (req, res, next) => {
                 amount
             }, { transaction: t });
         }
-
         // Update totalAmount of the transfer
         await transfer.update({ totalAmount: grandTotal }, { transaction: t });
 
+        const fromGodown = await Godown.findByPk(fromGodownId);
+        const toGodown = await Godown.findByPk(toGodownId);
+
         await t.commit();
+
+        logActivity(req, {
+            module: 'Stock Transfers',
+            action: 'CREATE',
+            description: `Created Stock Transfer #${transferNo} from ${fromGodown?.name || 'Godown'} to ${toGodown?.name || 'Godown'}`,
+            metadata: { transferId: transfer.id, transferNo, fromGodownId, toGodownId }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Stock transfer requested successfully.', transfer);
     } catch (error) {
         await t.rollback();

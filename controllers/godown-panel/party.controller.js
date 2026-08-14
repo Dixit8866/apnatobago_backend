@@ -3,6 +3,7 @@ import { User, BusinessProfile, Godown, RouteCategory, AppSettings } from '../..
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 // Safe attributes list to match admin panel
 const SAFE_ATTRIBUTES = ['id', 'fullname', 'email', 'dialcode', 'number', 'city', 'postcode', 'showtabacco', 'creditline', 'blockcredit', 'applevel', 'status', 'kycverification', 'routeCategoryId', 'deliveryRoundId', 'deliveryRoundTiming', 'deviceType', 'version', 'latitude', 'longitude', 'createdAt', 'updatedAt'];
@@ -201,6 +202,13 @@ export const updateGodownParty = async (req, res, next) => {
         if (status !== undefined) updates.status = status;
 
         await user.update(updates);
+
+        logActivity(req, {
+            module: 'Party Management',
+            action: 'UPDATE',
+            description: `Updated party "${user.fullname}" details`,
+            metadata: { partyId: user.id, updates }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Party updated successfully.', user);
     } catch (error) {

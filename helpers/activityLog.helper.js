@@ -15,7 +15,7 @@ export const logActivity = async (req, { module, action, description, metadata =
     try {
         const currentUser = req?.user || req?.admin || req?.staff || {};
         const userId = currentUser.id || null;
-        const userName = currentUser.name || currentUser.username || currentUser.email || 'Admin User';
+        const userName = currentUser.fullname || currentUser.name || currentUser.username || currentUser.email || 'Admin User';
         const userRole = currentUser.role?.name || currentUser.role || (currentUser.isSuperAdmin ? 'Super Admin' : 'Admin Staff');
         const userType = currentUser.userType || (currentUser.isSuperAdmin ? 'Super Admin' : 'Admin');
 

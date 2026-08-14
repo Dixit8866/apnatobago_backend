@@ -8,6 +8,8 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
 
+import { logActivity } from '../../helpers/activityLog.helper.js';
+
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createCompanyCategory = async (req, res, next) => {
     try {
@@ -49,6 +51,13 @@ export const createCompanyCategory = async (req, res, next) => {
             mainCategoryId: mainCategoryId || null,
             subCategoryId: subCategoryId || null,
             isTobacco: isTobacco || false
+        });
+
+        logActivity(req, {
+            module: 'Company Categories',
+            action: 'CREATE',
+            description: `Created Company Category "${title?.en || title?.gu || 'Category'}"`,
+            metadata: { categoryId: category.id }
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Company Category created successfully.", category);
@@ -217,6 +226,13 @@ export const updateCompanyCategory = async (req, res, next) => {
             isTobacco: isTobacco !== undefined ? isTobacco : category.isTobacco,
         });
 
+        logActivity(req, {
+            module: 'Company Categories',
+            action: 'UPDATE',
+            description: `Updated Company Category "${category.title?.en || category.title?.gu || 'Category'}"`,
+            metadata: { categoryId: category.id }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category updated successfully.", category);
     } catch (error) {
         next(error);
@@ -231,6 +247,13 @@ export const deleteCompanyCategory = async (req, res, next) => {
 
         category.status = 'Deleted';
         await category.save();
+
+        logActivity(req, {
+            module: 'Company Categories',
+            action: 'DELETE',
+            description: `Deleted Company Category "${category.title?.en || category.title?.gu || 'Category'}"`,
+            metadata: { categoryId: category.id }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Company Category deleted successfully.");
     } catch (error) {

@@ -4,6 +4,7 @@ import PartyCalling from '../../models/user/PartyCalling.js';
 import { BusinessProfile, RouteCategory, AppSettings, Order } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 /**
  * @desc    Get daily calling list for godown parties
@@ -513,6 +514,13 @@ export const logOrUpdateCall = async (req, res, next) => {
                 followupDateTime: finalFollowup
             });
         }
+
+        logActivity(req, {
+            module: 'Party Calling',
+            action: created ? 'CREATE' : 'UPDATE',
+            description: `Logged calling status "${status}" for customer "${user.fullname}"`,
+            metadata: { userId, status, notes }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Call logged successfully.', callRecord);
     } catch (error) {

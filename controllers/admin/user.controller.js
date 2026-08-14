@@ -5,6 +5,7 @@ import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings,
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
@@ -89,6 +90,14 @@ export const createUser = async (req, res, next) => {
         }
 
         const safeUser = await User.findByPk(user.id, { attributes: SAFE_ATTRIBUTES });
+
+        logActivity(req, {
+            module: 'Party Management',
+            action: 'CREATE',
+            description: `Created new Customer/Party "${fullname}" (${number})`,
+            metadata: { userId: user.id }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'User created successfully.', safeUser);
     } catch (error) {
         next(error);
@@ -367,13 +376,16 @@ export const updateUser = async (req, res, next) => {
 
         const updated = await User.findByPk(user.id, { 
             attributes: SAFE_ATTRIBUTES,
-            include: [
-                { model: BusinessProfile, as: 'businessProfile' },
-                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] },
-                { model: Godown, as: 'assignedGodown', attributes: ['id', 'name'] }
-            ]
+        const updatedUser = await User.findByPk(req.params.id, { attributes: SAFE_ATTRIBUTES });
+
+        logActivity(req, {
+            module: 'Party Management',
+            action: 'UPDATE',
+            description: `Updated Customer/Party "${user.fullname}"`,
+            metadata: { userId: user.id }
         });
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'User updated.', updated);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'User updated successfully.', updatedUser);
     } catch (error) {
         next(error);
     }
@@ -387,6 +399,8 @@ export const deleteUser = async (req, res, next) => {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
         }
+
+        const userName = user.fullname;
         
         // Delete associated records first to avoid foreign key issues
         await BusinessProfile.destroy({ where: { userId: user.id }, transaction: t });
@@ -403,6 +417,14 @@ export const deleteUser = async (req, res, next) => {
         await user.destroy({ transaction: t });
         
         await t.commit();
+
+        logActivity(req, {
+            module: 'Party Management',
+            action: 'DELETE',
+            description: `Deleted Customer/Party "${userName}"`,
+            metadata: { userId: req.params.id }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User deleted completely from database.');
     } catch (error) {
         await t.rollback();

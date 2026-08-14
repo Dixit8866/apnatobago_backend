@@ -1,21 +1,19 @@
 import GodownStaff from '../../models/superadmin-models/GodownStaff.js';
 import Godown from '../../models/superadmin-models/Godown.js';
 import { Op } from 'sequelize';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 export const createGodownStaff = async (req, res) => {
     try {
         const { godownId, name, email, password, role, phone, address, salary, profileImage, status } = req.body;
 
-        // Validate required fields
         if (!godownId || !name || !email || !password) {
             return res.status(400).json({ success: false, message: "godownId, name, email, and password are required." });
         }
 
-        // Check if godown exists
         const godown = await Godown.findByPk(godownId);
         if (!godown) return res.status(404).json({ success: false, message: "Godown not found" });
 
-        // Check duplicate email
         const existing = await GodownStaff.findOne({ where: { email } });
         if (existing) return res.status(400).json({ success: false, message: "Email already in use." });
 
@@ -26,7 +24,13 @@ export const createGodownStaff = async (req, res) => {
             status: status || 'Active'
         });
 
-        // Return without password
+        logActivity(req, {
+            module: 'Godown Staff',
+            action: 'CREATE',
+            description: `Created Godown Staff member "${name}" (${role || 'staff'})`,
+            metadata: { staffId: staff.id, godownId }
+        });
+
         const result = staff.toJSON();
         delete result.password;
 
@@ -60,7 +64,6 @@ export const getGodownStaffs = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        // Status counts
         const allCount = await GodownStaff.count();
         const activeCount = await GodownStaff.count({ where: { status: 'Active' } });
         const inactiveCount = await GodownStaff.count({ where: { status: 'Inactive' } });
@@ -104,7 +107,6 @@ export const updateGodownStaff = async (req, res) => {
         const staff = await GodownStaff.findByPk(req.params.id);
         if (!staff) return res.status(404).json({ success: false, message: "Godown Staff not found" });
 
-        // If email changed, check duplicate
         if (email && email !== staff.email) {
             const existing = await GodownStaff.findOne({ where: { email } });
             if (existing) return res.status(400).json({ success: false, message: "Email already in use." });
@@ -115,6 +117,13 @@ export const updateGodownStaff = async (req, res) => {
         if (password) updateData.password = password;
 
         await staff.update(updateData);
+
+        logActivity(req, {
+            module: 'Godown Staff',
+            action: 'UPDATE',
+            description: `Updated Godown Staff member "${staff.name}"`,
+            metadata: { staffId: staff.id }
+        });
 
         const result = staff.toJSON();
         delete result.password;
@@ -130,7 +139,16 @@ export const deleteGodownStaff = async (req, res) => {
         const staff = await GodownStaff.findByPk(req.params.id);
         if (!staff) return res.status(404).json({ success: false, message: "Godown Staff not found" });
 
+        const staffName = staff.name;
         await staff.destroy();
+
+        logActivity(req, {
+            module: 'Godown Staff',
+            action: 'DELETE',
+            description: `Deleted Godown Staff member "${staffName}"`,
+            metadata: { staffId: req.params.id }
+        });
+
         res.status(200).json({ success: true, message: "Godown Staff deleted successfully" });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

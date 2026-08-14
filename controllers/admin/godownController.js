@@ -1,10 +1,21 @@
 import Godown from '../../models/superadmin-models/Godown.js';
 import { Op } from 'sequelize';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 export const createGodown = async (req, res) => {
     try {
         const { name, type, address, pincodes, status } = req.body;
         const godown = await Godown.create({ name, type, address, pincodes, status });
+
+        const godownName = typeof name === 'object' ? (name.en || name.gu || 'Godown') : String(name || 'Godown');
+
+        logActivity(req, {
+            module: 'Godown Management',
+            action: 'CREATE',
+            description: `Created Godown "${godownName}" (${type || 'sub'})`,
+            metadata: { godownId: godown.id }
+        });
+
         res.status(201).json({ success: true, message: "Godown created successfully", data: godown });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -36,7 +47,6 @@ export const getGodowns = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        // Calculate counts
         const allCount = await Godown.count();
         const mainCount = await Godown.count({ where: { type: 'main' } });
         const subCount = await Godown.count({ where: { type: 'sub' } });
@@ -78,6 +88,16 @@ export const updateGodown = async (req, res) => {
         if (!godown) return res.status(404).json({ success: false, message: "Godown not found" });
 
         await godown.update({ name, type, address, pincodes, status });
+
+        const godownName = typeof godown.name === 'object' ? (godown.name.en || godown.name.gu || 'Godown') : String(godown.name || 'Godown');
+
+        logActivity(req, {
+            module: 'Godown Management',
+            action: 'UPDATE',
+            description: `Updated Godown "${godownName}"`,
+            metadata: { godownId: godown.id }
+        });
+
         res.status(200).json({ success: true, message: "Godown updated successfully", data: godown });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -89,7 +109,17 @@ export const deleteGodown = async (req, res) => {
         const godown = await Godown.findByPk(req.params.id);
         if (!godown) return res.status(404).json({ success: false, message: "Godown not found" });
 
+        const godownName = typeof godown.name === 'object' ? (godown.name.en || godown.name.gu || 'Godown') : String(godown.name || 'Godown');
+
         await godown.destroy();
+
+        logActivity(req, {
+            module: 'Godown Management',
+            action: 'DELETE',
+            description: `Deleted Godown "${godownName}"`,
+            metadata: { godownId: req.params.id }
+        });
+
         res.status(200).json({ success: true, message: "Godown deleted successfully" });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

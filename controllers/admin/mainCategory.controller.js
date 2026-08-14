@@ -4,6 +4,7 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
+import { logActivity } from '../../helpers/activityLog.helper.js';
 
 export const createMainCategory = async (req, res, next) => {
     try {
@@ -41,6 +42,14 @@ export const createMainCategory = async (req, res, next) => {
             image, title, description, status, isTobacco,
             position: maxPos + 1
         });
+
+        logActivity(req, {
+            module: 'Categories',
+            action: 'CREATE',
+            description: `Created Main Category "${title?.en || title?.gu || 'Category'}"`,
+            metadata: { categoryId: mainCategory.id }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Main Category created successfully.", mainCategory);
     } catch (error) {
         next(error);
@@ -181,6 +190,14 @@ export const updateMainCategory = async (req, res, next) => {
         }
 
         await category.update({ image, title, description, status, isTobacco });
+
+        logActivity(req, {
+            module: 'Categories',
+            action: 'UPDATE',
+            description: `Updated Main Category "${category.title?.en || category.title?.gu || 'Category'}"`,
+            metadata: { categoryId: category.id }
+        });
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Main Category updated successfully.", category);
     } catch (error) {
         next(error);
@@ -194,6 +211,13 @@ export const deleteMainCategory = async (req, res, next) => {
 
         category.status = 'Deleted';
         await category.save();
+
+        logActivity(req, {
+            module: 'Categories',
+            action: 'DELETE',
+            description: `Deleted Main Category "${category.title?.en || category.title?.gu || 'Category'}"`,
+            metadata: { categoryId: category.id }
+        });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Main Category deleted successfully.");
     } catch (error) {
