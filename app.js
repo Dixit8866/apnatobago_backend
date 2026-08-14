@@ -43,8 +43,10 @@ const allowedOrigins = [
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        if (process.env.NODE_ENV !== 'production' && /^http:\/\/localhost:\d+$/.test(origin)) {
-            return callback(null, true);
+        if (process.env.NODE_ENV !== 'production') {
+            if (/^http:\/\/localhost:\d+$/.test(origin) || /^http:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$/.test(origin)) {
+                return callback(null, true);
+            }
         }
         if (allowedOrigins.includes(origin)) {
             return callback(null, true);
