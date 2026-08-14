@@ -374,9 +374,14 @@ export const updateUser = async (req, res, next) => {
             }
         }
 
-        const updated = await User.findByPk(user.id, { 
+        const updatedUser = await User.findByPk(req.params.id, { 
             attributes: SAFE_ATTRIBUTES,
-        const updatedUser = await User.findByPk(req.params.id, { attributes: SAFE_ATTRIBUTES });
+            include: [
+                { model: BusinessProfile, as: 'businessProfile' },
+                { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] },
+                { model: Godown, as: 'assignedGodown', attributes: ['id', 'name'] }
+            ]
+        });
 
         logActivity(req, {
             module: 'Party Management',
