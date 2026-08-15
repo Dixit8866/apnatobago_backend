@@ -384,8 +384,14 @@ export const getOutletOrders = async (req, res) => {
         let cashPaid = 0;
         let bankPaid = 0;
         let totalPurchaseCost = 0;
+        const employeeMap = {};
 
         allOrdersForSummary.forEach(o => {
+            const creator = o.createdBy || 'Admin';
+            if (!employeeMap[creator]) {
+                employeeMap[creator] = { employeeName: creator, cash: 0, bank: 0, total: 0, due: 0, ordersCount: 0 };
+            }
+
             const gt = Number(o.grandTotal || o.totalAmount || 0);
             const paid = Number(o.paidAmount || 0);
             const due = Math.max(0, gt - paid);
@@ -393,6 +399,10 @@ export const getOutletOrders = async (req, res) => {
             totalSales += gt;
             totalPaid += paid;
             totalDue += due;
+
+            employeeMap[creator].ordersCount += 1;
+            employeeMap[creator].total += gt;
+            employeeMap[creator].due += due;
 
             const pmArr = o.payments && Array.isArray(o.payments) && o.payments.length > 0
                 ? o.payments
@@ -402,8 +412,10 @@ export const getOutletOrders = async (req, res) => {
                 const amt = Number(pm.amount || 0);
                 if (pm.method === 'Bank' || pm.method === 'Online') {
                     bankPaid += amt;
+                    employeeMap[creator].bank += amt;
                 } else {
                     cashPaid += amt;
+                    employeeMap[creator].cash += amt;
                 }
             });
 
@@ -429,7 +441,8 @@ export const getOutletOrders = async (req, res) => {
             cashPaid,
             bankPaid,
             totalPurchaseCost,
-            totalProfit
+            totalProfit,
+            employeeBreakdown: Object.values(employeeMap)
         };
 
         // Tab counts
