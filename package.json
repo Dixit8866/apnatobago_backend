@@ -20,7 +20,9 @@
     "transfer-50percent": "node scripts/transfer-50percent-stock.js",
     "transfer-50percent:prod": "NODE_ENV=production node scripts/transfer-50percent-stock.js",
     "transfer-100percent": "node scripts/transfer-100percent-stock.js",
-    "transfer-100percent:prod": "NODE_ENV=production node scripts/transfer-100percent-stock.js"
+    "transfer-100percent:prod": "NODE_ENV=production node scripts/transfer-100percent-stock.js",
+    "update-custom-volume": "node scripts/updateCustomSalesVolumeToLowest.js",
+    "update-custom-volume:prod": "NODE_ENV=production node scripts/updateCustomSalesVolumeToLowest.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1022.0",
