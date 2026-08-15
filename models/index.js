@@ -535,6 +535,12 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "customSalesVolumeQty" NUMERIC(10,2) DEFAULT 1');
         } catch (e) { console.log('[Migration Warning] Products mainVolume/customSalesVolume columns migration failed:', e.message); }
 
+        try {
+            // Add minOrderAmount and maxOrderAmount to app_settings table
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "minOrderAmount" DECIMAL(10, 2) DEFAULT 0');
+            await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "maxOrderAmount" DECIMAL(10, 2) DEFAULT NULL');
+        } catch (e) { console.log('[Migration Warning] AppSettings min/max order amount columns migration failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
 
     } catch (error) {

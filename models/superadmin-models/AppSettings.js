@@ -23,6 +23,16 @@ const AppSettings = sequelize.define('AppSettings', {
         type: DataTypes.DECIMAL(10, 2),
         defaultValue: 10000,
     },
+    minOrderAmount: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        defaultValue: 0,
+    },
+    maxOrderAmount: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        defaultValue: null,
+    },
     supportPhoneNumber: {
         type: DataTypes.STRING,
         allowNull: true,
