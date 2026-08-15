@@ -181,7 +181,7 @@ export const createOutletOrder = async (req, res) => {
             deliveryDate: deliveryDate || new Date().toISOString().split('T')[0],
             fulfillmentMode: 'Outlet',
             note: note || 'Outlet Order Entry',
-            createdBy: req.user?.fullname || 'Admin'
+            createdBy: req.body.createdBy || req.user?.name || req.user?.fullname || 'Admin'
         }, { transaction: t });
 
         // 3. Create Items & Deduct Inventory Stock
