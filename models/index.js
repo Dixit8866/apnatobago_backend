@@ -134,9 +134,12 @@ Product.belongsTo(SubCategory, { foreignKey: 'subCategoryId', as: 'subCategory' 
 CompanyCategory.hasMany(Product, { foreignKey: 'companyCategoryId', as: 'products' });
 Product.belongsTo(CompanyCategory, { foreignKey: 'companyCategoryId', as: 'companyCategory' });
 
-// Product -> Main Volume
+// Product -> Main Volume & Custom Sales Volume
 Volume.hasMany(Product, { foreignKey: 'mainVolumeId', as: 'mainVolumeProducts' });
 Product.belongsTo(Volume, { foreignKey: 'mainVolumeId', as: 'mainVolume' });
+
+Volume.hasMany(Product, { foreignKey: 'customSalesVolumeId', as: 'customSalesVolumeProducts' });
+Product.belongsTo(Volume, { foreignKey: 'customSalesVolumeId', as: 'customSalesVolume' });
 
 // CompanyCategory -> Main/Sub Category associations
 MainCategory.hasMany(CompanyCategory, { foreignKey: 'mainCategoryId', as: 'companyCategories' });

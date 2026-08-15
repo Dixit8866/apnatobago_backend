@@ -609,6 +609,7 @@ export const getProductById = async (req, res, next) => {
                 { model: SubCategory, as: 'subCategory', attributes: ['id', 'mainCategoryId', 'title', 'status'] },
                 { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title', 'status'] },
                 { model: Volume, as: 'mainVolume', attributes: ['id', 'name', 'status'] },
+                { model: Volume, as: 'customSalesVolume', attributes: ['id', 'name', 'status'] },
                 { model: Product, as: 'comboProduct1', attributes: ['id', 'name', 'thumbnail'] },
                 { model: Product, as: 'comboProduct2', attributes: ['id', 'name', 'thumbnail'] },
                 {
