@@ -300,17 +300,18 @@ export const getOutletOrders = async (req, res) => {
                 { shopName: { [Op.iLike]: `%${search}%` } }
             ];
         } else {
-            if (status === 'Today' || today === 'true' || date) {
+            if (startDate || endDate) {
+                const sDate = startDate ? new Date(startDate) : new Date('2020-01-01');
+                sDate.setHours(0, 0, 0, 0);
+                const eDate = endDate ? new Date(`${endDate}T23:59:59.999Z`) : new Date();
+                whereCondition.createdAt = { [Op.between]: [sDate, eDate] };
+            } else if (status === 'Today' || today === 'true' || date) {
                 const targetDateStr = (date && date !== 'undefined') ? date : new Date().toISOString().split('T')[0];
                 const startOfDay = new Date(targetDateStr);
                 startOfDay.setHours(0, 0, 0, 0);
                 const endOfDay = new Date(targetDateStr);
                 endOfDay.setHours(23, 59, 59, 999);
                 whereCondition.createdAt = { [Op.between]: [startOfDay, endOfDay] };
-            } else if (startDate && endDate) {
-                whereCondition.createdAt = {
-                    [Op.between]: [new Date(startDate), new Date(`${endDate}T23:59:59.999Z`)]
-                };
             } else if (status && status !== 'All' && status !== 'History' && status !== 'PaymentCollection') {
                 whereCondition.orderStatus = status;
             }
