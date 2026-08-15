@@ -102,6 +102,16 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: 1,
         },
+        customSalesVolumeId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            defaultValue: null,
+        },
+        customSalesVolumeQty: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: true,
+            defaultValue: 1,
+        },
         internalNote: {
             type: DataTypes.TEXT,
             allowNull: true,

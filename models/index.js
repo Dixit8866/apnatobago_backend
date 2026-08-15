@@ -525,10 +525,12 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Order block settings columns migration failed:', e.message); }
 
         try {
-            // Add mainVolumeId and mainVolumeQty to products table
+            // Add mainVolumeId, mainVolumeQty, customSalesVolumeId, and customSalesVolumeQty to products table
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "mainVolumeId" UUID REFERENCES volumes(id) ON DELETE SET NULL ON UPDATE CASCADE');
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "mainVolumeQty" NUMERIC(10,2) DEFAULT 1');
-        } catch (e) { console.log('[Migration Warning] Products mainVolume columns migration failed:', e.message); }
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "customSalesVolumeId" UUID REFERENCES volumes(id) ON DELETE SET NULL ON UPDATE CASCADE');
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "customSalesVolumeQty" NUMERIC(10,2) DEFAULT 1');
+        } catch (e) { console.log('[Migration Warning] Products mainVolume/customSalesVolume columns migration failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');
 
