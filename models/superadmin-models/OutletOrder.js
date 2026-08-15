@@ -75,6 +75,11 @@ const OutletOrder = sequelize.define(
             type: DataTypes.STRING,
             defaultValue: 'Cash',
         },
+        payments: {
+            type: DataTypes.JSONB,
+            allowNull: true,
+            defaultValue: [],
+        },
         deliveryDate: {
             type: DataTypes.DATEONLY,
             allowNull: true,

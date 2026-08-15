@@ -435,6 +435,10 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Order dueAmount update failed:', e.message); }
 
         try {
+            await sequelize.query('ALTER TABLE outlet_orders ADD COLUMN IF NOT EXISTS "payments" JSONB DEFAULT \'[]\'::jsonb');
+        } catch (e) { console.log('[Migration Warning] Outlet orders payments column migration failed:', e.message); }
+
+        try {
             // Add mainCategoryId to banners
             await sequelize.query('ALTER TABLE banners ADD COLUMN IF NOT EXISTS "mainCategoryId" UUID REFERENCES main_categories(id) ON DELETE SET NULL');
         } catch (e) { console.log('[Migration Warning] Banners mainCategoryId column failed:', e.message); }

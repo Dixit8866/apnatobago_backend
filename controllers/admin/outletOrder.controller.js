@@ -62,6 +62,7 @@ export const createOutletOrder = async (req, res) => {
             items,
             paidAmount = 0,
             paymentMode = 'Cash',
+            payments = [],
             deliveryDate = null,
             fulfillmentMode = 'Outlet',
             orderStatus = 'Completed',
@@ -72,6 +73,12 @@ export const createOutletOrder = async (req, res) => {
         if (!items || !Array.isArray(items) || items.length === 0) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please add at least one item to the outlet order.');
+        }
+
+        // Compulsory Multiple Payments Validation
+        if (!payments || !Array.isArray(payments) || payments.length === 0 || !payments.some(p => Number(p.amount) > 0)) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'ચુકવણીની રીત (Multiple Payments) અને રકમ ભરવી ફરજિયાત છે. (Multiple Payments selection and valid amount are compulsory)');
         }
 
         let userObj = null;
@@ -135,7 +142,10 @@ export const createOutletOrder = async (req, res) => {
         }
 
         const finalGrandTotal = Math.max(0, totalOrderAmount - Number(discountAmount || 0));
-        const numPaidAmount = Number(paidAmount || 0);
+        
+        // Sum total paid from payments array
+        const numPaidAmount = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
         let paymentStatus = 'Pending';
         if (numPaidAmount >= finalGrandTotal && finalGrandTotal > 0) {
             paymentStatus = 'Paid';
@@ -146,6 +156,9 @@ export const createOutletOrder = async (req, res) => {
         const finalCustomerName = (customerName && customerName.trim()) ? customerName.trim() : (userObj?.fullname || 'Guest');
         const finalCustomerPhone = customerPhone || userObj?.number || '';
         const finalShopName = shopName || userObj?.shopName || 'Direct Outlet';
+
+        // Primary payment mode label
+        const primaryMode = payments.length > 1 ? 'Multiple' : (payments[0]?.method || paymentMode || 'Cash');
 
         // 2. Create OutletOrder record
         const newOutletOrder = await OutletOrder.create({
@@ -162,7 +175,8 @@ export const createOutletOrder = async (req, res) => {
             discountAmount: Number(discountAmount || 0),
             grandTotal: finalGrandTotal,
             paidAmount: numPaidAmount,
-            paymentMode: paymentMode || 'Cash',
+            paymentMode: primaryMode,
+            payments: payments,
             deliveryDate: deliveryDate || new Date().toISOString().split('T')[0],
             fulfillmentMode: 'Outlet',
             note: note || 'Outlet Order Entry',
@@ -285,11 +299,7 @@ export const getOutletOrders = async (req, res) => {
                 { shopName: { [Op.iLike]: `%${search}%` } }
             ];
         } else {
-            if (status && status !== 'All' && status !== 'Today') {
-                whereCondition.orderStatus = status;
-            }
-
-            if (today === 'true' || date || status === 'Today') {
+            if (status === 'Today' || today === 'true' || date) {
                 const targetDateStr = (date && date !== 'undefined') ? date : new Date().toISOString().split('T')[0];
                 const startOfDay = new Date(targetDateStr);
                 startOfDay.setHours(0, 0, 0, 0);
@@ -300,6 +310,8 @@ export const getOutletOrders = async (req, res) => {
                 whereCondition.createdAt = {
                     [Op.between]: [new Date(startDate), new Date(`${endDate}T23:59:59.999Z`)]
                 };
+            } else if (status && status !== 'All' && status !== 'History' && status !== 'PaymentCollection') {
+                whereCondition.orderStatus = status;
             }
         }
 
@@ -314,7 +326,7 @@ export const getOutletOrders = async (req, res) => {
                     required: false,
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name'], required: false },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra'], required: false }
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra', 'purchasePrice', 'baseUnitsPerPack'], required: false }
                     ]
                 }
             ],
@@ -325,7 +337,101 @@ export const getOutletOrders = async (req, res) => {
             subQuery: false
         });
 
-        // Calculate Status Counts for Tab Badges
+        // Calculate Purchase Cost & Profit for each returned order
+        const formattedRows = result.rows.map(orderItem => {
+            const plain = orderItem.get({ plain: true });
+            let totalPurchaseCost = 0;
+            if (plain.items && plain.items.length > 0) {
+                plain.items.forEach(it => {
+                    const qty = Number(it.quantity || 0);
+                    const sellUnit = it.sellUnit || 'Base';
+                    const vInfo = it.variantInfo || {};
+                    const pPrice = Number(vInfo.purchasePrice || it.variant?.purchasePrice || 0);
+                    const bUPP = Number(vInfo.baseUnitsPerPack || it.variant?.baseUnitsPerPack || 1);
+                    const unitCost = sellUnit === 'Inner' ? (pPrice / bUPP) : pPrice;
+                    totalPurchaseCost += (unitCost * qty);
+                });
+            }
+            const grandTotal = Number(plain.grandTotal || plain.totalAmount || 0);
+            const profit = grandTotal - totalPurchaseCost;
+
+            return {
+                ...plain,
+                purchaseCost: totalPurchaseCost,
+                profit: profit
+            };
+        });
+
+        // Compute Financial Summary across all matching orders
+        const allOrdersForSummary = await OutletOrder.findAll({
+            where: whereCondition,
+            include: [
+                {
+                    model: OutletOrderItem,
+                    as: 'items',
+                    required: false,
+                    include: [
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'purchasePrice', 'baseUnitsPerPack'], required: false }
+                    ]
+                }
+            ]
+        });
+
+        let totalSales = 0;
+        let totalPaid = 0;
+        let totalDue = 0;
+        let cashPaid = 0;
+        let bankPaid = 0;
+        let totalPurchaseCost = 0;
+
+        allOrdersForSummary.forEach(o => {
+            const gt = Number(o.grandTotal || o.totalAmount || 0);
+            const paid = Number(o.paidAmount || 0);
+            const due = Math.max(0, gt - paid);
+
+            totalSales += gt;
+            totalPaid += paid;
+            totalDue += due;
+
+            const pmArr = o.payments && Array.isArray(o.payments) && o.payments.length > 0
+                ? o.payments
+                : [{ method: o.paymentMode || 'Cash', amount: paid }];
+
+            pmArr.forEach(pm => {
+                const amt = Number(pm.amount || 0);
+                if (pm.method === 'Bank' || pm.method === 'Online') {
+                    bankPaid += amt;
+                } else {
+                    cashPaid += amt;
+                }
+            });
+
+            if (o.items && o.items.length > 0) {
+                o.items.forEach(it => {
+                    const qty = Number(it.quantity || 0);
+                    const sellUnit = it.sellUnit || 'Base';
+                    const vInfo = it.variantInfo || {};
+                    const pPrice = Number(vInfo.purchasePrice || it.variant?.purchasePrice || 0);
+                    const bUPP = Number(vInfo.baseUnitsPerPack || it.variant?.baseUnitsPerPack || 1);
+                    const unitCost = sellUnit === 'Inner' ? (pPrice / bUPP) : pPrice;
+                    totalPurchaseCost += (unitCost * qty);
+                });
+            }
+        });
+
+        const totalProfit = totalSales - totalPurchaseCost;
+
+        const totalsSummary = {
+            totalSales,
+            totalPaid,
+            totalDue,
+            cashPaid,
+            bankPaid,
+            totalPurchaseCost,
+            totalProfit
+        };
+
+        // Tab counts
         const todayStr = new Date().toISOString().split('T')[0];
         const startOfToday = new Date(todayStr);
         startOfToday.setHours(0, 0, 0, 0);
@@ -334,35 +440,22 @@ export const getOutletOrders = async (req, res) => {
 
         const baseCountWhere = godownId ? { godownId } : {};
 
-        const [
-            todayCount,
-            pendingCount,
-            packagingCount,
-            packedCount,
-            completedCount,
-            cancelledCount
-        ] = await Promise.all([
+        const [todayCount, totalHistoryCount] = await Promise.all([
             OutletOrder.count({ where: { ...baseCountWhere, createdAt: { [Op.between]: [startOfToday, endOfToday] } } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Pending' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Packaging' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Packed' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Completed' } }),
-            OutletOrder.count({ where: { ...baseCountWhere, orderStatus: 'Cancelled' } })
+            OutletOrder.count({ where: baseCountWhere })
         ]);
 
         const statusCounts = {
             Today: todayCount,
-            Pending: pendingCount,
-            Packaging: packagingCount,
-            Packed: packedCount,
-            Completed: completedCount,
-            Cancelled: cancelledCount
+            History: totalHistoryCount,
+            PaymentCollection: totalHistoryCount
         };
 
-        const formatted = formatPaginatedResponse(result, page, limit);
+        const formatted = formatPaginatedResponse({ count: result.count, rows: formattedRows }, page, limit);
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Outlet orders fetched successfully.', {
             ...formatted,
-            statusCounts
+            statusCounts,
+            totalsSummary
         });
     } catch (error) {
         logger.error(`[getOutletOrders Error]: ${error.message}`, { stack: error.stack });
