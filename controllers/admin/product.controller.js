@@ -668,6 +668,8 @@ export const updateProduct = async (req, res, next) => {
             serialNumber,
             mainVolumeId,
             mainVolumeQty,
+            customSalesVolumeId,
+            customSalesVolumeQty,
             internalNote,
             couponPoints,
             couponPrice,
