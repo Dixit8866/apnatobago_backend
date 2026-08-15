@@ -212,18 +212,24 @@ export const getAllVendorOrders = async (req, res) => {
             where.createdAt = { [Op.between]: [startOfDay, endOfDay] };
         }
 
-        const vendorInclude = {
-            model: Vendor,
-            as: 'vendor',
-            where: {},
-            required: false,
-        };
-
         if (search && String(search).trim()) {
             const searchTrim = String(search).trim();
             const searchLower = searchTrim.toLowerCase();
 
-            // Find matching product IDs by product name, serialNumber, or keywords
+            // 1. Find matching Vendor IDs by vendor name or companyName
+            const matchingVendors = await Vendor.findAll({
+                where: {
+                    [Op.or]: [
+                        { name: { [Op.iLike]: `%${searchTrim}%` } },
+                        { companyName: { [Op.iLike]: `%${searchTrim}%` } }
+                    ]
+                },
+                attributes: ['id'],
+                raw: true
+            }).catch(() => []);
+            const matchingVendorIds = matchingVendors.map(v => v.id).filter(Boolean);
+
+            // 2. Find matching Product IDs by product name, serialNumber, or keywords
             const matchingProducts = await Product.findAll({
                 where: {
                     [Op.or]: [
@@ -232,16 +238,18 @@ export const getAllVendorOrders = async (req, res) => {
                         sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape('%' + searchLower + '%')})`)
                     ]
                 },
-                attributes: ['id', 'name'],
+                attributes: ['id'],
                 raw: true
             }).catch(() => []);
 
             const searchOrConditions = [
                 { orderNo: { [Op.iLike]: `%${searchTrim}%` } },
-                { '$vendor.name$': { [Op.iLike]: `%${searchTrim}%` } },
-                { '$vendor.companyName$': { [Op.iLike]: `%${searchTrim}%` } },
                 sequelize.literal(`"VendorOrder"."items"::text ILIKE ${sequelize.escape('%' + searchTrim + '%')}`)
             ];
+
+            if (matchingVendorIds.length > 0) {
+                searchOrConditions.push({ vendorId: { [Op.in]: matchingVendorIds } });
+            }
 
             if (Array.isArray(matchingProducts) && matchingProducts.length > 0) {
                 matchingProducts.forEach(p => {
@@ -254,13 +262,12 @@ export const getAllVendorOrders = async (req, res) => {
             }
 
             where[Op.or] = searchOrConditions;
-            vendorInclude.required = false;
         }
 
         const { count, rows: orders } = await VendorOrder.findAndCountAll({
             where,
             include: [
-                vendorInclude,
+                { model: Vendor, as: 'vendor', required: false },
                 {
                     model: PurchaseBill,
                     as: 'bill',
@@ -288,7 +295,7 @@ export const getAllVendorOrders = async (req, res) => {
         delete baseSearchWhere.createdAt;
 
         const statusCounts = {
-            Today: await VendorOrder.count({ where: { ...baseSearchWhere, createdAt: { [Op.between]: [startToday, endToday] } }, include: [vendorInclude] }),
+            Today: await VendorOrder.count({ where: { ...baseSearchWhere, createdAt: { [Op.between]: [startToday, endToday] } } }),
             Pending: await VendorOrder.count({ where: { ...baseSearchWhere, status: 'Pending' } }),
             Received: await VendorOrder.count({ where: { ...baseSearchWhere, status: 'Received' } }),
             Cancelled: await VendorOrder.count({ where: { ...baseSearchWhere, status: 'Cancelled' } }),
