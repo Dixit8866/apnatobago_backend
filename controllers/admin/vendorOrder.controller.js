@@ -1,4 +1,5 @@
 import { Op } from 'sequelize';
+import sequelize from '../../config/db.js';
 import VendorOrder from '../../models/superadmin-models/VendorOrder.js';
 import Vendor from '../../models/superadmin-models/Vendor.js';
 import Product from '../../models/superadmin-models/Product.js';
@@ -218,13 +219,42 @@ export const getAllVendorOrders = async (req, res) => {
             required: false,
         };
 
-        if (search) {
-            where[Op.or] = [
-                { orderNo: { [Op.iLike]: `%${search}%` } },
-                { '$vendor.name$': { [Op.iLike]: `%${search}%` } },
-                { '$vendor.companyName$': { [Op.iLike]: `%${search}%` } },
+        if (search && String(search).trim()) {
+            const searchTrim = String(search).trim();
+            const searchLower = searchTrim.toLowerCase();
+
+            // Find matching product IDs by product name, serialNumber, or keywords
+            const matchingProducts = await Product.findAll({
+                where: {
+                    [Op.or]: [
+                        sequelize.where(sequelize.cast(sequelize.col('name'), 'text'), { [Op.iLike]: `%${searchTrim}%` }),
+                        { serialNumber: { [Op.iLike]: `%${searchTrim}%` } },
+                        sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape('%' + searchLower + '%')})`)
+                    ]
+                },
+                attributes: ['id', 'name'],
+                raw: true
+            }).catch(() => []);
+
+            const searchOrConditions = [
+                { orderNo: { [Op.iLike]: `%${searchTrim}%` } },
+                { '$vendor.name$': { [Op.iLike]: `%${searchTrim}%` } },
+                { '$vendor.companyName$': { [Op.iLike]: `%${searchTrim}%` } },
+                sequelize.literal(`"VendorOrder"."items"::text ILIKE ${sequelize.escape('%' + searchTrim + '%')}`)
             ];
-            vendorInclude.required = true;
+
+            if (Array.isArray(matchingProducts) && matchingProducts.length > 0) {
+                matchingProducts.forEach(p => {
+                    if (p.id) {
+                        searchOrConditions.push(
+                            sequelize.literal(`EXISTS (SELECT 1 FROM jsonb_array_elements("VendorOrder"."items") AS item WHERE item->>'productId' = ${sequelize.escape(p.id)})`)
+                        );
+                    }
+                });
+            }
+
+            where[Op.or] = searchOrConditions;
+            vendorInclude.required = false;
         }
 
         const { count, rows: orders } = await VendorOrder.findAndCountAll({
@@ -252,11 +282,16 @@ export const getAllVendorOrders = async (req, res) => {
         const endToday = new Date();
         endToday.setHours(23, 59, 59, 999);
 
+        // Build base search where for statusCounts so tab badges reflect search query
+        const baseSearchWhere = { ...where };
+        delete baseSearchWhere.status;
+        delete baseSearchWhere.createdAt;
+
         const statusCounts = {
-            Today: await VendorOrder.count({ where: { createdAt: { [Op.between]: [startToday, endToday] } } }),
-            Pending: await VendorOrder.count({ where: { status: 'Pending' } }),
-            Received: await VendorOrder.count({ where: { status: 'Received' } }),
-            Cancelled: await VendorOrder.count({ where: { status: 'Cancelled' } }),
+            Today: await VendorOrder.count({ where: { ...baseSearchWhere, createdAt: { [Op.between]: [startToday, endToday] } }, include: [vendorInclude] }),
+            Pending: await VendorOrder.count({ where: { ...baseSearchWhere, status: 'Pending' } }),
+            Received: await VendorOrder.count({ where: { ...baseSearchWhere, status: 'Received' } }),
+            Cancelled: await VendorOrder.count({ where: { ...baseSearchWhere, status: 'Cancelled' } }),
         };
 
         res.status(200).json({
@@ -272,6 +307,7 @@ export const getAllVendorOrders = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error("ERROR IN GET ALL VENDOR ORDERS:", error);
         res.status(500).json({ message: error.message });
     }
 };

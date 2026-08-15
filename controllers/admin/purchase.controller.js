@@ -324,11 +324,13 @@ export const getPurchaseBills = async (req, res, next) => {
             where.godownId = godownId;
         }
 
-        if (search) {
+        if (search && String(search).trim()) {
+            const searchTrim = String(search).trim();
             where[Op.or] = [
-                { billNo: { [Op.iLike]: `%${search}%` } },
-                { '$vendor.name$': { [Op.iLike]: `%${search}%` } },
-                { '$vendor.companyName$': { [Op.iLike]: `%${search}%` } }
+                { billNo: { [Op.iLike]: `%${searchTrim}%` } },
+                { '$vendor.name$': { [Op.iLike]: `%${searchTrim}%` } },
+                { '$vendor.companyName$': { [Op.iLike]: `%${searchTrim}%` } },
+                sequelize.literal(`"vendorOrder"."items"::text ILIKE ${sequelize.escape('%' + searchTrim + '%')}`)
             ];
         }
 
