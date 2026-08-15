@@ -347,8 +347,8 @@ export const getProducts = async (req, res) => {
                     if (v.pricings && Array.isArray(v.pricings) && v.pricings.length > 0) {
                         const pricingMap = new Map();
                         for (const p of v.pricings) {
-                            const levelKey = p.customLevelId || p.customLevel?.id || 'default';
-                            // If key doesn't exist or current p has a specific godownId, overwrite
+                            const levelKey = `${p.customLevelId || p.customLevel?.id || 'default'}_${p.minQty}_${p.maxQty}`;
+                            // If key doesn't exist or current p has a specific godownId matching user, overwrite
                             if (!pricingMap.has(levelKey) || (p.godownId && String(p.godownId) === String(user?.godownId))) {
                                 pricingMap.set(levelKey, p);
                             }
@@ -566,8 +566,16 @@ export const searchCatalogue = async (req, res) => {
 
 
 
-        // Only fetch pricings for the user's assigned level
-        const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
+        // Only fetch pricings for the user's assigned level and godown
+        const pricingWhere = {
+            ...(userLevel && { customLevelId: userLevel }),
+            ...(user?.godownId ? {
+                [Op.or]: [
+                    { godownId: user.godownId },
+                    { godownId: null }
+                ]
+            } : { godownId: null })
+        };
 
         const products = await Product.findAll({
             where: productWhere,
@@ -683,6 +691,19 @@ export const searchCatalogue = async (req, res) => {
                         v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                     }
                     v.extraName = v.extra || '';
+
+                    // Prioritize godown-specific pricing over default global pricing (godownId = null)
+                    if (v.pricings && Array.isArray(v.pricings) && v.pricings.length > 0) {
+                        const pricingMap = new Map();
+                        for (const p of v.pricings) {
+                            const levelKey = `${p.customLevelId || p.customLevel?.id || 'default'}_${p.minQty}_${p.maxQty}`;
+                            if (!pricingMap.has(levelKey) || (p.godownId && String(p.godownId) === String(user?.godownId))) {
+                                pricingMap.set(levelKey, p);
+                            }
+                        }
+                        v.pricings = Array.from(pricingMap.values());
+                    }
+
                     return v;
                 });
             }

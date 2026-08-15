@@ -23,7 +23,15 @@ export const getWishlist = async (req, res) => {
     try {
         const userId = req.user.id;
         const userLevel = req.user.applevel || null;
-        const pricingWhere = userLevel ? { customLevelId: userLevel } : {};
+        const pricingWhere = {
+            ...(userLevel && { customLevelId: userLevel }),
+            ...(req.user?.godownId ? {
+                [Op.or]: [
+                    { godownId: req.user.godownId },
+                    { godownId: null }
+                ]
+            } : { godownId: null })
+        };
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
         const debug = req.query.debug === 'true';
 
@@ -122,6 +130,19 @@ export const getWishlist = async (req, res) => {
                                 v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                             }
                             v.extraName = v.extra || '';
+
+                            // Deduplicate pricings: prioritize user's godownId pricing over default godownId=null pricing
+                            if (v.pricings && Array.isArray(v.pricings) && v.pricings.length > 0) {
+                                const pricingMap = new Map();
+                                for (const p of v.pricings) {
+                                    const key = `${p.customLevelId || p.customLevel?.id || 'default'}_${p.minQty}_${p.maxQty}`;
+                                    if (!pricingMap.has(key) || (p.godownId && String(p.godownId) === String(req.user?.godownId))) {
+                                        pricingMap.set(key, p);
+                                    }
+                                }
+                                v.pricings = Array.from(pricingMap.values());
+                            }
+
                             return v;
                         });
                     }
@@ -177,6 +198,19 @@ export const getWishlist = async (req, res) => {
                                 v.innerUnitLabel = Object.values(v.innerUnitRef.name)[0] || v.innerUnitLabel;
                             }
                             v.extraName = v.extra || '';
+
+                            // Deduplicate pricings: prioritize user's godownId pricing over default godownId=null pricing
+                            if (v.pricings && Array.isArray(v.pricings) && v.pricings.length > 0) {
+                                const pricingMap = new Map();
+                                for (const p of v.pricings) {
+                                    const key = `${p.customLevelId || p.customLevel?.id || 'default'}_${p.minQty}_${p.maxQty}`;
+                                    if (!pricingMap.has(key) || (p.godownId && String(p.godownId) === String(req.user?.godownId))) {
+                                        pricingMap.set(key, p);
+                                    }
+                                }
+                                v.pricings = Array.from(pricingMap.values());
+                            }
+
                             return v;
                         });
                     }

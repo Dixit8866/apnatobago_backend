@@ -125,7 +125,8 @@ export const createOutletOrder = async (req, res) => {
                 baseUnitLabel: variant.baseUnitLabel,
                 innerUnitLabel: variant.innerUnitLabel,
                 sellingVolume: variant.sellingVolume,
-                productName: variant.product?.name
+                productName: variant.product?.name,
+                boxNumber: variant.product?.boxNumber
             };
 
             processedItems.push({
@@ -325,7 +326,7 @@ export const getOutletOrders = async (req, res) => {
                     as: 'items',
                     required: false,
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name'], required: false },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'boxNumber'], required: false },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra', 'purchasePrice', 'baseUnitsPerPack'], required: false }
                     ]
                 }
@@ -586,7 +587,7 @@ export const getOutletOrderById = async (req, res) => {
                     model: OutletOrderItem,
                     as: 'items',
                     include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name'] },
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'boxNumber'] },
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra', 'purchasePrice', 'baseUnitsPerPack'] }
                     ]
                 }
