@@ -4,6 +4,7 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import sequelize from '../../config/db.js';
+import { Op } from 'sequelize';
 
 const getVolumeLabel = (volumeRef, fallback = '') => {
     if (!volumeRef || !volumeRef.name) return fallback;
