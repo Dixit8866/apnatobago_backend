@@ -86,6 +86,16 @@ const sendPushToAllAdmins = async (title, body, data = {}) => {
 export const createOrder = async (req, res) => {
     logger.info(`[Create Order] Started. Body: ${JSON.stringify(req.body)}, User: ${req.user?.id}`);
 
+    // Check KYC Verification Status
+    const kycStatus = String(req.user?.kycverification || 'pending').toLowerCase();
+    if (kycStatus !== 'verified') {
+        return sendErrorResponse(
+            res, 
+            HTTP_STATUS.FORBIDDEN, 
+            "પહેલા તમારે KYC કન્ફર્મ કરાવવું પડશે"
+        );
+    }
+
     // Check if order creation is paused/blocked due to emergency/maintenance
     try {
         const blockSetting = await OrderBlockSetting.findOne();

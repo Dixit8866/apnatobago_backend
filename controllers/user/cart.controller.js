@@ -297,6 +297,17 @@ export const getCart = async (req, res) => {
 export const addToCart = async (req, res) => {
     try {
         const userId = req.user.id;
+
+        // Check KYC Verification Status
+        const kycStatus = String(req.user?.kycverification || 'pending').toLowerCase();
+        if (kycStatus !== 'verified') {
+            return sendErrorResponse(
+                res, 
+                HTTP_STATUS.FORBIDDEN, 
+                "પહેલા તમારે KYC કન્ફર્મ કરાવવું પડશે"
+            );
+        }
+
         const { productId, variantId, quantity } = req.body;
 
         if (!productId || !variantId || quantity === undefined) {
@@ -463,6 +474,17 @@ export const addToCart = async (req, res) => {
 export const updateCartItem = async (req, res) => {
     try {
         const userId = req.user.id;
+
+        // Check KYC Verification Status
+        const kycStatus = String(req.user?.kycverification || 'pending').toLowerCase();
+        if (kycStatus !== 'verified') {
+            return sendErrorResponse(
+                res, 
+                HTTP_STATUS.FORBIDDEN, 
+                "પહેલા તમારે KYC કન્ફર્મ કરાવવું પડશે"
+            );
+        }
+
         const id = req.params.id || req.query.id;
         const { quantity } = req.body;
 
