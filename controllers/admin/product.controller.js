@@ -523,6 +523,7 @@ export const getProducts = async (req, res, next) => {
             { model: SubCategory, as: 'subCategory', attributes: ['id', 'title'] },
             { model: CompanyCategory, as: 'companyCategory', attributes: ['id', 'title'] },
             { model: Volume, as: 'mainVolume', attributes: ['id', 'name'] },
+            { model: Volume, as: 'customSalesVolume', attributes: ['id', 'name'] },
             {
                 model: ProductVariant,
                 as: 'variants',
