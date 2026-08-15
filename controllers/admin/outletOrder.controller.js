@@ -305,8 +305,8 @@ export const getOutletOrders = async (req, res) => {
                 sDate.setHours(0, 0, 0, 0);
                 const eDate = endDate ? new Date(`${endDate}T23:59:59.999Z`) : new Date();
                 whereCondition.createdAt = { [Op.between]: [sDate, eDate] };
-            } else if (status === 'Today' || today === 'true' || date) {
-                const targetDateStr = (date && date !== 'undefined') ? date : new Date().toISOString().split('T')[0];
+            } else if (status === 'Today' || today === 'true' || (date && date !== '' && date !== 'undefined')) {
+                const targetDateStr = (date && date !== '' && date !== 'undefined') ? date : new Date().toISOString().split('T')[0];
                 const startOfDay = new Date(targetDateStr);
                 startOfDay.setHours(0, 0, 0, 0);
                 const endOfDay = new Date(targetDateStr);
