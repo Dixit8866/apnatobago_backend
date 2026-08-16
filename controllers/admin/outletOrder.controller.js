@@ -100,7 +100,10 @@ export const createOutletOrder = async (req, res) => {
         // 1. Process & Validate Items
         for (const item of items) {
             const variant = await ProductVariant.findByPk(item.variantId, {
-                include: [{ model: Product, as: 'product' }],
+                include: [
+                    { model: Product, as: 'product' },
+                    { model: Volume, as: 'volumeRef', required: false }
+                ],
                 transaction: t
             });
 
@@ -119,6 +122,7 @@ export const createOutletOrder = async (req, res) => {
             const variantSnapshot = {
                 id: variant.id,
                 volume: variant.volume,
+                volumeRef: variant.volumeRef ? { id: variant.volumeRef.id, name: variant.volumeRef.name } : null,
                 extra: variant.extra,
                 purchasePrice: variant.purchasePrice,
                 baseUnitsPerPack: variant.baseUnitsPerPack,
@@ -328,7 +332,13 @@ export const getOutletOrders = async (req, res) => {
                     required: false,
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'boxNumber'], required: false },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra', 'purchasePrice', 'baseUnitsPerPack'], required: false }
+                        { 
+                            model: ProductVariant, 
+                            as: 'variant', 
+                            attributes: ['id', 'volume', 'extra', 'purchasePrice', 'baseUnitsPerPack', 'volumeId'], 
+                            required: false,
+                            include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
+                        }
                     ]
                 }
             ],
@@ -602,7 +612,12 @@ export const getOutletOrderById = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name', 'boxNumber'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'extra', 'purchasePrice', 'baseUnitsPerPack'] }
+                        { 
+                            model: ProductVariant, 
+                            as: 'variant', 
+                            attributes: ['id', 'volume', 'extra', 'purchasePrice', 'baseUnitsPerPack', 'volumeId'],
+                            include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
+                        }                  
                     ]
                 }
             ]
