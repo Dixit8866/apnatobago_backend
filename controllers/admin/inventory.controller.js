@@ -148,7 +148,12 @@ export const getInventoryStocks = async (req, res, next) => {
 
         const include = [
             { model: Product, as: 'product', attributes: ['id', 'name', 'status'] },
-            { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'status'] },
+            { 
+                model: ProductVariant, 
+                as: 'variant', 
+                attributes: ['id', 'volume', 'extra', 'volumeId', 'status'],
+                include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
+            },
             { model: Godown, as: 'godown', attributes: ['id', 'name', 'status'] },
         ];
 
@@ -238,7 +243,12 @@ export const getInventoryStockById = async (req, res, next) => {
         const stock = await InventoryStock.findByPk(req.params.id, {
             include: [
                 { model: Product, as: 'product', attributes: ['id', 'name', 'status'] },
-                { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'status'] },
+                { 
+                    model: ProductVariant, 
+                    as: 'variant', 
+                    attributes: ['id', 'volume', 'extra', 'volumeId', 'status'],
+                    include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
+                },
                 { model: Godown, as: 'godown', attributes: ['id', 'name', 'status'] },
             ],
         });
