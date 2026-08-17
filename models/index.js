@@ -47,6 +47,7 @@ import ActivityLog from './superadmin-models/ActivityLog.js';
 import StockTransferItem from './superadmin-models/StockTransferItem.js';
 import OutletOrder from './superadmin-models/OutletOrder.js';
 import OutletOrderItem from './superadmin-models/OutletOrderItem.js';
+import DailyReconciliation from './superadmin-models/DailyReconciliation.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -648,5 +649,6 @@ export {
     ActivityLog,
     OutletOrder,
     OutletOrderItem,
+    DailyReconciliation,
     runManualMigrations
 };

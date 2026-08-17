@@ -37,6 +37,7 @@ import paymentRoutes from './payment.routes.js';
 import adminRoleRoutes from './adminRole.routes.js';
 import transferRoutes from './transfers.routes.js';
 import activityLogRoutes from '../admin/activityLog.routes.js';
+import dailyReconciliationRoutes from './dailyReconciliation.routes.js';
 
 const router = express.Router();
 
@@ -78,5 +79,6 @@ router.use('/payments', paymentRoutes);
 router.use('/admin-roles', adminRoleRoutes);
 router.use('/transfers', transferRoutes);
 router.use('/activity-logs', activityLogRoutes);
+router.use('/daily-reconciliation', dailyReconciliationRoutes);
 
 export default router;
