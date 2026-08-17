@@ -4,11 +4,11 @@ import {
     settleDay,
     getReconciliationHistory
 } from '../../controllers/admin/dailyReconciliation.controller.js';
-import { protectAdmin } from '../../middlewares/auth.middleware.js';
+import { protect, admin } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
-router.use(protectAdmin);
+router.use(protect, admin);
 
 router.get('/live', getLiveReconciliation);
 router.post('/settle', settleDay);
