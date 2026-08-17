@@ -9,7 +9,8 @@ import {
     ProductVariant,
     InventoryStock,
     InventoryTransaction,
-    DailyReconciliation
+    DailyReconciliation,
+    Godown
 } from '../../models/index.js';
 
 /**
@@ -39,9 +40,6 @@ export const getLiveReconciliation = async (req, res) => {
         const prevRecord = await DailyReconciliation.findOne({
             where: { date: prevDate, ...(godownId ? { godownId } : {}) }
         });
-
-        let openingStockAmount = prevRecord ? Number(prevRecord.closingStockAmount) : 0;
-        let openingCashBalance = prevRecord ? Number(prevRecord.closingCashBalance) : 0;
 
         // 2. Fetch Sales Data for Target Date
         const orderWhere = {
@@ -96,7 +94,8 @@ export const getLiveReconciliation = async (req, res) => {
                     itemSalesQtyMap[variantId] = (itemSalesQtyMap[variantId] || 0) + qty;
                 }
 
-                const purchasePrice = Number(item.variant?.purchasePrice || item.price || 0);
+                // Purchase price fallback: variant purchasePrice -> product purchasePrice -> item price * 0.8
+                const purchasePrice = Number(item.variant?.purchasePrice || item.product?.purchasePrice || (Number(item.price || 0) * 0.8));
                 totalSoldCostValuation += qty * purchasePrice;
             });
         });
@@ -122,7 +121,7 @@ export const getLiveReconciliation = async (req, res) => {
             purchasePaymentAmount += Number(pb.paidAmount || 0);
         });
 
-        // If opening stock valuation wasn't in DB, compute current live inventory valuation
+        // 4. Current Live Inventory Valuation from Database (Products & Variants or InventoryStock)
         const stockWhere = godownId ? { godownId } : {};
         const allStockRecords = await InventoryStock.findAll({
             where: stockWhere,
@@ -130,45 +129,84 @@ export const getLiveReconciliation = async (req, res) => {
                 { model: Product, as: 'product' },
                 { model: ProductVariant, as: 'variant' }
             ]
-        });
+        }).catch(() => []);
 
         let currentLiveStockValuation = 0;
         const itemQuantitySummary = [];
 
-        allStockRecords.forEach(s => {
-            const currentQty = Number(s.quantity || 0);
-            const costPrice = Number(s.variant?.purchasePrice || s.product?.purchasePrice || 0);
-            currentLiveStockValuation += currentQty * costPrice;
+        if (allStockRecords.length > 0) {
+            allStockRecords.forEach(s => {
+                const currentQty = Number(s.totalBaseUnits || s.quantity || 0);
+                const costPrice = Number(s.avgPurchasePricePerBaseUnit || s.variant?.purchasePrice || s.product?.purchasePrice || 0);
+                currentLiveStockValuation += currentQty * costPrice;
 
-            const variantId = s.variantId || s.productId;
-            const soldToday = itemSalesQtyMap[variantId] || 0;
-            const purchasedToday = 0; // Can be enhanced with line item breakdown
-            const openingQty = currentQty + soldToday - purchasedToday;
+                const variantId = s.variantId || s.productId;
+                const soldToday = itemSalesQtyMap[variantId] || 0;
+                const purchasedToday = 0;
+                const openingQty = currentQty + soldToday - purchasedToday;
 
-            const prodName = s.product?.name ? (typeof s.product.name === 'object' ? (s.product.name.gu || s.product.name.en || Object.values(s.product.name)[0]) : s.product.name) : 'Product';
-            const unitName = s.variant?.volume || 'Unit';
+                const prodName = s.product?.name
+                    ? (typeof s.product.name === 'object' ? (s.product.name.gu || s.product.name.en || Object.values(s.product.name)[0]) : s.product.name)
+                    : 'Product';
+                const unitName = s.variant?.volume || 'Unit';
 
-            itemQuantitySummary.push({
-                productId: s.productId,
-                variantId: s.variantId,
-                productName: prodName,
-                unitLabel: unitName,
-                openingQty,
-                soldQty: soldToday,
-                purchasedQty: purchasedToday,
-                closingQty: currentQty,
-                isMatched: (openingQty - soldToday + purchasedToday) === currentQty
+                itemQuantitySummary.push({
+                    productId: s.productId,
+                    variantId: s.variantId,
+                    productName: prodName,
+                    unitLabel: unitName,
+                    openingQty,
+                    soldQty: soldToday,
+                    purchasedQty: purchasedToday,
+                    closingQty: currentQty,
+                    isMatched: (openingQty - soldToday + purchasedToday) === currentQty
+                });
             });
-        });
+        } else {
+            // Fallback to Products & ProductVariants if InventoryStock table is not populated
+            const allProducts = await Product.findAll({
+                where: { status: { [Op.ne]: 'Deleted' } },
+                include: [{ model: ProductVariant, as: 'variants', where: { status: { [Op.ne]: 'Deleted' } }, required: false }]
+            });
 
-        if (openingStockAmount === 0) {
-            // Estimate opening stock = current stock + today's sold stock cost - today's purchase cost
-            openingStockAmount = Math.max(0, currentLiveStockValuation + totalSoldCostValuation - totalPurchaseAmount);
+            allProducts.forEach(p => {
+                const prodName = typeof p.name === 'object' ? (p.name.gu || p.name.en || Object.values(p.name)[0]) : p.name;
+                (p.variants || []).forEach(v => {
+                    const currentQty = Number(v.totalStock || 0);
+                    const costPrice = Number(v.purchasePrice || p.purchasePrice || 0);
+                    currentLiveStockValuation += currentQty * costPrice;
+
+                    const soldToday = itemSalesQtyMap[v.id] || 0;
+                    const purchasedToday = 0;
+                    const openingQty = currentQty + soldToday - purchasedToday;
+
+                    itemQuantitySummary.push({
+                        productId: p.id,
+                        variantId: v.id,
+                        productName: prodName,
+                        unitLabel: v.volume || 'Unit',
+                        openingQty,
+                        soldQty: soldToday,
+                        purchasedQty: purchasedToday,
+                        closingQty: currentQty,
+                        isMatched: (openingQty - soldToday + purchasedToday) === currentQty
+                    });
+                });
+            });
         }
 
-        const salesStockAmount = totalSoldCostValuation || (totalSalesAmount * 0.85); // Valuation cost of sold stock
-        const closingStockAmount = openingStockAmount - salesStockAmount + totalPurchaseAmount;
-        const expensesAmount = 0; // Expenses if logged
+        // Correct Inventory Accounting Valuation Formula
+        const closingStockAmount = currentLiveStockValuation;
+        const salesStockAmount = totalSoldCostValuation;
+        const purchaseStockAmount = totalPurchaseAmount;
+        
+        let openingStockAmount = prevRecord ? Number(prevRecord.closingStockAmount) : 0;
+        if (openingStockAmount === 0) {
+            openingStockAmount = closingStockAmount + salesStockAmount - purchaseStockAmount;
+        }
+
+        let openingCashBalance = prevRecord ? Number(prevRecord.closingCashBalance) : 0;
+        const expensesAmount = 0;
         const netProfit = totalSalesAmount - salesStockAmount - expensesAmount;
         const closingCashBalance = openingCashBalance + cashSalesAmount - purchasePaymentAmount - expensesAmount;
 
@@ -177,7 +215,7 @@ export const getLiveReconciliation = async (req, res) => {
             godownId: godownId || null,
             openingStockAmount: Number(openingStockAmount.toFixed(2)),
             salesStockAmount: Number(salesStockAmount.toFixed(2)),
-            purchaseStockAmount: Number(totalPurchaseAmount.toFixed(2)),
+            purchaseStockAmount: Number(purchaseStockAmount.toFixed(2)),
             closingStockAmount: Number(closingStockAmount.toFixed(2)),
             openingCashBalance: Number(openingCashBalance.toFixed(2)),
             cashSalesAmount: Number(cashSalesAmount.toFixed(2)),
