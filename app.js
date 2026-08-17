@@ -8,6 +8,7 @@ import superadminRoutes from './routes/superadmin-routes/index.js';
 import godownpanelRoutes from './routes/godownpanel-routes/index.js';
 import userRoutes from './routes/user-routes/index.js';
 import deliveryRoutes from './routes/delivery-routes/index.js';
+import appNoticeRoutes from './routes/superadmin-routes/appNotice.routes.js';
 import { sendSuccessResponse, sendErrorResponse } from './utils/response.util.js';
 import HTTP_STATUS from './constants/httpStatusCodes.js';
 import APP_MESSAGES from './constants/messages.js';
@@ -65,6 +66,11 @@ app.use('/api/godown-panel', godownpanelRoutes);
 app.use('/api/user', userRoutes);
 app.use('/user', userRoutes); // Support compatibility path (without /api prefix) for user endpoints
 app.use('/api/delivery', deliveryRoutes);
+
+// App Open Popup Notice public endpoints compatibility
+app.use('/api/v1/app-notice', appNoticeRoutes);
+app.use('/api/app-notice', appNoticeRoutes);
+app.use('/app-notice', appNoticeRoutes);
 
 // Health Check Route
 app.get('/api/health', (req, res) => {
