@@ -11,24 +11,26 @@ export const getPublicAppNotice = async (req, res, next) => {
             order: [['createdAt', 'DESC']]
         });
 
-        if (!notice || !notice.isActive) {
+        if (!notice) {
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'No active notice popup.', {
                 isActive: false,
                 notice: null
             });
         }
 
-        // Optional date range validation
         const now = new Date();
+        let isScheduledActive = notice.isActive;
+
         if (notice.fromDate && new Date(notice.fromDate) > now) {
-            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Notice schedule not started yet.', {
-                isActive: false,
-                notice: null
-            });
+            isScheduledActive = false;
         }
 
         if (notice.toDate && new Date(notice.toDate) < now) {
-            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Notice schedule expired.', {
+            isScheduledActive = false;
+        }
+
+        if (!isScheduledActive) {
+            return sendSuccessResponse(res, HTTP_STATUS.OK, 'App notice is currently disabled.', {
                 isActive: false,
                 notice: null
             });
@@ -38,11 +40,11 @@ export const getPublicAppNotice = async (req, res, next) => {
             isActive: true,
             notice: {
                 id: notice.id,
-                title: notice.title,
-                description: notice.description,
-                imageUrl: notice.imageUrl,
+                title: notice.title || '',
+                description: notice.description || '',
+                imageUrl: notice.imageUrl || '',
                 buttonText: notice.buttonText || 'ઓકે (OK)',
-                buttonLink: notice.buttonLink || null
+                buttonLink: notice.buttonLink || ''
             }
         });
     } catch (error) {
