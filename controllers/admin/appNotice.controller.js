@@ -1,6 +1,6 @@
 import { AppNoticeSetting } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
-import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
+import { sendSuccessResponse } from '../../utils/response.util.js';
 
 /**
  * Get App Notice for Customer Mobile App (Public / User API)
@@ -8,7 +8,7 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
 export const getPublicAppNotice = async (req, res, next) => {
     try {
         let notice = await AppNoticeSetting.findOne({
-            order: [['createdAt', 'DESC']]
+            order: [['updatedAt', 'DESC']]
         });
 
         if (!notice) {
@@ -19,7 +19,7 @@ export const getPublicAppNotice = async (req, res, next) => {
         }
 
         const now = new Date();
-        let isScheduledActive = notice.isActive;
+        let isScheduledActive = Boolean(notice.isActive);
 
         if (notice.fromDate && new Date(notice.fromDate) > now) {
             isScheduledActive = false;
@@ -57,17 +57,20 @@ export const getPublicAppNotice = async (req, res, next) => {
  */
 export const getAdminAppNotice = async (req, res, next) => {
     try {
-        let [notice] = await AppNoticeSetting.findOrCreate({
-            where: {},
-            defaults: {
+        let notice = await AppNoticeSetting.findOne({
+            order: [['updatedAt', 'DESC']]
+        });
+
+        if (!notice) {
+            notice = await AppNoticeSetting.create({
                 isActive: false,
-                title: 'તમારી ડિલિવરી અંગે સૂચના',
-                description: 'હવામાન અથવા તકનીકી કારણોસર ડિલિવરીમાં થોડો વિલંબ થઈ શકે છે. સહકાર બદલ આભાર.',
+                title: '',
+                description: '',
                 imageUrl: '',
                 buttonText: 'ઓકે (OK)',
                 buttonLink: ''
-            }
-        });
+            });
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Admin app notice settings fetched.', notice);
     } catch (error) {
@@ -91,30 +94,30 @@ export const updateAdminAppNotice = async (req, res, next) => {
             toDate = null
         } = req.body;
 
-        let [notice] = await AppNoticeSetting.findOrCreate({
-            where: {},
-            defaults: {
-                isActive,
-                title,
-                description,
-                imageUrl,
-                buttonText,
-                buttonLink,
-                fromDate,
-                toDate
-            }
+        let notice = await AppNoticeSetting.findOne({
+            order: [['updatedAt', 'DESC']]
         });
 
-        notice.isActive = Boolean(isActive);
-        notice.title = String(title || '').trim();
-        notice.description = String(description || '').trim();
-        notice.imageUrl = String(imageUrl || '').trim();
-        notice.buttonText = String(buttonText || 'ઓકે (OK)').trim();
-        notice.buttonLink = String(buttonLink || '').trim();
-        notice.fromDate = fromDate ? new Date(fromDate) : null;
-        notice.toDate = toDate ? new Date(toDate) : null;
+        const updatedFields = {
+            isActive: Boolean(isActive),
+            title: String(title || '').trim(),
+            description: String(description || '').trim(),
+            imageUrl: String(imageUrl || '').trim(),
+            buttonText: String(buttonText || 'ઓકે (OK)').trim(),
+            buttonLink: String(buttonLink || '').trim(),
+            fromDate: fromDate ? new Date(fromDate) : null,
+            toDate: toDate ? new Date(toDate) : null
+        };
 
-        await notice.save();
+        if (!notice) {
+            notice = await AppNoticeSetting.create(updatedFields);
+        } else {
+            Object.assign(notice, updatedFields);
+            await notice.save();
+        }
+
+        // Update all records in table to ensure complete consistency
+        await AppNoticeSetting.update(updatedFields, { where: {} });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'App Notice settings updated successfully.', notice);
     } catch (error) {
