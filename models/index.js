@@ -48,6 +48,7 @@ import StockTransferItem from './superadmin-models/StockTransferItem.js';
 import OutletOrder from './superadmin-models/OutletOrder.js';
 import OutletOrderItem from './superadmin-models/OutletOrderItem.js';
 import DailyReconciliation from './superadmin-models/DailyReconciliation.js';
+import AppNoticeSetting from './superadmin-models/AppNoticeSetting.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -650,5 +651,6 @@ export {
     OutletOrder,
     OutletOrderItem,
     DailyReconciliation,
+    AppNoticeSetting,
     runManualMigrations
 };
