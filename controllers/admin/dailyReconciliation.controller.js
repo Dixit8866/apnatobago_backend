@@ -10,8 +10,29 @@ import {
     InventoryStock,
     InventoryTransaction,
     DailyReconciliation,
-    Godown
+    Godown,
+    Volume
 } from '../../models/index.js';
+
+function getVariantUnitLabel(variant) {
+    if (!variant) return 'બોક્સ (Box)';
+    
+    // Check baseUnitRef first, then volumeRef, then innerUnitRef
+    const unitObj = variant.baseUnitRef || variant.volumeRef || variant.innerUnitRef;
+    if (unitObj && unitObj.name) {
+        const n = unitObj.name;
+        if (typeof n === 'object') {
+            return n.gu || n.en || Object.values(n)[0] || 'Unit';
+        }
+        return String(n);
+    }
+    
+    if (variant.volume && String(variant.volume).trim() !== '1') {
+        return String(variant.volume);
+    }
+    
+    return 'બોક્સ (Box)';
+}
 
 /**
  * Get Live Reconciliation Data for a specific Date & optional Godown
@@ -127,7 +148,15 @@ export const getLiveReconciliation = async (req, res) => {
             where: stockWhere,
             include: [
                 { model: Product, as: 'product' },
-                { model: ProductVariant, as: 'variant' }
+                {
+                    model: ProductVariant,
+                    as: 'variant',
+                    include: [
+                        { model: Volume, as: 'baseUnitRef', required: false },
+                        { model: Volume, as: 'volumeRef', required: false },
+                        { model: Volume, as: 'innerUnitRef', required: false }
+                    ]
+                }
             ]
         }).catch(() => []);
 
@@ -148,7 +177,7 @@ export const getLiveReconciliation = async (req, res) => {
                 const prodName = s.product?.name
                     ? (typeof s.product.name === 'object' ? (s.product.name.gu || s.product.name.en || Object.values(s.product.name)[0]) : s.product.name)
                     : 'Product';
-                const unitName = s.variant?.volume || 'Unit';
+                const unitName = getVariantUnitLabel(s.variant);
 
                 itemQuantitySummary.push({
                     productId: s.productId,
@@ -166,7 +195,19 @@ export const getLiveReconciliation = async (req, res) => {
             // Fallback to Products & ProductVariants if InventoryStock table is not populated
             const allProducts = await Product.findAll({
                 where: { status: { [Op.ne]: 'Deleted' } },
-                include: [{ model: ProductVariant, as: 'variants', where: { status: { [Op.ne]: 'Deleted' } }, required: false }]
+                include: [
+                    {
+                        model: ProductVariant,
+                        as: 'variants',
+                        where: { status: { [Op.ne]: 'Deleted' } },
+                        required: false,
+                        include: [
+                            { model: Volume, as: 'baseUnitRef', required: false },
+                            { model: Volume, as: 'volumeRef', required: false },
+                            { model: Volume, as: 'innerUnitRef', required: false }
+                        ]
+                    }
+                ]
             });
 
             allProducts.forEach(p => {
@@ -184,7 +225,7 @@ export const getLiveReconciliation = async (req, res) => {
                         productId: p.id,
                         variantId: v.id,
                         productName: prodName,
-                        unitLabel: v.volume || 'Unit',
+                        unitLabel: getVariantUnitLabel(v),
                         openingQty,
                         soldQty: soldToday,
                         purchasedQty: purchasedToday,
