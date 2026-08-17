@@ -8,7 +8,8 @@ import { protect, admin } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
-// Public endpoint for mobile app developers to show popup
+// Public endpoints for mobile app developers to show popup
+router.get('/', getPublicAppNotice);
 router.get('/public', getPublicAppNotice);
 
 // Protected endpoints for Admin Panel
