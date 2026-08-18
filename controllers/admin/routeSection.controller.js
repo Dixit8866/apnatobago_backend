@@ -33,6 +33,31 @@ const populateAreaCategories = async (sections) => {
     });
 };
 
+// Helper to check if any area category is already assigned to another active route section
+const checkDuplicateAssignedCategories = async (areaCategoryIds, excludeSectionId = null) => {
+    if (!areaCategoryIds || areaCategoryIds.length === 0) return null;
+
+    const whereClause = {
+        status: { [Op.ne]: 'Deleted' }
+    };
+    if (excludeSectionId) {
+        whereClause.id = { [Op.ne]: excludeSectionId };
+    }
+
+    const otherSections = await RouteSection.findAll({ where: whereClause });
+
+    for (const section of otherSections) {
+        const existingIds = section.areaCategoryIds || [];
+        const overlap = areaCategoryIds.filter(id => existingIds.includes(id));
+        if (overlap.length > 0) {
+            const conflictingCat = await RouteCategory.findByPk(overlap[0]);
+            const catName = conflictingCat ? conflictingCat.name : 'Area Category';
+            return `Area Category "${catName}" is already assigned to Route Section "${section.name}". (એરિયા કેટેગરી "${catName}" પહેલેથી જ "${section.name}" માં ઉમેરાયેલ છે.)`;
+        }
+    }
+    return null;
+};
+
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createRouteSection = async (req, res, next) => {
     try {
@@ -59,6 +84,12 @@ export const createRouteSection = async (req, res, next) => {
                 HTTP_STATUS.BAD_REQUEST,
                 "Route Section with this name already exists. (આ નામવાળું રૂટ સેક્શન પહેલેથી અસ્તિત્વમાં છે.)"
             );
+        }
+
+        // Validate that categories are not already assigned to another route section
+        const categoryError = await checkDuplicateAssignedCategories(validCategoryIds);
+        if (categoryError) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, categoryError);
         }
 
         const maxPos = (await RouteSection.max('position')) || 0;
@@ -184,7 +215,12 @@ export const updateRouteSection = async (req, res, next) => {
         }
 
         if (Array.isArray(areaCategoryIds)) {
-            routeSection.areaCategoryIds = areaCategoryIds.filter(Boolean);
+            const validCategoryIds = areaCategoryIds.filter(Boolean);
+            const categoryError = await checkDuplicateAssignedCategories(validCategoryIds, req.params.id);
+            if (categoryError) {
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, categoryError);
+            }
+            routeSection.areaCategoryIds = validCategoryIds;
         }
 
         if (description !== undefined) {
