@@ -633,3 +633,276 @@ export const getOutletOrderById = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to fetch outlet order details.', error.message);
     }
 };
+
+/**
+ * @desc    Update an existing Outlet Order with stock adjustment sync
+ * @route   PUT /api/admin/outlet-orders/:id
+ * @access  Private (Admin)
+ */
+export const updateOutletOrder = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const {
+            userId,
+            customerName,
+            customerPhone,
+            shopName,
+            godownId,
+            items,
+            paidAmount = 0,
+            paymentMode = 'Cash',
+            payments = [],
+            deliveryDate = null,
+            fulfillmentMode = 'Outlet',
+            orderStatus = 'Completed',
+            note = '',
+            discountAmount = 0
+        } = req.body;
+
+        const order = await OutletOrder.findByPk(id, { transaction: t });
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Outlet order not found.');
+        }
+
+        if (!items || !Array.isArray(items) || items.length === 0) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please add at least one item to the outlet order.');
+        }
+
+        const targetGodownId = godownId || order.godownId;
+
+        // 1. STEP 1: RESTORE PREVIOUS STOCK FOR ALL OLD ITEMS
+        const oldItems = await OutletOrderItem.findAll({
+            where: { outletOrderId: order.id },
+            transaction: t
+        });
+
+        for (const oldItem of oldItems) {
+            const variant = await ProductVariant.findByPk(oldItem.variantId, { transaction: t });
+            const bUPP = Number(variant?.baseUnitsPerPack || oldItem.variantInfo?.baseUnitsPerPack || 1);
+            const qtyToRestore = Math.round(oldItem.sellUnit === 'Inner'
+                ? Number(oldItem.quantity)
+                : Number(oldItem.quantity) * bUPP);
+
+            let stock = await InventoryStock.findOne({
+                where: {
+                    productId: oldItem.productId,
+                    godownId: order.godownId
+                },
+                order: [['createdAt', 'DESC']],
+                transaction: t
+            });
+
+            if (stock) {
+                const newTotalBaseUnits = Number(stock.totalBaseUnits || 0) + qtyToRestore;
+                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                await InventoryTransaction.create({
+                    stockId: stock.id,
+                    productId: oldItem.productId,
+                    variantId: oldItem.variantId,
+                    godownId: order.godownId,
+                    type: 'ADJUSTMENT',
+                    primaryUnitId: stock.primaryUnitId,
+                    secondaryUnitId: stock.secondaryUnitId,
+                    secondaryPerPrimary: stock.secondaryPerPrimary,
+                    totalQtyBaseUnits: qtyToRestore,
+                    balanceAfterBaseUnits: newTotalBaseUnits,
+                    note: `Updated Outlet Order #${order.orderId} (Stock Restored for recalculation)`,
+                    createdBy: req.user?.fullname || 'Admin'
+                }, { transaction: t });
+            } else {
+                const newStock = await InventoryStock.create({
+                    productId: oldItem.productId,
+                    variantId: oldItem.variantId,
+                    godownId: order.godownId,
+                    primaryUnitId: variant?.volumeId || null,
+                    secondaryUnitId: null,
+                    secondaryPerPrimary: bUPP,
+                    totalBaseUnits: qtyToRestore,
+                    avgPurchasePricePerBaseUnit: oldItem.price || 0,
+                    lastPurchasePricePerBaseUnit: oldItem.price || 0
+                }, { transaction: t });
+
+                await InventoryTransaction.create({
+                    stockId: newStock.id,
+                    productId: oldItem.productId,
+                    variantId: oldItem.variantId,
+                    godownId: order.godownId,
+                    type: 'ADJUSTMENT',
+                    primaryUnitId: newStock.primaryUnitId,
+                    secondaryUnitId: newStock.secondaryUnitId,
+                    secondaryPerPrimary: newStock.secondaryPerPrimary,
+                    totalQtyBaseUnits: qtyToRestore,
+                    balanceAfterBaseUnits: qtyToRestore,
+                    note: `Updated Outlet Order #${order.orderId} (Stock Restored for recalculation)`,
+                    createdBy: req.user?.fullname || 'Admin'
+                }, { transaction: t });
+            }
+        }
+
+        // Delete old items
+        await OutletOrderItem.destroy({
+            where: { outletOrderId: order.id },
+            transaction: t
+        });
+
+        // 2. STEP 2: PROCESS & VALIDATE NEW ITEMS AND DEDUCT NEW STOCK
+        let totalOrderAmount = 0;
+        const processedItems = [];
+
+        for (const item of items) {
+            const variant = await ProductVariant.findByPk(item.variantId, {
+                include: [
+                    { model: Product, as: 'product' },
+                    { model: Volume, as: 'volumeRef', required: false }
+                ],
+                transaction: t
+            });
+
+            if (!variant) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Variant not found for item ${item.productId}`);
+            }
+
+            const itemQty = Number(item.quantity || 1);
+            const itemUnitPrice = Number(item.price || variant.purchasePrice || 0);
+            const itemDiscount = Number(item.discount || 0);
+            const itemSubtotal = Math.max(0, (itemQty * itemUnitPrice) - itemDiscount);
+
+            totalOrderAmount += itemSubtotal;
+
+            const variantSnapshot = {
+                id: variant.id,
+                volume: variant.volume,
+                volumeRef: variant.volumeRef ? { id: variant.volumeRef.id, name: variant.volumeRef.name } : null,
+                extra: variant.extra,
+                purchasePrice: variant.purchasePrice,
+                baseUnitsPerPack: variant.baseUnitsPerPack,
+                baseUnitLabel: variant.baseUnitLabel,
+                innerUnitLabel: variant.innerUnitLabel,
+                sellingVolume: variant.sellingVolume,
+                productName: variant.product?.name,
+                boxNumber: variant.product?.boxNumber
+            };
+
+            processedItems.push({
+                productId: variant.productId,
+                variantId: variant.id,
+                quantity: itemQty,
+                price: itemUnitPrice,
+                sellUnit: item.sellUnit || 'Base',
+                discount: itemDiscount,
+                subtotal: itemSubtotal,
+                variantInfo: variantSnapshot,
+                variant
+            });
+        }
+
+        const finalGrandTotal = Math.max(0, totalOrderAmount - Number(discountAmount || 0));
+        const numPaidAmount = (payments && Array.isArray(payments) && payments.length > 0)
+            ? payments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
+            : Number(paidAmount || 0);
+
+        let paymentStatus = 'Pending';
+        if (numPaidAmount >= finalGrandTotal && finalGrandTotal > 0) {
+            paymentStatus = 'Paid';
+        } else if (numPaidAmount > 0) {
+            paymentStatus = 'Partial';
+        }
+
+        const primaryMode = (payments && payments.length > 1) ? 'Multiple' : (payments[0]?.method || paymentMode || 'Cash');
+
+        // 3. STEP 3: CREATE NEW ITEMS & DEDUCT NEW INVENTORY STOCK
+        for (const pItem of processedItems) {
+            await OutletOrderItem.create({
+                outletOrderId: order.id,
+                productId: pItem.productId,
+                variantId: pItem.variantId,
+                quantity: pItem.quantity,
+                price: pItem.price,
+                sellUnit: pItem.sellUnit,
+                discount: pItem.discount,
+                subtotal: pItem.subtotal,
+                variantInfo: pItem.variantInfo
+            }, { transaction: t });
+
+            const deductionRequired = Math.round(pItem.sellUnit === 'Inner'
+                ? pItem.quantity
+                : pItem.quantity * (pItem.variant.baseUnitsPerPack || 1));
+
+            const stocks = await InventoryStock.findAll({
+                where: {
+                    productId: pItem.productId,
+                    godownId: targetGodownId,
+                    totalBaseUnits: { [Op.gt]: 0 }
+                },
+                order: [['createdAt', 'ASC']],
+                transaction: t
+            });
+
+            let remainingToDeduct = deductionRequired;
+            for (const stock of stocks) {
+                if (remainingToDeduct <= 0) break;
+
+                const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
+                const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
+
+                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                await InventoryTransaction.create({
+                    stockId: stock.id,
+                    productId: pItem.productId,
+                    variantId: pItem.variantId,
+                    godownId: stock.godownId,
+                    type: 'SALE',
+                    primaryUnitId: stock.primaryUnitId,
+                    secondaryUnitId: stock.secondaryUnitId,
+                    secondaryPerPrimary: stock.secondaryPerPrimary,
+                    totalQtyBaseUnits: deductFromThis,
+                    balanceAfterBaseUnits: newTotalBaseUnits,
+                    note: `Updated Outlet Order #${order.orderId}`,
+                    createdBy: req.user?.fullname || 'Admin'
+                }, { transaction: t });
+
+                remainingToDeduct -= deductFromThis;
+            }
+        }
+
+        // 4. STEP 4: UPDATE ORDER RECORD
+        await order.update({
+            userId: userId || order.userId,
+            customerName: customerName || order.customerName,
+            customerPhone: customerPhone || order.customerPhone,
+            shopName: shopName || order.shopName,
+            godownId: targetGodownId,
+            orderStatus: orderStatus || order.orderStatus,
+            paymentStatus,
+            totalAmount: totalOrderAmount,
+            discountAmount: Number(discountAmount || 0),
+            grandTotal: finalGrandTotal,
+            paidAmount: numPaidAmount,
+            paymentMode: primaryMode,
+            payments: payments || order.payments,
+            deliveryDate: deliveryDate || order.deliveryDate,
+            note: note || order.note
+        }, { transaction: t });
+
+        await t.commit();
+
+        logActivity(req, {
+            module: 'Outlet Orders',
+            action: 'UPDATE',
+            description: `Updated Outlet Order #${order.orderId} (Grand Total: ₹${finalGrandTotal}) with stock recalculation`,
+            metadata: { orderId: order.id, grandTotal: finalGrandTotal, itemsCount: processedItems.length }
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Outlet order updated successfully.', { order });
+    } catch (error) {
+        await t.rollback();
+        logger.error(`[updateOutletOrder Error]: ${error.message}`, { stack: error.stack });
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to update outlet order.', error.message);
+    }
+};
