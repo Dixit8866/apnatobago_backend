@@ -40,6 +40,7 @@ import HelpSupport from './user/HelpSupport.js';
 import OrderPayment from './user/OrderPayment.js';
 import SalesReturn from './superadmin-models/SalesReturn.js';
 import RouteCategory from './superadmin-models/RouteCategory.js';
+import RouteSection from './superadmin-models/RouteSection.js';
 import BankSetting from './superadmin-models/BankSetting.js';
 import AdminRole from './superadmin-models/AdminRole.js';
 import StockTransfer from './superadmin-models/StockTransfer.js';
@@ -545,6 +546,10 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "orderLimitMessage" TEXT DEFAULT NULL');
         } catch (e) { console.log('[Migration Warning] AppSettings min/max order amount columns migration failed:', e.message); }
 
+        try {
+            await RouteSection.sync();
+        } catch (e) { console.log('[Migration Warning] RouteSection sync failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
 
     } catch (error) {
@@ -645,6 +650,7 @@ export {
     OrderPayment,
     SalesReturn,
     RouteCategory,
+    RouteSection,
     BankSetting,
     AdminRole,
     StockTransfer,
