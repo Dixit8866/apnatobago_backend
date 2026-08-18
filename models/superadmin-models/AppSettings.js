@@ -33,6 +33,11 @@ const AppSettings = sequelize.define('AppSettings', {
         allowNull: true,
         defaultValue: null,
     },
+    orderLimitMessage: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: null,
+    },
     supportPhoneNumber: {
         type: DataTypes.STRING,
         allowNull: true,
