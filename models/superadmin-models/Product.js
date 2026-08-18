@@ -112,6 +112,11 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: 1,
         },
+        customSalesVolumes: {
+            type: DataTypes.JSONB,
+            allowNull: false,
+            defaultValue: [],
+        },
         internalNote: {
             type: DataTypes.TEXT,
             allowNull: true,

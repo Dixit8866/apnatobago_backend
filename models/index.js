@@ -535,6 +535,7 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "mainVolumeQty" NUMERIC(10,2) DEFAULT 1');
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "customSalesVolumeId" UUID REFERENCES volumes(id) ON DELETE SET NULL ON UPDATE CASCADE');
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "customSalesVolumeQty" NUMERIC(10,2) DEFAULT 1');
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "customSalesVolumes" JSONB DEFAULT \'[]\'::jsonb');
         } catch (e) { console.log('[Migration Warning] Products mainVolume/customSalesVolume columns migration failed:', e.message); }
 
         try {

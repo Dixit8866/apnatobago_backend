@@ -40,6 +40,21 @@ function normalizeProductDescription(desc) {
     };
 }
 
+function normalizeCustomSalesVolumes(raw) {
+    if (!raw) return [];
+    let list = raw;
+    if (typeof raw === 'string') {
+        try { list = JSON.parse(raw); } catch (e) { list = []; }
+    }
+    if (!Array.isArray(list)) return [];
+    return list
+        .map(item => ({
+            volumeId: item.volumeId || item.volume || null,
+            qty: item.qty !== undefined && item.qty !== null && item.qty !== '' ? Number(item.qty) : (item.quantity !== undefined && item.quantity !== null && item.quantity !== '' ? Number(item.quantity) : 1)
+        }))
+        .filter(item => item.volumeId);
+}
+
 function getLocalizedText(multilingualField) {
     if (!multilingualField || typeof multilingualField !== 'object') return '';
     return Object.values(multilingualField).find((v) => String(v || '').trim()) || '';
@@ -161,10 +176,15 @@ export const createProduct = async (req, res, next) => {
             mainVolumeQty,
             customSalesVolumeId,
             customSalesVolumeQty,
+            customSalesVolumes,
             internalNote,
             couponPoints,
             couponPrice,
         } = req.body;
+
+        const normalizedCustomSalesVolumes = normalizeCustomSalesVolumes(customSalesVolumes);
+        const finalCustomSalesVolumeId = customSalesVolumeId || (normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].volumeId : null);
+        const finalCustomSalesVolumeQty = customSalesVolumeQty ? Number(customSalesVolumeQty) : (normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].qty : 1);
 
         if (!hasAnyLangValue(name)) {
             await t.rollback();
@@ -235,8 +255,9 @@ export const createProduct = async (req, res, next) => {
                 serialNumber: serialNumber || null,
                 mainVolumeId: mainVolumeId || null,
                 mainVolumeQty: mainVolumeQty ? Number(mainVolumeQty) : 1,
-                customSalesVolumeId: customSalesVolumeId || null,
-                customSalesVolumeQty: customSalesVolumeQty ? Number(customSalesVolumeQty) : 1,
+                customSalesVolumeId: finalCustomSalesVolumeId,
+                customSalesVolumeQty: finalCustomSalesVolumeQty,
+                customSalesVolumes: normalizedCustomSalesVolumes,
                 internalNote: internalNote || null,
                 couponPoints: couponPoints !== undefined && couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null,
                 couponPrice: couponPrice !== undefined && couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null,
@@ -671,6 +692,7 @@ export const updateProduct = async (req, res, next) => {
             mainVolumeQty,
             customSalesVolumeId,
             customSalesVolumeQty,
+            customSalesVolumes,
             internalNote,
             couponPoints,
             couponPrice,
@@ -681,6 +703,14 @@ export const updateProduct = async (req, res, next) => {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
         }
+
+        const normalizedCustomSalesVolumes = customSalesVolumes !== undefined ? normalizeCustomSalesVolumes(customSalesVolumes) : undefined;
+        const finalCustomSalesVolumeId = customSalesVolumeId !== undefined
+            ? (customSalesVolumeId || (normalizedCustomSalesVolumes && normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].volumeId : null))
+            : (normalizedCustomSalesVolumes && normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].volumeId : product.customSalesVolumeId);
+        const finalCustomSalesVolumeQty = customSalesVolumeQty !== undefined
+            ? (customSalesVolumeQty ? Number(customSalesVolumeQty) : 1)
+            : (normalizedCustomSalesVolumes && normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].qty : product.customSalesVolumeQty);
 
         if (!hasAnyLangValue(name)) {
             await t.rollback();
@@ -806,8 +836,9 @@ export const updateProduct = async (req, res, next) => {
                 serialNumber: serialNumber !== undefined ? serialNumber : product.serialNumber,
                 mainVolumeId: mainVolumeId !== undefined ? (mainVolumeId || null) : product.mainVolumeId,
                 mainVolumeQty: mainVolumeQty !== undefined ? (mainVolumeQty ? Number(mainVolumeQty) : 1) : product.mainVolumeQty,
-                customSalesVolumeId: customSalesVolumeId !== undefined ? (customSalesVolumeId || null) : product.customSalesVolumeId,
-                customSalesVolumeQty: customSalesVolumeQty !== undefined ? (customSalesVolumeQty ? Number(customSalesVolumeQty) : 1) : product.customSalesVolumeQty,
+                customSalesVolumeId: finalCustomSalesVolumeId,
+                customSalesVolumeQty: finalCustomSalesVolumeQty,
+                customSalesVolumes: normalizedCustomSalesVolumes !== undefined ? normalizedCustomSalesVolumes : product.customSalesVolumes,
                 internalNote: internalNote !== undefined ? (internalNote || null) : product.internalNote,
                 couponPoints: couponPoints !== undefined ? (couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null) : product.couponPoints,
                 couponPrice: couponPrice !== undefined ? (couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null) : product.couponPrice,
