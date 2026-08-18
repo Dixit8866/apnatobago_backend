@@ -74,7 +74,11 @@ export const getGodownOrders = async (req, res, next) => {
         })() : {};
 
         // Route category filter (Order has routeCategoryId directly)
-        const routeFilter = routeCategoryId ? { routeCategoryId } : {};
+        const routeFilter = routeCategoryId
+            ? (typeof routeCategoryId === 'string' && routeCategoryId.includes(',')
+                ? { routeCategoryId: { [Op.in]: routeCategoryId.split(',') } }
+                : { routeCategoryId })
+            : {};
 
         // Date range filter (Order Date or Delivery Date)
         let dateFilter = {};

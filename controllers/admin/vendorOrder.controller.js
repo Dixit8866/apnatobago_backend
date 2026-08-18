@@ -123,6 +123,7 @@ async function enrichItems(rawItems) {
                 unitLabel: cleanText(unitLabel),
                 quotationPrice: item.quotationPrice !== undefined && item.quotationPrice !== null ? Number(item.quotationPrice) : null,
                 qty: Number(item.qty),
+                productNote: item.productNote || item.internalNote || '',
                 variantsData: item.variantsData || null
             };
         } catch (err) {
@@ -155,6 +156,20 @@ export const createVendorOrder = async (req, res) => {
             items: enrichedItems,
             totalItems,
         });
+
+        // Sync product internalNote if updated in Vendor Order
+        if (items && Array.isArray(items)) {
+            try {
+                await Promise.all(items.map(async (item) => {
+                    if (item.productId && (item.productNote !== undefined || item.internalNote !== undefined)) {
+                        const noteVal = item.productNote !== undefined ? item.productNote : item.internalNote;
+                        await Product.update({ internalNote: noteVal || null }, { where: { id: item.productId } });
+                    }
+                }));
+            } catch (err) {
+                console.error("Failed to sync product internalNote:", err);
+            }
+        }
 
         // Auto-link any new products in items to the Vendor's productIds
         if (vendorId && items && items.length > 0) {
@@ -361,6 +376,20 @@ export const updateVendorOrder = async (req, res) => {
         }
 
         await order.update(updateData);
+
+        // Sync product internalNote if updated in Vendor Order
+        if (items && Array.isArray(items)) {
+            try {
+                await Promise.all(items.map(async (item) => {
+                    if (item.productId && (item.productNote !== undefined || item.internalNote !== undefined)) {
+                        const noteVal = item.productNote !== undefined ? item.productNote : item.internalNote;
+                        await Product.update({ internalNote: noteVal || null }, { where: { id: item.productId } });
+                    }
+                }));
+            } catch (err) {
+                console.error("Failed to sync product internalNote in update:", err);
+            }
+        }
 
         if (items && order.vendorId) {
             try {

@@ -296,7 +296,11 @@ export const getAllOrders = async (req, res) => {
 
         // Apply route category filter
         if (routeCategoryId) {
-            routeClause = { routeCategoryId };
+            if (typeof routeCategoryId === 'string' && routeCategoryId.includes(',')) {
+                routeClause = { routeCategoryId: { [Op.in]: routeCategoryId.split(',') } };
+            } else {
+                routeClause = { routeCategoryId };
+            }
         }
 
         // Apply delivery timing filter (Express or a specific Round timing slot)
@@ -527,7 +531,11 @@ export const getAllOrders = async (req, res) => {
         const countInclude = search ? searchIncludes : [];
 
         if (routeCategoryId) {
-            countWhere.routeCategoryId = routeCategoryId;
+            if (typeof routeCategoryId === 'string' && routeCategoryId.includes(',')) {
+                countWhere.routeCategoryId = { [Op.in]: routeCategoryId.split(',') };
+            } else {
+                countWhere.routeCategoryId = routeCategoryId;
+            }
         }
 
         if (deliveryBoyId) {
