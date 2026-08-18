@@ -170,6 +170,10 @@ const Order = sequelize.define(
             type: DataTypes.UUID,
             allowNull: true,
         },
+        verifiedByAdminId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,

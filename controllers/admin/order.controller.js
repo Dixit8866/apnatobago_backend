@@ -406,6 +406,12 @@ export const getAllOrders = async (req, res) => {
                     as: 'godown',
                     required: false,
                     attributes: ['id', 'name']
+                },
+                {
+                    model: Admin,
+                    as: 'verifiedByAdmin',
+                    required: false,
+                    attributes: ['id', 'name']
                 }
             ],
             limit,
@@ -1164,6 +1170,7 @@ export const bulkVerifyPayments = async (req, res) => {
         for (const order of orders) {
             order.orderStatus = 'Payment Verify';
             order.paymentCollectStatus = 'Verified';
+            order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
             order.deliveredAt = order.deliveredAt || new Date();
 
             if (note) {
