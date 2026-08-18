@@ -34,7 +34,13 @@ export const getGodownParties = async (req, res, next) => {
         }
 
         if (kycverification) searchWhere.kycverification = kycverification;
-        if (routeCategoryId) searchWhere.routeCategoryId = routeCategoryId;
+        if (routeCategoryId) {
+            if (typeof routeCategoryId === 'string' && routeCategoryId.includes(',')) {
+                searchWhere.routeCategoryId = { [Op.in]: routeCategoryId.split(',') };
+            } else {
+                searchWhere.routeCategoryId = routeCategoryId;
+            }
+        }
         if (deliveryRoundTiming) searchWhere.deliveryRoundTiming = deliveryRoundTiming;
 
         const where = { ...searchWhere };

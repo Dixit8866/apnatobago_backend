@@ -120,7 +120,13 @@ export const getAllUsers = async (req, res, next) => {
             ];
         }
         if (kycverification) searchWhere.kycverification = kycverification;
-        if (routeCategoryId) searchWhere.routeCategoryId = routeCategoryId;
+        if (routeCategoryId) {
+            if (typeof routeCategoryId === 'string' && routeCategoryId.includes(',')) {
+                searchWhere.routeCategoryId = { [Op.in]: routeCategoryId.split(',') };
+            } else {
+                searchWhere.routeCategoryId = routeCategoryId;
+            }
+        }
         if (deliveryRoundTiming) searchWhere.deliveryRoundTiming = deliveryRoundTiming;
         if (godownId) searchWhere.godownId = godownId;
 
