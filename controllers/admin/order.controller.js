@@ -2454,7 +2454,7 @@ export const getCustomerPaymentsReport = async (req, res) => {
             // Delivery Boy Breakdown
             const dbObj = order.assignment?.deliveryBoy;
             const dbId = dbObj?.id ? String(dbObj.id) : 'unassigned';
-            const dbName = dbObj?.name || 'વગર ડીલિવરી બોય (Direct/Unassigned)';
+            const dbName = dbObj?.name || 'ડાયરેક્ટ (Unassigned)';
 
             if (!dbSummaryMap.has(dbId)) {
                 dbSummaryMap.set(dbId, {
