@@ -241,27 +241,33 @@ export const getAllOrders = async (req, res) => {
             }
         }
 
-        // Apply date / date range filters
+        // Apply date / date range filters (in IST timezone +05:30)
+        const parseISTDate = (dateStr, isEnd = false) => {
+            if (!dateStr) return null;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                return new Date(`${dateStr}T${isEnd ? '23:59:59.999' : '00:00:00.000'}+05:30`);
+            }
+            const d = new Date(dateStr);
+            if (isEnd) d.setHours(23, 59, 59, 999);
+            else d.setHours(0, 0, 0, 0);
+            return d;
+        };
+
+        let startOfDate = null;
+        let endOfDate = null;
+
         if (startDate && endDate) {
-            const startOfDate = new Date(startDate);
-            startOfDate.setHours(0, 0, 0, 0);
-            const endOfDate = new Date(endDate);
-            endOfDate.setHours(23, 59, 59, 999);
-            if (dateFilterField === 'deliveredAt') {
-                dateClause = {
-                    [Op.or]: [
-                        { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
-                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } }
-                    ]
-                };
-            } else {
-                dateClause = { [dateFilterField]: { [Op.between]: [startOfDate, endOfDate] } };
-            }
+            startOfDate = parseISTDate(startDate, false);
+            endOfDate = parseISTDate(endDate, true);
         } else if (startDate) {
-            const startOfDate = new Date(startDate);
-            startOfDate.setHours(0, 0, 0, 0);
-            const endOfDate = new Date(startDate);
-            endOfDate.setHours(23, 59, 59, 999);
+            startOfDate = parseISTDate(startDate, false);
+            endOfDate = parseISTDate(startDate, true);
+        } else if (date) {
+            startOfDate = parseISTDate(date, false);
+            endOfDate = parseISTDate(date, true);
+        }
+
+        if (startOfDate && endOfDate) {
             if (dateFilterField === 'deliveredAt') {
                 dateClause = {
                     [Op.or]: [
@@ -271,21 +277,6 @@ export const getAllOrders = async (req, res) => {
                 };
             } else {
                 dateClause = { [dateFilterField]: { [Op.between]: [startOfDate, endOfDate] } };
-            }
-        } else if (date) {
-            const startOfDay = new Date(date);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(date);
-            endOfDay.setHours(23, 59, 59, 999);
-            if (dateFilterField === 'deliveredAt') {
-                dateClause = {
-                    [Op.or]: [
-                        { deliveredAt: { [Op.between]: [startOfDay, endOfDay] } },
-                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfDay, endOfDay] } }
-                    ]
-                };
-            } else {
-                dateClause = { [dateFilterField]: { [Op.between]: [startOfDay, endOfDay] } };
             }
         }
 
@@ -555,24 +546,8 @@ export const getAllOrders = async (req, res) => {
         }
 
         let countDateRange = null;
-        if (startDate && endDate) {
-            const startOfDate = new Date(startDate);
-            startOfDate.setHours(0, 0, 0, 0);
-            const endOfDate = new Date(endDate);
-            endOfDate.setHours(23, 59, 59, 999);
+        if (startOfDate && endOfDate) {
             countDateRange = { [Op.between]: [startOfDate, endOfDate] };
-        } else if (startDate) {
-            const startOfDate = new Date(startDate);
-            startOfDate.setHours(0, 0, 0, 0);
-            const endOfDate = new Date(startDate);
-            endOfDate.setHours(23, 59, 59, 999);
-            countDateRange = { [Op.between]: [startOfDate, endOfDate] };
-        } else if (date) {
-            const startOfDay = new Date(date);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(date);
-            endOfDay.setHours(23, 59, 59, 999);
-            countDateRange = { [Op.between]: [startOfDay, endOfDay] };
         }
 
         // Setup count filters

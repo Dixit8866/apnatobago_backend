@@ -80,13 +80,13 @@ export const getGodownOrders = async (req, res, next) => {
                 : { routeCategoryId })
             : {};
 
-        // Date range filter (Order Date or Delivery Date)
+        // Date range filter (Order Date or Delivery Date) in IST timezone (+05:30)
         let dateFilter = {};
         if (startDate || endDate) {
             const dateField = dateType === 'deliveredAt' ? 'deliveredAt' : 'createdAt';
             dateFilter[dateField] = {};
-            if (startDate) dateFilter[dateField][Op.gte] = new Date(startDate + 'T00:00:00.000Z');
-            if (endDate)   dateFilter[dateField][Op.lte] = new Date(endDate   + 'T23:59:59.999Z');
+            if (startDate) dateFilter[dateField][Op.gte] = new Date(startDate.includes('T') ? startDate : startDate + 'T00:00:00+05:30');
+            if (endDate)   dateFilter[dateField][Op.lte] = new Date(endDate.includes('T') ? endDate : endDate + 'T23:59:59.999+05:30');
         }
 
         const where = {
