@@ -1,4 +1,4 @@
-import { Order, PurchaseBill, OrderItem, Product, ProductVariant, MainCategory, User, Vendor, InventoryStock, Volume, HelpSupport } from '../../models/index.js';
+import { Order, PurchaseBill, OrderItem, Product, ProductVariant, MainCategory, User, Vendor, InventoryStock, Volume, HelpSupport, OutletOrder, OutletOrderItem } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { Op, fn, col, literal } from 'sequelize';
@@ -42,6 +42,8 @@ export const getDashboardStats = async (req, res) => {
         
         const dateFilter = {};
         const purchaseDateFilter = {};
+        const outletDateFilter = {};
+
         if (startDate && endDate) {
             const { startISO, endISO, startYMD, endYMD } = getIndiaTimezoneRange(startDate, endDate);
             dateFilter[Op.or] = [
@@ -52,6 +54,10 @@ export const getDashboardStats = async (req, res) => {
                 { createdAt: { [Op.between]: [startISO, endISO] } },
                 { receivedDate: { [Op.between]: [startISO, endISO] } }
             ];
+            outletDateFilter[Op.or] = [
+                { createdAt: { [Op.between]: [startISO, endISO] } },
+                { orderDate: { [Op.between]: [startYMD, endYMD] } }
+            ];
         }
 
         const cancelledStatuses = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
@@ -59,15 +65,24 @@ export const getDashboardStats = async (req, res) => {
         // Build conditional godown filter
         const godownFilter = godownId ? { godownId } : {};
 
-        // 1. Total Sales (sums App orders, Custom Direct Sales, and Outlet Sales)
-        const totalSalesSum = await Order.sum('totalAmount', { 
+        // 1. Total Sales (sums App orders + Custom Direct Sales + Outlet Orders)
+        const appSalesSum = await Order.sum('totalAmount', { 
             where: { 
                 ...dateFilter,
                 ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             } 
         }) || 0;
-        const totalSales = Math.round(Number(totalSalesSum) * 100) / 100;
+
+        const outletSalesSum = await OutletOrder.sum('totalAmount', {
+            where: {
+                ...outletDateFilter,
+                ...godownFilter,
+                orderStatus: { [Op.notIn]: cancelledStatuses }
+            }
+        }) || 0;
+
+        const totalSales = Math.round((Number(appSalesSum) + Number(outletSalesSum)) * 100) / 100;
 
         // 2. Total Purchase
         const totalPurchaseSum = await PurchaseBill.sum('totalAmount', { 
@@ -92,29 +107,46 @@ export const getDashboardStats = async (req, res) => {
             group: ['paymentMethod']
         });
 
-        // 4. Total Outstanding (Money yet to be received)
-        const totalOutstandingSum = await Order.sum('dueAmount', {
+        // 4. Total Outstanding (Money yet to be received from App + Outlet orders)
+        const appOutstandingSum = await Order.sum('dueAmount', {
             where: {
                 ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
-        const totalOutstanding = Math.round(Number(totalOutstandingSum) * 100) / 100;
 
-        // 5. Total Received (Money already collected)
-        const totalReceivedSum = await Order.sum('paidAmount', {
+        const outletOutstandingSum = await OutletOrder.sum('dueAmount', {
+            where: {
+                ...godownFilter,
+                orderStatus: { [Op.notIn]: cancelledStatuses }
+            }
+        }) || 0;
+
+        const totalOutstanding = Math.round((Number(appOutstandingSum) + Number(outletOutstandingSum)) * 100) / 100;
+
+        // 5. Total Received (Money already collected from App + Outlet orders)
+        const appReceivedSum = await Order.sum('paidAmount', {
             where: {
                 ...dateFilter,
                 ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
-        const totalReceived = Math.round(Number(totalReceivedSum) * 100) / 100;
+
+        const outletReceivedSum = await OutletOrder.sum('paidAmount', {
+            where: {
+                ...outletDateFilter,
+                ...godownFilter,
+                orderStatus: { [Op.notIn]: cancelledStatuses }
+            }
+        }) || 0;
+
+        const totalReceived = Math.round((Number(appReceivedSum) + Number(outletReceivedSum)) * 100) / 100;
 
         // 6. Payables (Outstanding to vendors)
         const totalPayable = totalPurchase; 
 
-        // 6.0 Total Profit Calculation
+        // 6.0 Total Profit Calculation across App + Outlet Orders
         let totalCost = 0;
         try {
             const validOrders = await Order.findAll({
@@ -137,6 +169,35 @@ export const getDashboardStats = async (req, res) => {
             });
 
             validOrders.forEach(ord => {
+                if (Array.isArray(ord.items)) {
+                    ord.items.forEach(it => {
+                        const qty = Number(it.quantity || 0);
+                        const costPrice = Number(it.variant?.purchasePrice || 0);
+                        totalCost += qty * costPrice;
+                    });
+                }
+            });
+
+            const validOutletOrders = await OutletOrder.findAll({
+                where: {
+                    ...outletDateFilter,
+                    ...godownFilter,
+                    orderStatus: { [Op.notIn]: cancelledStatuses }
+                },
+                attributes: ['id', 'totalAmount'],
+                include: [{
+                    model: OutletOrderItem,
+                    as: 'items',
+                    attributes: ['quantity', 'price', 'variantId'],
+                    include: [{
+                        model: ProductVariant,
+                        as: 'variant',
+                        attributes: ['purchasePrice']
+                    }]
+                }]
+            });
+
+            validOutletOrders.forEach(ord => {
                 if (Array.isArray(ord.items)) {
                     ord.items.forEach(it => {
                         const qty = Number(it.quantity || 0);
@@ -169,11 +230,12 @@ export const getDashboardStats = async (req, res) => {
             }
         });
 
-        // 6.3 Today Total Order
+        // 6.3 Today Total Order (summing App + Outlet Orders)
         const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
         const todayStartISO = new Date(`${todayStr}T00:00:00+05:30`);
         const todayEndISO = new Date(`${todayStr}T23:59:59.999+05:30`);
-        const todayTotalOrder = await Order.count({
+
+        const todayAppOrderCount = await Order.count({
             where: {
                 ...godownFilter,
                 [Op.or]: [
@@ -182,6 +244,18 @@ export const getDashboardStats = async (req, res) => {
                 ]
             }
         });
+
+        const todayOutletOrderCount = await OutletOrder.count({
+            where: {
+                ...godownFilter,
+                [Op.or]: [
+                    { createdAt: { [Op.between]: [todayStartISO, todayEndISO] } },
+                    { orderDate: todayStr }
+                ]
+            }
+        });
+
+        const todayTotalOrder = todayAppOrderCount + todayOutletOrderCount;
 
         // 6. Top Selling Products
         const topSellingProducts = await OrderItem.findAll({
