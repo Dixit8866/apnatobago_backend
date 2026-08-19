@@ -4,21 +4,49 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { Op, fn, col, literal } from 'sequelize';
 import logger from '../../logger/apiLogger.js';
 
+function getIndiaTimezoneRange(startDateStr, endDateStr) {
+    let startYMD = startDateStr;
+    let endYMD = endDateStr;
+
+    if (startDateStr && startDateStr.includes('-')) {
+        const parts = startDateStr.split('-');
+        if (parts[2]?.length === 4) {
+            startYMD = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+    }
+
+    if (endDateStr && endDateStr.includes('-')) {
+        const parts = endDateStr.split('-');
+        if (parts[2]?.length === 4) {
+            endYMD = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+    }
+
+    if (!startYMD || !/^\d{4}-\d{2}-\d{2}$/.test(startYMD)) {
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+        startYMD = todayStr;
+    }
+    if (!endYMD || !/^\d{4}-\d{2}-\d{2}$/.test(endYMD)) {
+        endYMD = startYMD;
+    }
+
+    const startISO = new Date(`${startYMD}T00:00:00+05:30`);
+    const endISO = new Date(`${endYMD}T23:59:59.999+05:30`);
+
+    return { startISO, endISO, startYMD, endYMD };
+}
+
 export const getDashboardStats = async (req, res) => {
     try {
         const { startDate, endDate, godownId } = req.query;
         
         const dateFilter = {};
         if (startDate && endDate) {
-            const start = new Date(startDate);
-            start.setHours(0, 0, 0, 0);
-            
-            const end = new Date(endDate);
-            end.setHours(23, 59, 59, 999);
-            
-            dateFilter.createdAt = {
-                [Op.between]: [start, end]
-            };
+            const { startISO, endISO, startYMD, endYMD } = getIndiaTimezoneRange(startDate, endDate);
+            dateFilter[Op.or] = [
+                { createdAt: { [Op.between]: [startISO, endISO] } },
+                { orderDate: { [Op.between]: [startYMD, endYMD] } }
+            ];
         }
 
         const cancelledStatuses = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
@@ -26,22 +54,24 @@ export const getDashboardStats = async (req, res) => {
         // Build conditional godown filter
         const godownFilter = godownId ? { godownId } : {};
 
-        // 1. Total Sales
-        const totalSales = await Order.sum('totalAmount', { 
+        // 1. Total Sales (sums App orders, Custom Direct Sales, and Outlet Sales)
+        const totalSalesSum = await Order.sum('totalAmount', { 
             where: { 
                 ...dateFilter,
                 ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             } 
         }) || 0;
+        const totalSales = Math.round(Number(totalSalesSum) * 100) / 100;
 
         // 2. Total Purchase
-        const totalPurchase = await PurchaseBill.sum('totalAmount', { 
+        const totalPurchaseSum = await PurchaseBill.sum('totalAmount', { 
             where: {
                 ...dateFilter,
                 ...godownFilter
             }
         }) || 0;
+        const totalPurchase = Math.round(Number(totalPurchaseSum) * 100) / 100;
 
         // 3. Payment Bifurcation
         const paymentStats = await Order.findAll({
@@ -58,24 +88,63 @@ export const getDashboardStats = async (req, res) => {
         });
 
         // 4. Total Outstanding (Money yet to be received)
-        const totalOutstanding = await Order.sum('dueAmount', {
+        const totalOutstandingSum = await Order.sum('dueAmount', {
             where: {
                 ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
+        const totalOutstanding = Math.round(Number(totalOutstandingSum) * 100) / 100;
 
         // 5. Total Received (Money already collected)
-        const totalReceived = await Order.sum('paidAmount', {
+        const totalReceivedSum = await Order.sum('paidAmount', {
             where: {
                 ...dateFilter,
                 ...godownFilter,
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         }) || 0;
+        const totalReceived = Math.round(Number(totalReceivedSum) * 100) / 100;
 
         // 6. Payables (Outstanding to vendors)
         const totalPayable = totalPurchase; 
+
+        // 6.0 Total Profit Calculation
+        let totalCost = 0;
+        try {
+            const validOrders = await Order.findAll({
+                where: {
+                    ...dateFilter,
+                    ...godownFilter,
+                    orderStatus: { [Op.notIn]: cancelledStatuses }
+                },
+                attributes: ['id', 'totalAmount'],
+                include: [{
+                    model: OrderItem,
+                    as: 'items',
+                    attributes: ['quantity', 'price', 'variantId'],
+                    include: [{
+                        model: ProductVariant,
+                        as: 'variant',
+                        attributes: ['purchasePrice']
+                    }]
+                }]
+            });
+
+            validOrders.forEach(ord => {
+                if (Array.isArray(ord.items)) {
+                    ord.items.forEach(it => {
+                        const qty = Number(it.quantity || 0);
+                        const costPrice = Number(it.variant?.purchasePrice || 0);
+                        totalCost += qty * costPrice;
+                    });
+                }
+            });
+        } catch (err) {
+            logger.error(`[Dashboard Total Profit Calculation Error]: ${err.message}`);
+        }
+
+        const totalProfit = Math.max(0, Math.round((totalSales - totalCost) * 100) / 100);
 
         // 6.1 New Order Count
         const newOrderCount = await Order.count({
@@ -96,16 +165,16 @@ export const getDashboardStats = async (req, res) => {
         });
 
         // 6.3 Today Total Order
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+        const todayStartISO = new Date(`${todayStr}T00:00:00+05:30`);
+        const todayEndISO = new Date(`${todayStr}T23:59:59.999+05:30`);
         const todayTotalOrder = await Order.count({
             where: {
                 ...godownFilter,
-                createdAt: {
-                    [Op.between]: [todayStart, todayEnd]
-                }
+                [Op.or]: [
+                    { createdAt: { [Op.between]: [todayStartISO, todayEndISO] } },
+                    { orderDate: todayStr }
+                ]
             }
         });
 
@@ -305,6 +374,7 @@ export const getDashboardStats = async (req, res) => {
                 totalOutstanding,
                 totalReceived,
                 totalPayable,
+                totalProfit,
                 newOrderCount,
                 deliveredOrderCount,
                 todayTotalOrder,

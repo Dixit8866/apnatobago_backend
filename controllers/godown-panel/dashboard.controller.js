@@ -20,6 +20,38 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
  * @route   GET /api/godown-panel/dashboard
  * @access  Private (GodownStaff)
  */
+function getIndiaTimezoneRange(startDateStr, endDateStr) {
+    let startYMD = startDateStr;
+    let endYMD = endDateStr;
+
+    if (startDateStr && startDateStr.includes('-')) {
+        const parts = startDateStr.split('-');
+        if (parts[2]?.length === 4) {
+            startYMD = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+    }
+
+    if (endDateStr && endDateStr.includes('-')) {
+        const parts = endDateStr.split('-');
+        if (parts[2]?.length === 4) {
+            endYMD = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+    }
+
+    if (!startYMD || !/^\d{4}-\d{2}-\d{2}$/.test(startYMD)) {
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+        startYMD = todayStr;
+    }
+    if (!endYMD || !/^\d{4}-\d{2}-\d{2}$/.test(endYMD)) {
+        endYMD = startYMD;
+    }
+
+    const startISO = new Date(`${startYMD}T00:00:00+05:30`);
+    const endISO = new Date(`${endYMD}T23:59:59.999+05:30`);
+
+    return { startISO, endISO, startYMD, endYMD };
+}
+
 export const getGodownDashboard = async (req, res, next) => {
     try {
         const staff = req.user;
@@ -33,15 +65,11 @@ export const getGodownDashboard = async (req, res, next) => {
 
         const dateFilter = {};
         if (startDate && endDate) {
-            const start = new Date(startDate);
-            start.setHours(0, 0, 0, 0);
-
-            const end = new Date(endDate);
-            end.setHours(23, 59, 59, 999);
-
-            dateFilter.createdAt = {
-                [Op.between]: [start, end]
-            };
+            const { startISO, endISO, startYMD, endYMD } = getIndiaTimezoneRange(startDate, endDate);
+            dateFilter[Op.or] = [
+                { createdAt: { [Op.between]: [startISO, endISO] } },
+                { orderDate: { [Op.between]: [startYMD, endYMD] } }
+            ];
         }
 
         const cancelledStatuses = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
@@ -54,7 +82,7 @@ export const getGodownDashboard = async (req, res, next) => {
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         });
-        const totalSales = Number(totalSalesSum || 0);
+        const totalSales = Math.round(Number(totalSalesSum || 0) * 100) / 100;
 
         // 2. Total Purchase (sum of totalAmount for purchase bills in this godown)
         const totalPurchaseSum = await PurchaseBill.sum('totalAmount', {
@@ -63,7 +91,7 @@ export const getGodownDashboard = async (req, res, next) => {
                 ...dateFilter
             }
         });
-        const totalPurchase = Number(totalPurchaseSum || 0);
+        const totalPurchase = Math.round(Number(totalPurchaseSum || 0) * 100) / 100;
         const totalPayable = totalPurchase;
 
         // 3. New Order Count (Pending)
@@ -76,14 +104,16 @@ export const getGodownDashboard = async (req, res, next) => {
         });
 
         // 4. Today Total Orders (placed today in this godown)
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+        const todayStartISO = new Date(`${todayStr}T00:00:00+05:30`);
+        const todayEndISO = new Date(`${todayStr}T23:59:59.999+05:30`);
         const todayTotalOrder = await Order.count({
             where: {
                 ...godownFilter,
-                createdAt: { [Op.between]: [todayStart, todayEnd] }
+                [Op.or]: [
+                    { createdAt: { [Op.between]: [todayStartISO, todayEndISO] } },
+                    { orderDate: todayStr }
+                ]
             }
         });
 
@@ -104,7 +134,7 @@ export const getGodownDashboard = async (req, res, next) => {
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         });
-        const totalReceived = Number(totalReceivedSum || 0);
+        const totalReceived = Math.round(Number(totalReceivedSum || 0) * 100) / 100;
 
         // 7. Total Outstanding (dueAmount for active orders)
         const totalOutstandingSum = await Order.sum('dueAmount', {
@@ -113,7 +143,44 @@ export const getGodownDashboard = async (req, res, next) => {
                 orderStatus: { [Op.notIn]: cancelledStatuses }
             }
         });
-        const totalOutstanding = Number(totalOutstandingSum || 0);
+        const totalOutstanding = Math.round(Number(totalOutstandingSum || 0) * 100) / 100;
+
+        // 7.1 Total Profit Calculation
+        let totalCost = 0;
+        try {
+            const validOrders = await Order.findAll({
+                where: {
+                    ...godownFilter,
+                    ...dateFilter,
+                    orderStatus: { [Op.notIn]: cancelledStatuses }
+                },
+                attributes: ['id', 'totalAmount'],
+                include: [{
+                    model: OrderItem,
+                    as: 'items',
+                    attributes: ['quantity', 'price', 'variantId'],
+                    include: [{
+                        model: ProductVariant,
+                        as: 'variant',
+                        attributes: ['purchasePrice']
+                    }]
+                }]
+            });
+
+            validOrders.forEach(ord => {
+                if (Array.isArray(ord.items)) {
+                    ord.items.forEach(it => {
+                        const qty = Number(it.quantity || 0);
+                        const costPrice = Number(it.variant?.purchasePrice || 0);
+                        totalCost += qty * costPrice;
+                    });
+                }
+            });
+        } catch (err) {
+            console.error('[Godown Dashboard Total Profit Error]:', err.message);
+        }
+
+        const totalProfit = Math.max(0, Math.round((totalSales - totalCost) * 100) / 100);
 
         // 8. Active Parties (total parties assigned to this godown)
         const totalParties = await User.count({
@@ -313,6 +380,7 @@ export const getGodownDashboard = async (req, res, next) => {
                 totalSales,
                 totalPurchase,
                 totalPayable,
+                totalProfit,
                 newOrderCount,
                 todayTotalOrder,
                 deliveredOrderCount,
