@@ -744,7 +744,7 @@ export const getAllOrders = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { orderStatus, paymentStatus, paidAmount: newPaidAmount, notes } = req.body;
+        const { orderStatus, paymentStatus, paidAmount: newPaidAmount, notes, cashAmount, onlineAmount, creditAmount, paymentNotes } = req.body;
 
         const order = await Order.findByPk(id);
 
@@ -880,8 +880,58 @@ export const updateOrderStatus = async (req, res) => {
             }
         }
 
-        // Handle Payment Updates
-        if (newPaidAmount !== undefined) {
+        // Handle Payment Updates & Cash/Online/Credit Breakdown Entries
+        const cash = parseFloat(cashAmount || 0);
+        const online = parseFloat(onlineAmount || 0);
+        const credit = parseFloat(creditAmount || 0);
+
+        if (cash > 0 || online > 0 || credit > 0) {
+            if (cash > 0) {
+                await OrderPayment.create({
+                    orderId: order.id,
+                    amount: cash,
+                    paymentMethod: 'CASH',
+                    isSubmitted: true,
+                    submittedAt: new Date(),
+                    notes: paymentNotes || notes || 'Admin Collected Cash Payment'
+                });
+            }
+            if (online > 0) {
+                await OrderPayment.create({
+                    orderId: order.id,
+                    amount: online,
+                    paymentMethod: 'ONLINE',
+                    isSubmitted: true,
+                    submittedAt: new Date(),
+                    notes: paymentNotes || notes || 'Admin Collected Online Payment'
+                });
+            }
+            if (credit > 0) {
+                await OrderPayment.create({
+                    orderId: order.id,
+                    amount: credit,
+                    paymentMethod: 'CREDIT',
+                    isSubmitted: true,
+                    submittedAt: new Date(),
+                    notes: paymentNotes || notes || 'Admin Recorded Credit Payment'
+                });
+            }
+
+            const currentPaid = parseFloat(order.paidAmount || 0);
+            const total = parseFloat(order.totalAmount || 0);
+            const addedReal = cash + online;
+            const newPaid = Math.min(total, currentPaid + addedReal);
+
+            order.paidAmount = newPaid.toFixed(2);
+            const newDue = Math.max(0, total - newPaid - credit);
+            order.dueAmount = newDue.toFixed(2);
+
+            if (newDue <= 1e-5) {
+                order.paymentStatus = 'Paid';
+            } else if (newPaid > 0) {
+                order.paymentStatus = 'Partial';
+            }
+        } else if (newPaidAmount !== undefined) {
             const total = parseFloat(order.totalAmount);
             const paid = parseFloat(newPaidAmount);
 
