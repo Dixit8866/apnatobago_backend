@@ -45,6 +45,8 @@ const sendSMS = async (fullNumber, otp) => {
         const text = `${otp} is your mobile verification code. Regards, ${companyName} Call: ${supportContact} Team MRSTXI`;
 
         const smsParams = {
+            user: process.env.SMS_USERNAME || 'prashant224',
+            password: process.env.SMS_PASSWORD || 'prashant@224',
             APIKey: process.env.SMS_API_KEY || 'isGOxtla5EKjl6skCtuFqQ',
             senderid: process.env.SMS_SENDER_ID || 'MRSTXI',
             channel: 2,
@@ -59,9 +61,11 @@ const sendSMS = async (fullNumber, otp) => {
 
         const urlParams = new URLSearchParams(smsParams).toString();
 
-        // Endpoints to try (if main www domain returns server C# database exception, fallback to login domain)
+        // Endpoints to try (smsc.co.in, login.smsgatewayhub.com, www.smsgatewayhub.com)
         const candidateEndpoints = Array.from(new Set([
             process.env.SMS_BASE_URL,
+            'http://smsc.co.in/api/mt/SendSMS',
+            'https://smsc.co.in/api/mt/SendSMS',
             'http://login.smsgatewayhub.com/api/mt/SendSMS',
             'https://login.smsgatewayhub.com/api/mt/SendSMS',
             'https://www.smsgatewayhub.com/api/mt/SendSMS'
