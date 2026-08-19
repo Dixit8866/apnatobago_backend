@@ -33,13 +33,16 @@ const isTestNumber = (num) => {
  */
 const sendSMS = async (fullNumber, otp) => {
     try {
-        // Clean number (remove '+' if present)
-        const cleanNumber = fullNumber.replace('+', '');
+        // Clean number (ensure valid 12-digit Indian number starting with 91 for SMSGatewayHub)
+        let cleanNumber = (fullNumber || '').toString().replace(/\D/g, '');
+        if (cleanNumber.length === 10) {
+            cleanNumber = `91${cleanNumber}`;
+        }
 
         // DLT Approved Template: {#var#} is your mobile verification code. Regards, {#var#} Call: {#var#} Team MRSTXI
         // We must fill all 3 variables exactly
         const companyName = "MRSTXI";
-        const supportContact = "MRSTXI"; // You can replace this with a support number later
+        const supportContact = "MRSTXI"; 
         const text = `${otp} is your mobile verification code. Regards, ${companyName} Call: ${supportContact} Team MRSTXI`;
 
         const smsParams = {
@@ -60,11 +63,17 @@ const sendSMS = async (fullNumber, otp) => {
         const fullUrl = `${baseURL}?${urlParams}`;
 
         const response = await axios.get(fullUrl);
+        if (response.data && (response.data.ErrorCode === '000' || response.data.status === 'Success')) {
+            logger.info(`[SMS Success]: OTP sent to ${cleanNumber}`);
+        } else if (response.data && response.data.ErrorMessage) {
+            logger.warn(`[SMS Gateway Warning]: ${response.data.ErrorMessage} (Code: ${response.data.ErrorCode})`);
+        }
 
         return true;
     } catch (smsError) {
-        console.error(`[SMS Error] Failed to send SMS:`, smsError.message);
-        logger.error(`[SMS Send Error]: ${smsError.message}`);
+        const errorDetail = smsError.response?.data ? JSON.stringify(smsError.response.data) : smsError.message;
+        console.error(`[SMS Error] Failed to send SMS:`, errorDetail);
+        logger.error(`[SMS Send Error]: ${errorDetail}`);
         return false;
     }
 };
