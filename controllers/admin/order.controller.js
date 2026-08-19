@@ -2375,28 +2375,37 @@ export const getCustomerPaymentsReport = async (req, res) => {
         let totalPendingDue = 0;
         const pendingShops = [];
         const stockMap = new Map();
+        const dbSummaryMap = new Map();
 
-        // Helper for volume display
+        // Helper for volume display (stripping any raw UUIDs)
+        const sanitizeText = (str) => {
+            if (!str) return '';
+            if (typeof str === 'object') {
+                str = str.gu || str.en || Object.values(str)[0] || '';
+            }
+            const text = String(str).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '').trim();
+            return text;
+        };
+
         const formatVolumeDisplay = (item) => {
             const vObj = item.variant || item.variantInfo || {};
             let name = '';
 
             if (vObj.volumeRef && vObj.volumeRef.name) {
-                const ref = vObj.volumeRef.name;
-                name = typeof ref === 'object' ? (ref.gu || ref.en || Object.values(ref)[0]) : String(ref);
+                name = sanitizeText(vObj.volumeRef.name);
             }
 
             if (!name && vObj.volume) {
-                name = typeof vObj.volume === 'object' ? (vObj.volume.gu || vObj.volume.en || Object.values(vObj.volume)[0]) : String(vObj.volume);
+                name = sanitizeText(vObj.volume);
             }
 
-            if (!name) {
-                name = item.sellVolume || vObj.innerUnitLabel || vObj.baseUnitLabel || '';
+            if (!name && item.sellVolume) {
+                name = sanitizeText(item.sellVolume);
             }
 
-            let unit = item.sellUnit;
+            let unit = sanitizeText(item.sellUnit);
             if (unit === 'Base' || !unit) {
-                unit = vObj.baseUnitLabel || vObj.innerUnitLabel || '';
+                unit = sanitizeText(vObj.baseUnitLabel) || sanitizeText(vObj.innerUnitLabel) || '';
                 if (unit === 'Base') unit = '';
             }
 
@@ -2404,7 +2413,7 @@ export const getCustomerPaymentsReport = async (req, res) => {
                 return unit || name || 'એકમ';
             }
 
-            if (unit && !name.toLowerCase().includes(unit.toLowerCase())) {
+            if (unit && unit.toLowerCase() !== name.toLowerCase() && !name.toLowerCase().includes(unit.toLowerCase())) {
                 return `${name} ${unit}`.trim();
             }
 
@@ -2420,21 +2429,51 @@ export const getCustomerPaymentsReport = async (req, res) => {
             const shopName = order.user?.businessProfile?.shopName || order.customerName || 'અજ્ઞાત દુકાન';
             const phone = order.user?.number || order.customerNumber || '';
 
+            let orderCash = 0;
+            let orderOnline = 0;
+
             if (paid > 0) {
                 if (method.includes('cash') || method.includes('રોકડ')) {
-                    customerCash += paid;
+                    orderCash = paid;
                 } else if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr') || method.includes('gpay') || method.includes('paytm') || method.includes('cheque')) {
-                    customerOnline += paid;
+                    orderOnline = paid;
                 } else {
-                    customerCash += paid;
+                    orderCash = paid;
                 }
             } else if (order.paymentStatus === 'Paid') {
                 if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr')) {
-                    customerOnline += bill;
+                    orderOnline = bill;
                 } else {
-                    customerCash += bill;
+                    orderCash = bill;
                 }
             }
+
+            customerCash += orderCash;
+            customerOnline += orderOnline;
+
+            // Delivery Boy Breakdown
+            const dbObj = order.assignment?.deliveryBoy;
+            const dbId = dbObj?.id ? String(dbObj.id) : 'unassigned';
+            const dbName = dbObj?.name || 'વગર ડીલિવરી બોય (Direct/Unassigned)';
+
+            if (!dbSummaryMap.has(dbId)) {
+                dbSummaryMap.set(dbId, {
+                    id: dbId,
+                    name: dbName,
+                    cash: 0,
+                    online: 0,
+                    credit: 0,
+                    totalCollected: 0,
+                    totalOrders: 0
+                });
+            }
+
+            const dbEntry = dbSummaryMap.get(dbId);
+            dbEntry.cash += orderCash;
+            dbEntry.online += orderOnline;
+            dbEntry.credit += due;
+            dbEntry.totalCollected = dbEntry.cash + dbEntry.online;
+            dbEntry.totalOrders += 1;
 
             if (due > 0.01) {
                 totalPendingDue += due;
@@ -2556,10 +2595,13 @@ export const getCustomerPaymentsReport = async (req, res) => {
         const grandTotalOnline = customerOnline + outletOnline;
         const totalCollected = customerTotal + outletTotal;
 
-        const stockList = Array.from(stockMap.values());
+        // Sort stockList by product name so multiple volume items stay grouped together
+        const stockList = Array.from(stockMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'gu'));
         const stockSellingTotal = stockList.reduce((sum, i) => sum + i.sellingAmount, 0);
         const stockPurchaseTotal = stockList.reduce((sum, i) => sum + i.purchaseCost, 0);
         const netProfit = stockSellingTotal - stockPurchaseTotal;
+
+        const deliveryBoySummary = Array.from(dbSummaryMap.values());
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Customer payments report fetched successfully", {
             // Customer Payments
@@ -2577,6 +2619,9 @@ export const getCustomerPaymentsReport = async (req, res) => {
             grandTotalOnline,
             totalCollected,
             totalPendingDue,
+
+            // Delivery Boy Wise Summary
+            deliveryBoySummary,
 
             // Pending Shops List
             pendingShops,
