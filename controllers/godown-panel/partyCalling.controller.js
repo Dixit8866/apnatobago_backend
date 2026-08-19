@@ -42,13 +42,6 @@ export const getDailyCallings = async (req, res, next) => {
         // Build base search criteria - restricted to godown
         const userWhere = {
             status: { [Op.ne]: 'Deleted' },
-            deliveryRoundId: {
-                [Op.and]: [
-                    { [Op.ne]: null },
-                    { [Op.ne]: '' },
-                    { [Op.ne]: 'none' }
-                ]
-            },
             godownId: staff.godownId
         };
 
@@ -279,13 +272,6 @@ export const getInactiveParties = async (req, res, next) => {
 
         const userWhere = {
             status: { [Op.ne]: 'Deleted' },
-            deliveryRoundId: {
-                [Op.and]: [
-                    { [Op.ne]: null },
-                    { [Op.ne]: '' },
-                    { [Op.ne]: 'none' }
-                ]
-            },
             godownId: staff.godownId
         };
 

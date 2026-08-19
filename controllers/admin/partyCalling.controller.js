@@ -38,14 +38,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
 
         // Build base search criteria
         const userWhere = {
-            status: { [Op.ne]: 'Deleted' },
-            deliveryRoundId: {
-                [Op.and]: [
-                    { [Op.ne]: null },
-                    { [Op.ne]: '' },
-                    { [Op.ne]: 'none' }
-                ]
-            }
+            status: { [Op.ne]: 'Deleted' }
         };
 
         if (godownId) {
@@ -334,14 +327,7 @@ export const getInactivePartyCalls = async (req, res, next) => {
 
         // Build base search criteria
         const userWhere = {
-            status: { [Op.ne]: 'Deleted' },
-            deliveryRoundId: {
-                [Op.and]: [
-                    { [Op.ne]: null },
-                    { [Op.ne]: '' },
-                    { [Op.ne]: 'none' }
-                ]
-            }
+            status: { [Op.ne]: 'Deleted' }
         };
 
         if (godownId) {
