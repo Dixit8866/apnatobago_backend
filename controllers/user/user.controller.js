@@ -40,7 +40,6 @@ const sendSMS = async (fullNumber, otp) => {
         }
 
         // DLT Approved Template: {#var#} is your mobile verification code. Regards, {#var#} Call: {#var#} Team MRSTXI
-        // We must fill all 3 variables exactly
         const companyName = "MRSTXI";
         const supportContact = "MRSTXI"; 
         const text = `${otp} is your mobile verification code. Regards, ${companyName} Call: ${supportContact} Team MRSTXI`;
@@ -58,18 +57,54 @@ const sendSMS = async (fullNumber, otp) => {
             dlttemplateid: process.env.SMS_TEMPLATE_ID || '1207166081646554203'
         };
 
-        const baseURL = process.env.SMS_BASE_URL || 'https://www.smsgatewayhub.com/api/mt/SendSMS';
         const urlParams = new URLSearchParams(smsParams).toString();
-        const fullUrl = `${baseURL}?${urlParams}`;
 
-        const response = await axios.get(fullUrl);
-        if (response.data && (response.data.ErrorCode === '000' || response.data.status === 'Success')) {
-            logger.info(`[SMS Success]: OTP sent to ${cleanNumber}`);
-        } else if (response.data && response.data.ErrorMessage) {
-            logger.warn(`[SMS Gateway Warning]: ${response.data.ErrorMessage} (Code: ${response.data.ErrorCode})`);
+        // Endpoints to try (if main www domain returns server C# database exception, fallback to login domain)
+        const candidateEndpoints = Array.from(new Set([
+            process.env.SMS_BASE_URL,
+            'http://login.smsgatewayhub.com/api/mt/SendSMS',
+            'https://login.smsgatewayhub.com/api/mt/SendSMS',
+            'https://www.smsgatewayhub.com/api/mt/SendSMS'
+        ].filter(Boolean)));
+
+        let sentSuccess = false;
+        let lastErrorMsg = '';
+
+        for (const baseURL of candidateEndpoints) {
+            try {
+                const fullUrl = `${baseURL}?${urlParams}`;
+                const response = await axios.get(fullUrl, { timeout: 8000 });
+
+                // Catch SMSGatewayHub server-side ASP.NET SQL Exception
+                if (response.data && typeof response.data === 'object' && response.data.ExceptionType) {
+                    console.warn(`[SMS Gateway Server Error on ${baseURL}]: ${response.data.ExceptionMessage || response.data.Message}`);
+                    lastErrorMsg = response.data.ExceptionMessage || response.data.Message;
+                    continue; // Try next fallback endpoint
+                }
+
+                if (response.data && (response.data.ErrorCode === '000' || response.data.status === 'Success')) {
+                    logger.info(`[SMS Success]: OTP sent to ${cleanNumber} via ${baseURL}`);
+                    sentSuccess = true;
+                    break;
+                } else if (response.data && response.data.ErrorMessage) {
+                    logger.warn(`[SMS Gateway Warning on ${baseURL}]: ${response.data.ErrorMessage} (Code: ${response.data.ErrorCode})`);
+                    lastErrorMsg = response.data.ErrorMessage;
+                } else {
+                    sentSuccess = true;
+                    break;
+                }
+            } catch (err) {
+                lastErrorMsg = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+                console.warn(`[SMS Gateway Attempt Failed on ${baseURL}]:`, lastErrorMsg);
+            }
         }
 
-        return true;
+        if (!sentSuccess) {
+            console.error(`[SMS Error] All endpoints failed. Last Error: ${lastErrorMsg}`);
+            logger.error(`[SMS Send Error]: All endpoints failed. ${lastErrorMsg}`);
+        }
+
+        return sentSuccess;
     } catch (smsError) {
         const errorDetail = smsError.response?.data ? JSON.stringify(smsError.response.data) : smsError.message;
         console.error(`[SMS Error] Failed to send SMS:`, errorDetail);
