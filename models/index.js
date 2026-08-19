@@ -496,7 +496,8 @@ const runManualMigrations = async () => {
 
         try {
             await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "boxNumber" VARCHAR(255) DEFAULT null');
-        } catch (e) { console.log('[Migration Warning] Products boxNumber column failed:', e.message); }
+            await sequelize.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS "lowStockVolumes" JSONB DEFAULT \'[]\'::jsonb');
+        } catch (e) { console.log('[Migration Warning] Products boxNumber/lowStockVolumes column failed:', e.message); }
 
         try {
             await sequelize.query('ALTER TABLE users ALTER COLUMN "fcmtoken" TYPE TEXT');

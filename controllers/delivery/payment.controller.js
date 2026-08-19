@@ -1,4 +1,5 @@
 import { Order, AppSettings, OrderPayment, User, BusinessProfile, BankSetting } from '../../models/index.js';
+import sequelize from '../../config/db.js';
 import { restoreUserCreditFromPayment } from './order.controller.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';

@@ -6,7 +6,6 @@ import { OrderPayment, Order, User, DeliveryBoy, BankSetting } from './models/in
 
 async function testQuery() {
   try {
-    console.log('Running OrderPayment.findAndCountAll query with SQL logging on the cached instance...');
     const result = await OrderPayment.findAndCountAll({
         where: {},
         include: [
@@ -40,7 +39,6 @@ async function testQuery() {
         distinct: true
     });
 
-    console.log('Query finished.');
   } catch (err) {
     console.error('Error during query test:', err);
   } finally {

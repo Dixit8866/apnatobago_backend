@@ -33,13 +33,11 @@ const seedAdmin = async () => {
                 role: 'superadmin',
                 status: 'Active'
             });
-            console.log('[Seed] SuperAdmin created successfully ✓');
         } else {
             const isMatch = await existing.matchPassword('apnatobacco123');
             if (!isMatch) {
                 existing.password = 'apnatobacco123';
                 await existing.save();
-                console.log('[Seed] SuperAdmin password updated/corrected to default ✓');
             }
         }
     } catch (error) {
@@ -62,10 +60,6 @@ const seedGodownAdmin = async () => {
             }
         });
 
-        if (godownCreated) {
-            console.log(`[Seed] Created Master Godown: ${masterGodown.id} ✓`);
-        }
-
         // 2. Find or create GodownStaff (superadmin)
         const existing = await GodownStaff.findOne({ where: { email: 'godownadmin@gmail.com' } });
         if (!existing) {
@@ -78,13 +72,11 @@ const seedGodownAdmin = async () => {
                 phone: null,
                 status: 'Active',
             });
-            console.log(`[Seed] GodownStaff (godownadmin@gmail.com) created successfully ✓`);
         } else {
             const isMatch = await existing.matchPassword('godownadmin@gmail.com');
             if (!isMatch) {
                 existing.password = 'godownadmin@gmail.com';
                 await existing.save();
-                console.log('[Seed] GodownStaff (godownadmin@gmail.com) password updated/corrected to default ✓');
             }
         }
     } catch (error) {
@@ -124,6 +116,5 @@ startServer();
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
-    console.log(`[Error] Unhandled Rejection: ${err.message}`);
     server.close(() => process.exit(1));
 });

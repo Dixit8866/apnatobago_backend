@@ -142,6 +142,11 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        lowStockVolumes: {
+            type: DataTypes.JSONB,
+            allowNull: false,
+            defaultValue: [],
+        },
     },
     {
         timestamps: true,

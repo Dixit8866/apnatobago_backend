@@ -182,11 +182,19 @@ export const createProduct = async (req, res, next) => {
             couponPrice,
             lowStockVolumeId,
             lowStockQuantity,
+            lowStockVolumes,
         } = req.body;
 
         const normalizedCustomSalesVolumes = normalizeCustomSalesVolumes(customSalesVolumes);
         const finalCustomSalesVolumeId = customSalesVolumeId || (normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].volumeId : null);
         const finalCustomSalesVolumeQty = customSalesVolumeQty ? Number(customSalesVolumeQty) : (normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].qty : 1);
+
+        const normalizedLowStockVolumes = Array.isArray(lowStockVolumes)
+            ? lowStockVolumes.filter(x => x && x.volumeId).map(x => ({ volumeId: String(x.volumeId).trim(), qty: x.qty !== undefined && x.qty !== null && x.qty !== '' ? Number(x.qty) : 0 }))
+            : [];
+        const firstLowStock = normalizedLowStockVolumes.length > 0 ? normalizedLowStockVolumes[0] : null;
+        const finalLowStockVolumeId = lowStockVolumeId || (firstLowStock ? firstLowStock.volumeId : null);
+        const finalLowStockQuantity = lowStockQuantity !== undefined && lowStockQuantity !== '' && lowStockQuantity !== null ? Number(lowStockQuantity) : (firstLowStock ? firstLowStock.qty : null);
 
         if (!hasAnyLangValue(name)) {
             await t.rollback();
@@ -263,8 +271,9 @@ export const createProduct = async (req, res, next) => {
                 internalNote: internalNote || null,
                 couponPoints: couponPoints !== undefined && couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null,
                 couponPrice: couponPrice !== undefined && couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null,
-                lowStockVolumeId: lowStockVolumeId || null,
-                lowStockQuantity: lowStockQuantity !== undefined && lowStockQuantity !== '' && lowStockQuantity !== null ? Number(lowStockQuantity) : null,
+                lowStockVolumeId: finalLowStockVolumeId,
+                lowStockQuantity: finalLowStockQuantity,
+                lowStockVolumes: normalizedLowStockVolumes,
             },
             { transaction: t }
         );
@@ -702,6 +711,7 @@ export const updateProduct = async (req, res, next) => {
             couponPrice,
             lowStockVolumeId,
             lowStockQuantity,
+            lowStockVolumes,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -717,6 +727,19 @@ export const updateProduct = async (req, res, next) => {
         const finalCustomSalesVolumeQty = customSalesVolumeQty !== undefined
             ? (customSalesVolumeQty ? Number(customSalesVolumeQty) : 1)
             : (normalizedCustomSalesVolumes && normalizedCustomSalesVolumes.length > 0 ? normalizedCustomSalesVolumes[0].qty : product.customSalesVolumeQty);
+
+        const normalizedLowStockVolumes = lowStockVolumes !== undefined
+            ? (Array.isArray(lowStockVolumes)
+                ? lowStockVolumes.filter(x => x && x.volumeId).map(x => ({ volumeId: String(x.volumeId).trim(), qty: x.qty !== undefined && x.qty !== null && x.qty !== '' ? Number(x.qty) : 0 }))
+                : [])
+            : undefined;
+        const firstLowStock = normalizedLowStockVolumes && normalizedLowStockVolumes.length > 0 ? normalizedLowStockVolumes[0] : null;
+        const finalLowStockVolumeId = lowStockVolumeId !== undefined
+            ? (lowStockVolumeId || (firstLowStock ? firstLowStock.volumeId : null))
+            : (firstLowStock ? firstLowStock.volumeId : product.lowStockVolumeId);
+        const finalLowStockQuantity = lowStockQuantity !== undefined
+            ? (lowStockQuantity !== '' && lowStockQuantity !== null ? Number(lowStockQuantity) : (firstLowStock ? firstLowStock.qty : null))
+            : (firstLowStock ? firstLowStock.qty : product.lowStockQuantity);
 
         if (!hasAnyLangValue(name)) {
             await t.rollback();
@@ -848,8 +871,9 @@ export const updateProduct = async (req, res, next) => {
                 internalNote: internalNote !== undefined ? (internalNote || null) : product.internalNote,
                 couponPoints: couponPoints !== undefined ? (couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null) : product.couponPoints,
                 couponPrice: couponPrice !== undefined ? (couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null) : product.couponPrice,
-                lowStockVolumeId: lowStockVolumeId !== undefined ? (lowStockVolumeId || null) : product.lowStockVolumeId,
-                lowStockQuantity: lowStockQuantity !== undefined ? (lowStockQuantity !== '' && lowStockQuantity !== null ? Number(lowStockQuantity) : null) : product.lowStockQuantity,
+                lowStockVolumeId: finalLowStockVolumeId,
+                lowStockQuantity: finalLowStockQuantity,
+                lowStockVolumes: normalizedLowStockVolumes !== undefined ? normalizedLowStockVolumes : product.lowStockVolumes,
             },
             { transaction: t }
         );
