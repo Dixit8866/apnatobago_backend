@@ -2243,3 +2243,197 @@ export const clearUserCart = async (req, res) => {
     }
 };
 
+/**
+ * @desc    Get Customer Payments & Stock Reconciliation Report data
+ * @route   GET /api/admin/orders/customer-payments-report
+ * @access  Private (Admin)
+ */
+export const getCustomerPaymentsReport = async (req, res) => {
+    try {
+        const { startDate, endDate, deliveryBoyId, godownId } = req.query;
+
+        const baseWhere = {
+            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+        };
+
+        if (godownId) {
+            baseWhere.godownId = godownId;
+        }
+
+        // Date range handling (IST +05:30)
+        const parseISTDate = (dateStr, isEnd = false) => {
+            if (!dateStr) return null;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                return new Date(`${dateStr}T${isEnd ? '23:59:59.999' : '00:00:00.000'}+05:30`);
+            }
+            const d = new Date(dateStr);
+            if (isEnd) d.setHours(23, 59, 59, 999);
+            else d.setHours(0, 0, 0, 0);
+            return d;
+        };
+
+        let startOfDate = parseISTDate(startDate, false);
+        let endOfDate = parseISTDate(endDate, true);
+
+        if (!startOfDate || !endOfDate) {
+            const now = new Date();
+            startOfDate = new Date(now.setHours(0, 0, 0, 0));
+            endOfDate = new Date(now.setHours(23, 59, 59, 999));
+        }
+
+        // Match date on deliveredAt, updatedAt, or createdAt
+        baseWhere[Op.or] = [
+            { deliveredAt: { [Op.between]: [startOfDate, endOfDate] } },
+            { deliveredAt: null, updatedAt: { [Op.between]: [startOfDate, endOfDate] } },
+            { createdAt: { [Op.between]: [startOfDate, endOfDate] } }
+        ];
+
+        // Delivery Boy filter
+        if (deliveryBoyId) {
+            baseWhere['$assignment.deliveryBoyId$'] = deliveryBoyId;
+        }
+
+        const orders = await Order.findAll({
+            where: baseWhere,
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                        }
+                    ]
+                },
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name'] },
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'purchasePrice', 'baseUnitsPerPack'] }
+                    ]
+                },
+                {
+                    model: OrderAssignment,
+                    as: 'assignment',
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone'] }]
+                },
+                {
+                    model: OrderPayment,
+                    as: 'payments'
+                }
+            ],
+            order: [['createdAt', 'DESC']]
+        });
+
+        let cashCollect = 0;
+        let onlineCollect = 0;
+        let totalPendingDue = 0;
+        const pendingShops = [];
+        const stockMap = new Map();
+
+        orders.forEach(order => {
+            const bill = parseFloat(order.totalAmount || 0);
+            const paid = parseFloat(order.paidAmount || 0);
+            const due = parseFloat(order.dueAmount || 0);
+            const method = String(order.paymentMethod || '').toLowerCase();
+            const shopName = order.user?.businessProfile?.shopName || order.customerName || 'અજ્ઞાત દુકાન';
+            const phone = order.user?.number || order.customerNumber || '';
+
+            // Calculate Cash vs Online payment collected
+            if (paid > 0) {
+                if (method.includes('cash') || method.includes('રોકડ')) {
+                    cashCollect += paid;
+                } else if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr') || method.includes('gpay') || method.includes('paytm') || method.includes('cheque')) {
+                    onlineCollect += paid;
+                } else {
+                    cashCollect += paid;
+                }
+            } else if (order.paymentStatus === 'Paid') {
+                if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr')) {
+                    onlineCollect += bill;
+                } else {
+                    cashCollect += bill;
+                }
+            }
+
+            // Pending due calculation
+            if (due > 0.01) {
+                totalPendingDue += due;
+                pendingShops.push({
+                    orderId: order.orderId,
+                    shopName,
+                    phone,
+                    dueAmount: due
+                });
+            }
+
+            // Itemized stock calculation
+            (order.items || []).forEach(item => {
+                const pObj = item.product || {};
+                const pName = typeof pObj.name === 'object' ? (pObj.name.gu || pObj.name.en || 'Product') : (pObj.name || item.name || 'Product');
+
+                const vObj = item.variant || item.variantInfo || {};
+                const volStr = typeof vObj.volume === 'object' ? (vObj.volume.gu || vObj.volume.en || '') : String(vObj.volume || item.sellVolume || '');
+                const unitLabel = item.sellUnit || vObj.baseUnitLabel || '';
+                const volumeDisplay = [volStr, unitLabel].filter(Boolean).join(' ') || 'Unit';
+
+                const qty = parseFloat(item.quantity || 0);
+                const itemPrice = parseFloat(item.price || 0);
+                const sellingAmount = itemPrice * qty;
+
+                // Purchase price calculation
+                const purchasePrice = parseFloat(vObj.purchasePrice || 0);
+                const bUPP = parseFloat(vObj.baseUnitsPerPack || 1);
+                let itemPurchaseCost = 0;
+                if (item.sellUnit === 'Inner' && bUPP > 0) {
+                    itemPurchaseCost = (purchasePrice / bUPP) * qty;
+                } else {
+                    itemPurchaseCost = purchasePrice * qty;
+                }
+
+                const mapKey = `${pName}_${volumeDisplay}`;
+                if (stockMap.has(mapKey)) {
+                    const existing = stockMap.get(mapKey);
+                    existing.qty += qty;
+                    existing.sellingAmount += sellingAmount;
+                    existing.purchaseCost += itemPurchaseCost;
+                } else {
+                    stockMap.set(mapKey, {
+                        name: pName,
+                        volume: volumeDisplay,
+                        qty,
+                        sellingAmount,
+                        purchaseCost: itemPurchaseCost
+                    });
+                }
+            });
+        });
+
+        const totalCollected = cashCollect + onlineCollect;
+        const stockList = Array.from(stockMap.values());
+        const stockSellingTotal = stockList.reduce((sum, i) => sum + i.sellingAmount, 0);
+        const stockPurchaseTotal = stockList.reduce((sum, i) => sum + i.purchaseCost, 0);
+        const netProfit = stockSellingTotal - stockPurchaseTotal;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Customer payments report fetched successfully", {
+            cashCollect,
+            onlineCollect,
+            totalCollected,
+            totalPendingDue,
+            pendingShops,
+            stockList,
+            stockSellingTotal,
+            stockPurchaseTotal,
+            netProfit,
+            totalOrders: orders.length
+        });
+    } catch (error) {
+        logger.error(`[Customer Payments Report Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
