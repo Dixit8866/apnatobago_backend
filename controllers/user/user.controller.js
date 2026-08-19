@@ -61,14 +61,13 @@ const sendSMS = async (fullNumber, otp) => {
 
         const urlParams = new URLSearchParams(smsParams).toString();
 
-        // Endpoints to try (smsc.co.in, login.smsgatewayhub.com, www.smsgatewayhub.com)
+        // Primary working endpoint (smsc.co.in) first to avoid smsgatewayhub server error logs
         const candidateEndpoints = Array.from(new Set([
-            process.env.SMS_BASE_URL,
             'http://smsc.co.in/api/mt/SendSMS',
             'https://smsc.co.in/api/mt/SendSMS',
+            process.env.SMS_BASE_URL,
             'http://login.smsgatewayhub.com/api/mt/SendSMS',
-            'https://login.smsgatewayhub.com/api/mt/SendSMS',
-            'https://www.smsgatewayhub.com/api/mt/SendSMS'
+            'https://login.smsgatewayhub.com/api/mt/SendSMS'
         ].filter(Boolean)));
 
         let sentSuccess = false;

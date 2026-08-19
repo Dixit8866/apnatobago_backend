@@ -41,11 +41,16 @@ export const getDashboardStats = async (req, res) => {
         const { startDate, endDate, godownId } = req.query;
         
         const dateFilter = {};
+        const purchaseDateFilter = {};
         if (startDate && endDate) {
             const { startISO, endISO, startYMD, endYMD } = getIndiaTimezoneRange(startDate, endDate);
             dateFilter[Op.or] = [
                 { createdAt: { [Op.between]: [startISO, endISO] } },
                 { orderDate: { [Op.between]: [startYMD, endYMD] } }
+            ];
+            purchaseDateFilter[Op.or] = [
+                { createdAt: { [Op.between]: [startISO, endISO] } },
+                { receivedDate: { [Op.between]: [startISO, endISO] } }
             ];
         }
 
@@ -67,7 +72,7 @@ export const getDashboardStats = async (req, res) => {
         // 2. Total Purchase
         const totalPurchaseSum = await PurchaseBill.sum('totalAmount', { 
             where: {
-                ...dateFilter,
+                ...purchaseDateFilter,
                 ...godownFilter
             }
         }) || 0;
