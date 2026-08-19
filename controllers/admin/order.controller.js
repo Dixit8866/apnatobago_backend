@@ -212,12 +212,17 @@ export const getAllOrders = async (req, res) => {
         };
 
         const { startOfTodayUTC, endOfTodayUTC } = getISTTodayRange();
-        const dateFilterField = status === 'Delivered' ? 'deliveredAt' : (status === 'Cancelled' ? 'updatedAt' : 'createdAt');
+        const isDeliveredType = ['Delivered', 'Payment Collect', 'Payment Verify'].includes(status);
+        const dateFilterField = isDeliveredType ? 'deliveredAt' : (status === 'Cancelled' ? 'updatedAt' : (req.query.dateType || 'createdAt'));
 
         // Apply status filter
         if (status && status !== 'All') {
-            if (status === 'Delivered') {
-                baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+            if (isDeliveredType) {
+                if (status === 'Delivered') {
+                    baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+                } else {
+                    baseWhere.orderStatus = status;
+                }
                 // Restrict Delivered/Payment Collect/Payment Verify to today by default unless filtered
                 if (!startDate && !endDate && !date) {
                     dateClause = {
