@@ -7,9 +7,44 @@ import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
 
 // ─── CREATE ─────────────────────────────────────────────────────────────────
+// Helper to enrich bank settings with assigned delivery boys list
+const enrichBankSettingsWithDeliveryBoys = async (items) => {
+    if (!items || items.length === 0) return items;
+    const allBoyIds = new Set();
+    items.forEach(bs => {
+        const ids = Array.isArray(bs.deliveryBoyIds) && bs.deliveryBoyIds.length > 0
+            ? bs.deliveryBoyIds
+            : (bs.deliveryBoyId ? [bs.deliveryBoyId] : []);
+        ids.forEach(id => { if (id) allBoyIds.add(id); });
+        if (bs.deliveryBoy?.id) allBoyIds.add(bs.deliveryBoy.id);
+    });
+
+    let deliveryBoysMap = {};
+    if (allBoyIds.size > 0) {
+        const boys = await DeliveryBoy.findAll({
+            where: { id: { [Op.in]: Array.from(allBoyIds) } },
+            attributes: ['id', 'name', 'phone']
+        });
+        boys.forEach(b => { deliveryBoysMap[b.id] = b.toJSON ? b.toJSON() : b; });
+    }
+
+    return items.map(bs => {
+        const json = bs.toJSON ? bs.toJSON() : { ...bs };
+        const ids = Array.isArray(json.deliveryBoyIds) && json.deliveryBoyIds.length > 0
+            ? json.deliveryBoyIds
+            : (json.deliveryBoyId ? [json.deliveryBoyId] : []);
+        json.assignedDeliveryBoys = ids.map(id => deliveryBoysMap[id]).filter(Boolean);
+        if (json.assignedDeliveryBoys.length === 0 && json.deliveryBoy) {
+            json.assignedDeliveryBoys = [json.deliveryBoy];
+        }
+        return json;
+    });
+};
+
+// ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status, openingBalance, branchName } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, deliveryBoyIds, image, status, openingBalance, branchName } = req.body;
 
         if (!bankName || !bankName.trim()) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank Name is required. (બેંકનું નામ જરૂરી છે.)");
@@ -38,12 +73,21 @@ export const createBankSetting = async (req, res, next) => {
             );
         }
 
+        let finalBoyIds = [];
+        if (Array.isArray(deliveryBoyIds)) {
+            finalBoyIds = deliveryBoyIds.filter(Boolean);
+        } else if (deliveryBoyId) {
+            finalBoyIds = [deliveryBoyId];
+        }
+        const finalSingleBoyId = finalBoyIds.length > 0 ? finalBoyIds[0] : null;
+
         const bankSetting = await BankSetting.create({
             bankName: normalizedBankName,
             accountName: normalizedAccountName,
             accountNumber: accountNumber ? accountNumber.trim() : null,
             ifscCode: ifscCode ? ifscCode.trim() : null,
-            deliveryBoyId: deliveryBoyId || null,
+            deliveryBoyId: finalSingleBoyId,
+            deliveryBoyIds: finalBoyIds,
             image: image || null,
             status: status || 'Active',
             openingBalance: openingBalance !== undefined && openingBalance !== null ? parseFloat(openingBalance) : 0.00,
@@ -89,7 +133,7 @@ export const getBankSettings = async (req, res, next) => {
         const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
 
         if (req.query.paginate === 'false') {
-            const bankSettings = await BankSetting.findAll({
+            const rawSettings = await BankSetting.findAll({
                 where: whereClause,
                 include: [
                     {
@@ -100,7 +144,8 @@ export const getBankSettings = async (req, res, next) => {
                 ],
                 order: [['createdAt', 'DESC']]
             });
-            return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank Settings fetched successfully.", { categories: bankSettings, statusCounts });
+            const enriched = await enrichBankSettingsWithDeliveryBoys(rawSettings);
+            return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank Settings fetched successfully.", { categories: enriched, statusCounts });
         }
 
         const pagination = getPaginationOptions(req.query);
@@ -121,8 +166,10 @@ export const getBankSettings = async (req, res, next) => {
         });
 
         const responseData = formatPaginatedResponse(result, page, limit);
+        if (responseData.items) {
+            responseData.items = await enrichBankSettingsWithDeliveryBoys(responseData.items);
+        }
 
-        // Note: For DataPageLayout compatibility, the paginated array is usually inside data.
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank Settings fetched successfully.", {
             ...responseData,
             statusCounts,
@@ -147,7 +194,8 @@ export const getBankSettingById = async (req, res, next) => {
         if (!bankSetting) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Bank Setting not found.");
         }
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank Setting fetched successfully.", bankSetting);
+        const [enriched] = await enrichBankSettingsWithDeliveryBoys([bankSetting]);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Bank Setting fetched successfully.", enriched);
     } catch (error) {
         next(error);
     }
@@ -156,7 +204,7 @@ export const getBankSettingById = async (req, res, next) => {
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
 export const updateBankSetting = async (req, res, next) => {
     try {
-        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, image, status, openingBalance, branchName } = req.body;
+        const { bankName, accountName, accountNumber, ifscCode, deliveryBoyId, deliveryBoyIds, image, status, openingBalance, branchName } = req.body;
         const bankSetting = await BankSetting.findByPk(req.params.id);
         if (!bankSetting) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Bank Setting not found.");
@@ -203,8 +251,15 @@ export const updateBankSetting = async (req, res, next) => {
             bankSetting.ifscCode = ifscCode ? ifscCode.trim() : null;
         }
 
-        if (deliveryBoyId !== undefined) {
-            bankSetting.deliveryBoyId = deliveryBoyId || null;
+        if (deliveryBoyIds !== undefined || deliveryBoyId !== undefined) {
+            let updatedBoyIds = [];
+            if (Array.isArray(deliveryBoyIds)) {
+                updatedBoyIds = deliveryBoyIds.filter(Boolean);
+            } else if (deliveryBoyId) {
+                updatedBoyIds = [deliveryBoyId];
+            }
+            bankSetting.deliveryBoyIds = updatedBoyIds;
+            bankSetting.deliveryBoyId = updatedBoyIds.length > 0 ? updatedBoyIds[0] : null;
         }
 
         if (image !== undefined) {

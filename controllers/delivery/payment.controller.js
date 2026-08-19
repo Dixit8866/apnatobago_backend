@@ -643,8 +643,11 @@ export const getDeliveryBoyBankDetails = async (req, res) => {
 
         const bankDetails = await BankSetting.findAll({
             where: {
-                deliveryBoyId,
-                status: 'Active'
+                status: 'Active',
+                [Op.or]: [
+                    { deliveryBoyId },
+                    sequelize.literal(`"deliveryBoyIds" @> '["${deliveryBoyId}"]'::jsonb`)
+                ]
             },
             order: [['createdAt', 'DESC']]
         });

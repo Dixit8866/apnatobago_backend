@@ -180,6 +180,8 @@ export const createProduct = async (req, res, next) => {
             internalNote,
             couponPoints,
             couponPrice,
+            lowStockVolumeId,
+            lowStockQuantity,
         } = req.body;
 
         const normalizedCustomSalesVolumes = normalizeCustomSalesVolumes(customSalesVolumes);
@@ -261,6 +263,8 @@ export const createProduct = async (req, res, next) => {
                 internalNote: internalNote || null,
                 couponPoints: couponPoints !== undefined && couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null,
                 couponPrice: couponPrice !== undefined && couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null,
+                lowStockVolumeId: lowStockVolumeId || null,
+                lowStockQuantity: lowStockQuantity !== undefined && lowStockQuantity !== '' && lowStockQuantity !== null ? Number(lowStockQuantity) : null,
             },
             { transaction: t }
         );
@@ -696,6 +700,8 @@ export const updateProduct = async (req, res, next) => {
             internalNote,
             couponPoints,
             couponPrice,
+            lowStockVolumeId,
+            lowStockQuantity,
         } = req.body;
         const product = await Product.findByPk(req.params.id, { transaction: t });
 
@@ -842,6 +848,8 @@ export const updateProduct = async (req, res, next) => {
                 internalNote: internalNote !== undefined ? (internalNote || null) : product.internalNote,
                 couponPoints: couponPoints !== undefined ? (couponPoints !== '' && couponPoints !== null ? Number(couponPoints) : null) : product.couponPoints,
                 couponPrice: couponPrice !== undefined ? (couponPrice !== '' && couponPrice !== null ? Number(couponPrice) : null) : product.couponPrice,
+                lowStockVolumeId: lowStockVolumeId !== undefined ? (lowStockVolumeId || null) : product.lowStockVolumeId,
+                lowStockQuantity: lowStockQuantity !== undefined ? (lowStockQuantity !== '' && lowStockQuantity !== null ? Number(lowStockQuantity) : null) : product.lowStockQuantity,
             },
             { transaction: t }
         );

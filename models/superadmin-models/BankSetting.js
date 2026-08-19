@@ -27,6 +27,11 @@ const BankSetting = sequelize.define('BankSetting', {
         type: DataTypes.UUID,
         allowNull: true,
     },
+    deliveryBoyIds: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        defaultValue: [],
+    },
     image: {
         type: DataTypes.STRING,
         allowNull: true,

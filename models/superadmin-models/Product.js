@@ -132,6 +132,16 @@ const Product = sequelize.define(
             allowNull: true,
             defaultValue: null,
         },
+        lowStockVolumeId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            defaultValue: null,
+        },
+        lowStockQuantity: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,
