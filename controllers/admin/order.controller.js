@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing, OutletOrder, OutletOrderItem } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -2293,6 +2293,7 @@ export const getCustomerPaymentsReport = async (req, res) => {
             baseWhere['$assignment.deliveryBoyId$'] = deliveryBoyId;
         }
 
+        // 1. Fetch Customer Orders
         const orders = await Order.findAll({
             where: baseWhere,
             include: [
@@ -2313,7 +2314,12 @@ export const getCustomerPaymentsReport = async (req, res) => {
                     as: 'items',
                     include: [
                         { model: Product, as: 'product', attributes: ['id', 'name'] },
-                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'purchasePrice', 'baseUnitsPerPack'] }
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'purchasePrice', 'baseUnitsPerPack', 'baseUnitLabel', 'innerUnitLabel'],
+                            include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
+                        }
                     ]
                 },
                 {
@@ -2329,12 +2335,83 @@ export const getCustomerPaymentsReport = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        let cashCollect = 0;
-        let onlineCollect = 0;
+        // 2. Fetch Outlet Orders (Direct Counter Orders)
+        const outletWhere = {
+            orderStatus: { [Op.ne]: 'Cancelled' },
+            createdAt: { [Op.between]: [startOfDate, endOfDate] }
+        };
+        if (godownId) {
+            outletWhere.godownId = godownId;
+        }
+
+        let outletOrders = [];
+        try {
+            outletOrders = await OutletOrder.findAll({
+                where: outletWhere,
+                include: [
+                    {
+                        model: OutletOrderItem,
+                        as: 'items',
+                        include: [
+                            { model: Product, as: 'product', attributes: ['id', 'name'] },
+                            {
+                                model: ProductVariant,
+                                as: 'variant',
+                                attributes: ['id', 'volume', 'purchasePrice', 'baseUnitsPerPack', 'baseUnitLabel', 'innerUnitLabel'],
+                                include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
+                            }
+                        ]
+                    }
+                ]
+            });
+        } catch (e) {
+            logger.warn(`[Outlet Orders Fetch Warning]: ${e.message}`);
+        }
+
+        let customerCash = 0;
+        let customerOnline = 0;
+        let outletCash = 0;
+        let outletOnline = 0;
         let totalPendingDue = 0;
         const pendingShops = [];
         const stockMap = new Map();
 
+        // Helper for volume display
+        const formatVolumeDisplay = (item) => {
+            const vObj = item.variant || item.variantInfo || {};
+            let name = '';
+
+            if (vObj.volumeRef && vObj.volumeRef.name) {
+                const ref = vObj.volumeRef.name;
+                name = typeof ref === 'object' ? (ref.gu || ref.en || Object.values(ref)[0]) : String(ref);
+            }
+
+            if (!name && vObj.volume) {
+                name = typeof vObj.volume === 'object' ? (vObj.volume.gu || vObj.volume.en || Object.values(vObj.volume)[0]) : String(vObj.volume);
+            }
+
+            if (!name) {
+                name = item.sellVolume || vObj.innerUnitLabel || vObj.baseUnitLabel || '';
+            }
+
+            let unit = item.sellUnit;
+            if (unit === 'Base' || !unit) {
+                unit = vObj.baseUnitLabel || vObj.innerUnitLabel || '';
+                if (unit === 'Base') unit = '';
+            }
+
+            if (!name || name === '1') {
+                return unit || name || 'એકમ';
+            }
+
+            if (unit && !name.toLowerCase().includes(unit.toLowerCase())) {
+                return `${name} ${unit}`.trim();
+            }
+
+            return name.trim();
+        };
+
+        // Process Customer Orders
         orders.forEach(order => {
             const bill = parseFloat(order.totalAmount || 0);
             const paid = parseFloat(order.paidAmount || 0);
@@ -2343,24 +2420,22 @@ export const getCustomerPaymentsReport = async (req, res) => {
             const shopName = order.user?.businessProfile?.shopName || order.customerName || 'અજ્ઞાત દુકાન';
             const phone = order.user?.number || order.customerNumber || '';
 
-            // Calculate Cash vs Online payment collected
             if (paid > 0) {
                 if (method.includes('cash') || method.includes('રોકડ')) {
-                    cashCollect += paid;
+                    customerCash += paid;
                 } else if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr') || method.includes('gpay') || method.includes('paytm') || method.includes('cheque')) {
-                    onlineCollect += paid;
+                    customerOnline += paid;
                 } else {
-                    cashCollect += paid;
+                    customerCash += paid;
                 }
             } else if (order.paymentStatus === 'Paid') {
                 if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr')) {
-                    onlineCollect += bill;
+                    customerOnline += bill;
                 } else {
-                    cashCollect += bill;
+                    customerCash += bill;
                 }
             }
 
-            // Pending due calculation
             if (due > 0.01) {
                 totalPendingDue += due;
                 pendingShops.push({
@@ -2371,21 +2446,16 @@ export const getCustomerPaymentsReport = async (req, res) => {
                 });
             }
 
-            // Itemized stock calculation
             (order.items || []).forEach(item => {
                 const pObj = item.product || {};
                 const pName = typeof pObj.name === 'object' ? (pObj.name.gu || pObj.name.en || 'Product') : (pObj.name || item.name || 'Product');
-
-                const vObj = item.variant || item.variantInfo || {};
-                const volStr = typeof vObj.volume === 'object' ? (vObj.volume.gu || vObj.volume.en || '') : String(vObj.volume || item.sellVolume || '');
-                const unitLabel = item.sellUnit || vObj.baseUnitLabel || '';
-                const volumeDisplay = [volStr, unitLabel].filter(Boolean).join(' ') || 'Unit';
+                const volumeDisplay = formatVolumeDisplay(item);
 
                 const qty = parseFloat(item.quantity || 0);
                 const itemPrice = parseFloat(item.price || 0);
                 const sellingAmount = itemPrice * qty;
 
-                // Purchase price calculation
+                const vObj = item.variant || item.variantInfo || {};
                 const purchasePrice = parseFloat(vObj.purchasePrice || 0);
                 const bUPP = parseFloat(vObj.baseUnitsPerPack || 1);
                 let itemPurchaseCost = 0;
@@ -2413,23 +2483,110 @@ export const getCustomerPaymentsReport = async (req, res) => {
             });
         });
 
-        const totalCollected = cashCollect + onlineCollect;
+        // Process Outlet Orders
+        outletOrders.forEach(order => {
+            const bill = parseFloat(order.totalAmount || order.grandTotal || 0);
+            const paid = parseFloat(order.paidAmount || bill);
+            const due = parseFloat(order.dueAmount || 0);
+
+            let payments = Array.isArray(order.payments) ? order.payments : [];
+            if (payments.length > 0) {
+                payments.forEach(p => {
+                    const amt = parseFloat(p.amount || 0);
+                    const m = String(p.method || p.paymentMode || '').toLowerCase();
+                    if (m.includes('cash') || m.includes('રોકડ')) {
+                        outletCash += amt;
+                    } else {
+                        outletOnline += amt;
+                    }
+                });
+            } else {
+                const mode = String(order.paymentMode || 'cash').toLowerCase();
+                if (mode.includes('cash') || mode.includes('રોકડ')) {
+                    outletCash += paid;
+                } else {
+                    outletOnline += paid;
+                }
+            }
+
+            if (due > 0.01) {
+                totalPendingDue += due;
+            }
+
+            (order.items || []).forEach(item => {
+                const pObj = item.product || {};
+                const pName = typeof pObj.name === 'object' ? (pObj.name.gu || pObj.name.en || 'Product') : (pObj.name || item.name || 'Product');
+                const volumeDisplay = formatVolumeDisplay(item);
+
+                const qty = parseFloat(item.quantity || 0);
+                const itemPrice = parseFloat(item.price || 0);
+                const sellingAmount = itemPrice * qty;
+
+                const vObj = item.variant || item.variantInfo || {};
+                const purchasePrice = parseFloat(vObj.purchasePrice || 0);
+                const bUPP = parseFloat(vObj.baseUnitsPerPack || 1);
+                let itemPurchaseCost = 0;
+                if (item.sellUnit === 'Inner' && bUPP > 0) {
+                    itemPurchaseCost = (purchasePrice / bUPP) * qty;
+                } else {
+                    itemPurchaseCost = purchasePrice * qty;
+                }
+
+                const mapKey = `${pName}_${volumeDisplay}`;
+                if (stockMap.has(mapKey)) {
+                    const existing = stockMap.get(mapKey);
+                    existing.qty += qty;
+                    existing.sellingAmount += sellingAmount;
+                    existing.purchaseCost += itemPurchaseCost;
+                } else {
+                    stockMap.set(mapKey, {
+                        name: pName,
+                        volume: volumeDisplay,
+                        qty,
+                        sellingAmount,
+                        purchaseCost: itemPurchaseCost
+                    });
+                }
+            });
+        });
+
+        const customerTotal = customerCash + customerOnline;
+        const outletTotal = outletCash + outletOnline;
+        const grandTotalCash = customerCash + outletCash;
+        const grandTotalOnline = customerOnline + outletOnline;
+        const totalCollected = customerTotal + outletTotal;
+
         const stockList = Array.from(stockMap.values());
         const stockSellingTotal = stockList.reduce((sum, i) => sum + i.sellingAmount, 0);
         const stockPurchaseTotal = stockList.reduce((sum, i) => sum + i.purchaseCost, 0);
         const netProfit = stockSellingTotal - stockPurchaseTotal;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Customer payments report fetched successfully", {
-            cashCollect,
-            onlineCollect,
+            // Customer Payments
+            customerCash,
+            customerOnline,
+            customerTotal,
+
+            // Outlet Orders
+            outletCash,
+            outletOnline,
+            outletTotal,
+
+            // Combined Totals
+            grandTotalCash,
+            grandTotalOnline,
             totalCollected,
             totalPendingDue,
+
+            // Pending Shops List
             pendingShops,
+
+            // Stock & Profit
             stockList,
             stockSellingTotal,
             stockPurchaseTotal,
             netProfit,
-            totalOrders: orders.length
+            totalOrders: orders.length + outletOrders.length
         });
     } catch (error) {
         logger.error(`[Customer Payments Report Error]: ${error.message}`);
