@@ -725,6 +725,51 @@ export const getAllOrders = async (req, res) => {
             'Pending Due Order': pendingDueCount
         };
 
+        let paymentTotals = {
+            totalAmountSum: 0,
+            totalPaidSum: 0,
+            totalDueSum: 0,
+            cashPaidSum: 0,
+            onlinePaidSum: 0
+        };
+
+        try {
+            const allMatchedOrders = await Order.findAll({
+                where,
+                include: search ? searchIncludes : (deliveryBoyId ? [{ model: OrderAssignment, as: 'assignment' }] : []),
+                attributes: ['id', 'totalAmount', 'paidAmount', 'dueAmount', 'paymentMethod', 'paymentStatus', 'orderStatus']
+            });
+
+            allMatchedOrders.forEach(o => {
+                const bill = Number(o.totalAmount || 0);
+                const paid = Number(o.paidAmount || 0);
+                const due = Number(o.dueAmount || 0);
+                const pm = String(o.paymentMethod || '').toLowerCase();
+
+                paymentTotals.totalAmountSum += bill;
+                paymentTotals.totalPaidSum += paid;
+                paymentTotals.totalDueSum += due;
+
+                if (pm.includes('cash') || pm.includes('રોકડ')) {
+                    paymentTotals.cashPaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
+                } else if (pm.includes('online') || pm.includes('upi') || pm.includes('bank') || pm.includes('qr') || pm.includes('gpay') || pm.includes('paytm') || pm.includes('cheque')) {
+                    paymentTotals.onlinePaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
+                } else {
+                    if (paid > 0) paymentTotals.cashPaidSum += paid;
+                }
+            });
+
+            paymentTotals.totalAmountSum = Math.round(paymentTotals.totalAmountSum * 100) / 100;
+            paymentTotals.totalPaidSum = Math.round(paymentTotals.totalPaidSum * 100) / 100;
+            paymentTotals.totalDueSum = Math.round(paymentTotals.totalDueSum * 100) / 100;
+            paymentTotals.cashPaidSum = Math.round(paymentTotals.cashPaidSum * 100) / 100;
+            paymentTotals.onlinePaidSum = Math.round(paymentTotals.onlinePaidSum * 100) / 100;
+        } catch (err) {
+            logger.error(`[getAllOrders paymentTotals calculation error]: ${err.message}`);
+        }
+
+        responseData.paymentTotals = paymentTotals;
+
         if (responseData.orders) {
             responseData.orders = responseData.orders.map(order => adjustOrderPayments(order));
         }
