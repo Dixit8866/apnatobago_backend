@@ -30,7 +30,6 @@ const ensureProductExists = async (productId) => {
             companyCategoryId: compCat?.id || '00000000-0000-0000-0000-000000000000',
             status: 'Active'
         });
-        console.log(`[Import] Created placeholder product for missing references: ${productId}`);
     }
 };
 
@@ -43,13 +42,11 @@ const ensureVolumeExists = async (volumeId) => {
             name: { en: 'Imported Volume', gu: 'આયાતી વોલ્યુમ' },
             status: 'Active'
         });
-        console.log(`[Import] Created placeholder volume for missing references: ${volumeId}`);
     }
 };
 
 const importVariants = async () => {
     try {
-        console.log(`[Import] Reading local product-variants.json file...`);
         if (!fs.existsSync(JSON_PATH)) {
             throw new Error(`JSON file not found at path: ${JSON_PATH}`);
         }
@@ -57,12 +54,9 @@ const importVariants = async () => {
         const dataStr = fs.readFileSync(JSON_PATH, 'utf-8');
         const variants = JSON.parse(dataStr);
 
-        console.log(`[Import] Loaded ${variants.length} product variants to seed.`);
-
         // Connect to the DB
         await connectDB();
 
-        console.log('[Import] Seeding variants database...');
         let successCount = 0;
         let failCount = 0;
 
@@ -94,7 +88,6 @@ const importVariants = async () => {
             }
         }
 
-        console.log(`\n[Import Complete] Successfully imported/updated ${successCount} variants. Failures: ${failCount}`);
         process.exit(0);
     } catch (err) {
         console.error('[Import Fatal Error]:', err.message);

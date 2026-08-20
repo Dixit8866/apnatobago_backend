@@ -393,19 +393,11 @@ export const addToCart = async (req, res) => {
         // Check stock strictly for user's assigned godown (or all godowns if no godown assigned)
         let availableStock = await getAvailableStock(productId, req.user?.godownId);
 
-        console.log(`[ADD_TO_CART_STOCK_CHECK] Product: ${productId}, Variant: ${variant?.id}`);
-        console.log(`  -> bUPP: ${bUPP}, currentCartQty: ${currentCartQty}, qtyToAdd: ${qtyToAdd}, totalProposedQty: ${totalProposedQty}`);
-        console.log(`  -> deductionRequiredBaseUnits: ${deductionRequired}`);
-        console.log(`  -> userGodownId: ${req.user?.godownId}, availableStockInAssignedGodown: ${availableStock}`);
-        console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
-
         // Check Old Stock Lock Toggle restriction
         if (variant && variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
             const limitQty = Number(variant.oldStockLimitQty);
             const lockedBaseUnits = limitQty * bUPP;
-            console.log(`  -> Lock active in addToCart! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
             availableStock = Math.min(availableStock, lockedBaseUnits);
-            console.log(`  -> availableStock after lock cap: ${availableStock}`);
         }
 
         if (deductionRequired > availableStock) {
@@ -550,17 +542,10 @@ export const updateCartItem = async (req, res) => {
 
             let availableStock = await getAvailableStock(cartItem.productId, req.user?.godownId);
 
-            console.log(`[UPDATE_CART_STOCK_CHECK] Product: ${cartItem.productId}, Variant: ${variant?.id}`);
-            console.log(`  -> bUPP: ${bUPP}, proposedQty: ${proposedQty}, deductionRequiredBaseUnits: ${deductionRequired}`);
-            console.log(`  -> userGodownId: ${req.user?.godownId}, availableStockInAssignedGodown: ${availableStock}`);
-            console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
-
             if (variant && variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
                 const limitQty = Number(variant.oldStockLimitQty);
                 const lockedBaseUnits = limitQty * bUPP;
-                console.log(`  -> Lock active in updateCart! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
                 availableStock = Math.min(availableStock, lockedBaseUnits);
-                console.log(`  -> availableStock after lock cap: ${availableStock}`);
             }
 
             if (deductionRequired > availableStock) {

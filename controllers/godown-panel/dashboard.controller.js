@@ -79,10 +79,7 @@ export const getGodownDashboard = async (req, res, next) => {
                 { createdAt: { [Op.between]: [startISO, endISO] } },
                 { receivedDate: { [Op.between]: [startISO, endISO] } }
             ];
-            outletDateFilter[Op.or] = [
-                { createdAt: { [Op.between]: [startISO, endISO] } },
-                { orderDate: { [Op.between]: [startYMD, endYMD] } }
-            ];
+            outletDateFilter.createdAt = { [Op.between]: [startISO, endISO] };
         }
 
         const cancelledStatuses = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
@@ -143,10 +140,7 @@ export const getGodownDashboard = async (req, res, next) => {
         const todayOutletOrderCount = await OutletOrder.count({
             where: {
                 ...godownFilter,
-                [Op.or]: [
-                    { createdAt: { [Op.between]: [todayStartISO, todayEndISO] } },
-                    { orderDate: todayStr }
-                ]
+                createdAt: { [Op.between]: [todayStartISO, todayEndISO] }
             }
         });
 
@@ -188,12 +182,15 @@ export const getGodownDashboard = async (req, res, next) => {
             }
         }) || 0;
 
-        const outletOutstandingSum = await OutletOrder.sum('dueAmount', {
-            where: {
-                ...godownFilter,
-                orderStatus: { [Op.notIn]: cancelledStatuses }
+        const outletOutstandingSum = await OutletOrder.sum(
+            literal('GREATEST(0, "grandTotal" - "paidAmount")'),
+            {
+                where: {
+                    ...godownFilter,
+                    orderStatus: { [Op.notIn]: cancelledStatuses }
+                }
             }
-        }) || 0;
+        ) || 0;
 
         const totalOutstanding = Math.round((Number(appOutstandingSum) + Number(outletOutstandingSum)) * 100) / 100;
 

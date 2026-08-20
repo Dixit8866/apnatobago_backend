@@ -34,13 +34,6 @@ export const getWishlist = async (req, res) => {
             } : { godownId: null })
         };
         const { paginate, page: queryPage, limit: queryLimit } = req.query;
-        const debug = req.query.debug === 'true';
-
-        console.log(userId, userLevel, pricingWhere);
-        console.log(paginate, queryPage, queryLimit);
-        if (debug) {
-            console.log('[Wishlist debug] request query=', req.query);
-        }
 
         const include = [
             {
@@ -151,8 +144,6 @@ export const getWishlist = async (req, res) => {
                 return itemJson;
             });
 
-            console.log(formattedWishlist,"====formattedWishlist")
-
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Wishlist fetched successfully", formattedWishlist);
         }
 
@@ -169,7 +160,6 @@ export const getWishlist = async (req, res) => {
         });
 
         const formattedResult = formatPaginatedResponse(result, page, limit);
-        console.log(formattedResult, "===formattedResult")
         if (formattedResult.data) {
             formattedResult.data = formattedResult.data.map(item => {
                 const itemJson = item.toJSON ? item.toJSON() : item;

@@ -310,17 +310,10 @@ export const createOrder = async (req, res) => {
                     availableStock = userGodownStock;
                 }
 
-                console.log(`[CREATE_ORDER_STOCK_CHECK] Product: ${item.productId}, Variant: ${variant?.id}`);
-                console.log(`  -> bUPP: ${bUPP}, requestedQty: ${item.quantity}, deductionRequiredBaseUnits: ${deductionRequired}`);
-                console.log(`  -> godownId: ${targetGodownId}, availableStockInAssignedGodown: ${availableStock}`);
-                console.log(`  -> oldStockLockToggle: ${variant?.oldStockLockToggle}, oldStockLimitQty: ${variant?.oldStockLimitQty}`);
-
                 if (variant.oldStockLockToggle && Number(variant.oldStockLimitQty || 0) > 0) {
                     const limitQty = Number(variant.oldStockLimitQty);
                     const lockedBaseUnits = limitQty * bUPP;
-                    console.log(`  -> Lock active in createOrder! lockedBaseUnits: ${lockedBaseUnits} (limit: ${limitQty} packs)`);
                     availableStock = Math.min(availableStock, lockedBaseUnits);
-                    console.log(`  -> availableStock after lock cap: ${availableStock}`);
                 }
 
                 if (deductionRequired > availableStock) {

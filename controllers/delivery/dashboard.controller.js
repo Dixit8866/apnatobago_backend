@@ -32,18 +32,6 @@ export const getTodayRangeIST = () => {
     const todayStart = new Date(Date.UTC(year, month, date, 0,  0,  0,   0) - IST_OFFSET_MS);
     // IST 23:59:59.999 → UTC
     const todayEnd   = new Date(Date.UTC(year, month, date, 23, 59, 59, 999) - IST_OFFSET_MS);
-
-    // ── DEBUG ────────────────────────────────────────────────────────────────
-    const toIST = (d) => new Date(d.getTime() + IST_OFFSET_MS)
-        .toISOString().replace('T', ' ').slice(0, 23) + ' IST';
-    console.log('[DEBUG getTodayRangeIST] ─────────────────────────────────────');
-    console.log('[DEBUG getTodayRangeIST] Server UTC now :', now.toISOString());
-    console.log('[DEBUG getTodayRangeIST] IST now        :', toIST(now));
-    console.log('[DEBUG getTodayRangeIST] todayStart IST :', toIST(todayStart), '← today 00:00:00');
-    console.log('[DEBUG getTodayRangeIST] todayEnd   IST :', toIST(todayEnd),   '← today 23:59:59');
-    console.log('[DEBUG getTodayRangeIST] todayStart UTC :', todayStart.toISOString());
-    console.log('[DEBUG getTodayRangeIST] todayEnd   UTC :', todayEnd.toISOString());
-    console.log('[DEBUG getTodayRangeIST] ─────────────────────────────────────');
     // ─────────────────────────────────────────────────────────────────────────
 
     return { todayStart, todayEnd };
@@ -63,8 +51,6 @@ export const getDeliveryDashboardStats = async (req, res) => {
         const riderProfileImage = req.user.profileImage;
 
         logger.info(`[Delivery Dashboard]: Fetching dashboard statistics for rider ${riderName} (${deliveryBoyId})`);
-        console.log(`\n[DASHBOARD DEBUG] ========================================`);
-        console.log(`[DASHBOARD DEBUG] Rider: ${riderName} | ID: ${deliveryBoyId}`);
 
         // Define the rolling 24-hour range
         const { todayStart, todayEnd } = getTodayRangeIST();
@@ -89,7 +75,6 @@ export const getDeliveryDashboardStats = async (req, res) => {
                 }
             }]
         });
-        console.log(`[DASHBOARD DEBUG] assignedOrdersCount (all active) : ${assignedOrdersCount}`);
 
         // 2. Completed Orders TODAY: filter by ORDER's updatedAt (NOT assignment.updatedAt)
         //    assignment.updatedAt is unreliable - gets bulk-reset by unrelated DB operations
@@ -105,8 +90,6 @@ export const getDeliveryDashboardStats = async (req, res) => {
                 }
             }]
         });
-        console.log(`[DASHBOARD DEBUG] completedOrdersCount (by order.updatedAt today) : ${completedOrdersCount}`);
-
         // 3. Cancelled Orders TODAY: filter by ORDER's updatedAt (NOT assignment.updatedAt)
         const cancelledOrdersCount = await OrderAssignment.count({
             where: { deliveryBoyId },
@@ -120,8 +103,6 @@ export const getDeliveryDashboardStats = async (req, res) => {
                 }
             }]
         });
-        console.log(`[DASHBOARD DEBUG] cancelledOrdersCount (by order.updatedAt today) : ${cancelledOrdersCount}`);
-        console.log(`[DASHBOARD DEBUG] ========================================\n`);
 
 
         // 4. Fetch all payment transactions received by this delivery boy today

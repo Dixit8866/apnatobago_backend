@@ -5,12 +5,7 @@ import sequelize from '../config/db.js';
 
 async function auditPricingAnomalies() {
     try {
-        console.log('================================================================');
-        console.log('       🔍 READ-ONLY PRICING AUDIT SCRIPT FOR PRODUCTS');
-        console.log('================================================================');
-        console.log('[Script] Authenticating database connection...');
         await sequelize.authenticate();
-        console.log('[Script] Connected to database successfully.\n');
 
         const [rows] = await sequelize.query(`
             SELECT 
@@ -107,30 +102,19 @@ async function auditPricingAnomalies() {
 
         const faultyProductsList = Array.from(faultyProductsMap.values());
 
-        console.log(`[Script] Total 1767 pricing records examined.\n`);
-
         if (faultyProductsList.length === 0) {
             console.log('✅ NO PRICING ANOMALIES FOUND! All product purchase prices are lower than MRP and Selling Prices.\n');
         } else {
-            console.log('================================================================');
-            console.log(`❌ FOUND ${faultyProductsList.length} PRODUCTS WITH PRICING ANOMALIES (FAULTS):`);
-            console.log('================================================================\n');
 
             faultyProductsList.forEach((item, idx) => {
-                console.log(`${idx + 1}. Product: "${item.productName}" (ID: ${item.productId})`);
                 item.faults.forEach((f, fIdx) => {
                     console.log(`   └─ [Fault ${fIdx + 1}] Volume: "${f.volDisplay}" | Level: "${f.levelName}" => ${f.details}`);
                 });
                 console.log('');
             });
-
-            console.log('================================================================');
-            console.log('📋 ONLY PRODUCT NAMES (EASY COPY-PASTE):');
-            console.log('================================================================');
             faultyProductsList.forEach((item, idx) => {
                 console.log(`${idx + 1}. ${item.productName}`);
             });
-            console.log('================================================================\n');
         }
 
     } catch (err) {

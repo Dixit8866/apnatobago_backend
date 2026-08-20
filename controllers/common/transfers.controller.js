@@ -207,10 +207,6 @@ export const createTransfer = async (req, res, next) => {
 
             const maxAvailablePacks = totalStockBaseUnits / factor;
 
-            console.log(`[CREATE_TRANSFER_CHECK] Product: ${productId}, Variant: ${variantId}, FromGodown: ${fromGodownId}, ToGodown: ${toGodownId}`);
-            console.log(`  -> Requested Qty: ${qty} packs, factor (bUPP): ${factor}, qtyInBaseUnits: ${qtyInBaseUnits}`);
-            console.log(`  -> Total Stock Base Units in Source Godown: ${totalStockBaseUnits}, Max Available Packs: ${maxAvailablePacks}`);
-
             if (totalStockBaseUnits < qtyInBaseUnits) {
                 await t.rollback();
                 const vol = variant ? variant.volume : '';

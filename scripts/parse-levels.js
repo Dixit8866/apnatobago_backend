@@ -14,9 +14,7 @@ const jsonPath = path.join(__dirname, 'custom_levels.json');
 
 async function main() {
     try {
-        console.log('[Script] Authenticating database connection...');
         await sequelize.authenticate();
-        console.log('[Script] Connected successfully.');
 
         if (!fs.existsSync(jsonPath)) {
             console.error(`JSON file not found at ${jsonPath}`);
@@ -24,7 +22,6 @@ async function main() {
         }
 
         const levelsData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-        console.log(`[Script] Loaded ${levelsData.length} levels from JSON.`);
 
         // Seed / bulk upsert custom levels
         const fieldsToUpdate = Object.keys(CustomLevel.rawAttributes).filter(

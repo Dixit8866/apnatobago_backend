@@ -7,7 +7,6 @@ import VendorOrder from './models/superadmin-models/VendorOrder.js';
       order: [['createdAt', 'DESC']],
       limit: 3,
     });
-    console.log("LAST 3 VENDOR ORDERS:");
     orders.forEach(o => {
       console.log(`Order ID: ${o.id}, OrderNo: ${o.orderNo}`);
       console.log(`Items:`, JSON.stringify(o.items, null, 2));

@@ -15,7 +15,6 @@ const JSON_PATH = path.join(__dirname, 'products.json');
 
 const importProducts = async () => {
     try {
-        console.log(`[Import] Reading local products.json file...`);
         if (!fs.existsSync(JSON_PATH)) {
             throw new Error(`JSON file not found at path: ${JSON_PATH}`);
         }
@@ -23,12 +22,9 @@ const importProducts = async () => {
         const dataStr = fs.readFileSync(JSON_PATH, 'utf-8');
         const products = JSON.parse(dataStr);
 
-        console.log(`[Import] Loaded ${products.length} products to seed.`);
-
         // Connect to the DB
         await connectDB();
 
-        console.log('[Import] Seeding database...');
         let successCount = 0;
         let failCount = 0;
 
@@ -93,8 +89,6 @@ const importProducts = async () => {
                 failCount++;
             }
         }
-
-        console.log(`\n[Import Complete] Successfully imported/updated ${successCount} products. Failures: ${failCount}`);
         process.exit(0);
     } catch (err) {
         console.error('[Import Fatal Error]:', err.message);

@@ -22,7 +22,6 @@ const ensureCustomLevelExists = async (customLevelId) => {
             name: 'Imported Level',
             status: 'Active'
         });
-        console.log(`[Import] Created placeholder CustomLevel: ${customLevelId}`);
     }
 };
 
@@ -41,13 +40,11 @@ const ensureVariantExists = async (variantId) => {
             purchasePrice: 0,
             status: 'Active'
         });
-        console.log(`[Import] Created placeholder ProductVariant: ${variantId}`);
     }
 };
 
 const importPricings = async () => {
     try {
-        console.log(`[Import] Reading local product-pricings.json file...`);
         if (!fs.existsSync(JSON_PATH)) {
             throw new Error(`JSON file not found at path: ${JSON_PATH}`);
         }
@@ -55,12 +52,9 @@ const importPricings = async () => {
         const dataStr = fs.readFileSync(JSON_PATH, 'utf-8');
         const pricings = JSON.parse(dataStr);
 
-        console.log(`[Import] Loaded ${pricings.length} product pricings to seed.`);
-
         // Connect to the DB
         await connectDB();
 
-        console.log('[Import] Seeding product pricings...');
         let successCount = 0;
         let failCount = 0;
 
@@ -93,7 +87,6 @@ const importPricings = async () => {
             }
         }
 
-        console.log(`\n[Import Complete] Successfully imported/updated ${successCount} product pricings. Failures: ${failCount}`);
         process.exit(0);
     } catch (err) {
         console.error('[Import Fatal Error]:', err.message);

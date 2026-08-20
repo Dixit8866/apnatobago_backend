@@ -65,12 +65,6 @@ export const getMyAssignedOrders = async (req, res) => {
         // ── DEBUG ─────────────────────────────────────────────────────────────
         const toIST = (d) => new Date(d.getTime() + (5.5 * 60 * 60 * 1000))
             .toISOString().replace('T', ' ').slice(0, 19) + ' IST';
-        console.log(`\n[ORDER LIST DEBUG] ==========================================`);
-        console.log(`[ORDER LIST DEBUG] DeliveryBoyId : ${deliveryBoyId}`);
-        console.log(`[ORDER LIST DEBUG] Status Filter : ${status || 'NONE (default: all)'}`);
-        console.log(`[ORDER LIST DEBUG] Search        : ${search || 'none'}`);
-        console.log(`[ORDER LIST DEBUG] Date Range    : ${toIST(todayStart)}  →  ${toIST(todayEnd)}`);
-        console.log(`[ORDER LIST DEBUG] UTC  Range    : ${todayStart.toISOString()}  →  ${todayEnd.toISOString()}`);
         // ─────────────────────────────────────────────────────────────────────
 
         if (status) {
@@ -162,22 +156,12 @@ export const getMyAssignedOrders = async (req, res) => {
         });
 
         // ── DEBUG: Print every returned row ───────────────────────────────────
-        console.log(`[ORDER LIST DEBUG] Total rows found in DB : ${result.count}`);
         result.rows.forEach((row, i) => {
             const o = row.order;
             const updatedIST = row.updatedAt ? toIST(new Date(row.updatedAt)) : 'N/A';
             const orderUpdatedIST = o?.updatedAt ? toIST(new Date(o.updatedAt)) : 'N/A';
             const assignedIST = row.assignedAt ? toIST(new Date(row.assignedAt)) : 'N/A';
-            console.log(
-                `[ORDER LIST DEBUG] [${i + 1}] OrderID=${o?.orderId || o?.id || '?'}` +
-                ` | assignment.status=${row.status}` +
-                ` | order.orderStatus=${o?.orderStatus || '?'}` +
-                ` | assignment.updatedAt(IST)=${updatedIST}` +
-                ` | order.updatedAt(IST)=${orderUpdatedIST}` +
-                ` | assignedAt(IST)=${assignedIST}`
-            );
         });
-        console.log(`[ORDER LIST DEBUG] ==========================================\n`);
         // ─────────────────────────────────────────────────────────────────────
 
         // Lazy load items for the assigned orders
