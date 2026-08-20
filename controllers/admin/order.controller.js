@@ -2420,30 +2420,50 @@ export const getCustomerPaymentsReport = async (req, res) => {
         // Process Customer Orders
         orders.forEach(order => {
             const bill = parseFloat(order.totalAmount || 0);
-            const paid = parseFloat(order.paidAmount || 0);
-            const due = parseFloat(order.dueAmount || 0);
-            const method = String(order.paymentMethod || '').toLowerCase();
             const shopName = order.user?.businessProfile?.shopName || order.customerName || 'અજ્ઞાત દુકાન';
             const phone = order.user?.number || order.customerNumber || '';
 
             let orderCash = 0;
             let orderOnline = 0;
+            let orderCredit = 0;
 
-            if (paid > 0) {
-                if (method.includes('cash') || method.includes('રોકડ')) {
-                    orderCash = paid;
-                } else if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr') || method.includes('gpay') || method.includes('paytm') || method.includes('cheque')) {
-                    orderOnline = paid;
-                } else {
-                    orderCash = paid;
-                }
-            } else if (order.paymentStatus === 'Paid') {
-                if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr')) {
-                    orderOnline = bill;
-                } else {
-                    orderCash = bill;
+            const payments = Array.isArray(order.payments) ? order.payments : [];
+
+            if (payments.length > 0) {
+                payments.forEach(p => {
+                    const amt = parseFloat(p.amount || 0);
+                    const m = String(p.paymentMethod || p.method || p.paymentMode || '').toUpperCase();
+                    if (m === 'CASH' || m.includes('ROKAD') || m.includes('રોકડ')) {
+                        orderCash += amt;
+                    } else if (m === 'CREDIT') {
+                        orderCredit += amt;
+                    } else if (amt > 0) {
+                        orderOnline += amt;
+                    }
+                });
+            } else {
+                const paid = parseFloat(order.paidAmount || 0);
+                const method = String(order.paymentMethod || '').toLowerCase();
+
+                if (paid > 0) {
+                    if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr') || method.includes('gpay') || method.includes('paytm') || method.includes('cheque')) {
+                        orderOnline = paid;
+                    } else {
+                        orderCash = paid;
+                    }
+                } else if (order.paymentStatus === 'Paid') {
+                    if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr')) {
+                        orderOnline = bill;
+                    } else {
+                        orderCash = bill;
+                    }
                 }
             }
+
+            const totalRealPaid = orderCash + orderOnline;
+            const due = (order.dueAmount !== undefined && order.dueAmount !== null)
+                ? parseFloat(order.dueAmount)
+                : Math.max(0, bill - totalRealPaid);
 
             customerCash += orderCash;
             customerOnline += orderOnline;
