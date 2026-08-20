@@ -44,11 +44,9 @@ try {
             firebaseApp = initializeApp({
                 credential: cert(serviceAccount)
             });
-            console.log('[Firebase Admin Initialize] Initialized new app successfully');
             logger.info('Firebase Admin initialized successfully');
         } else {
             firebaseApp = getApp();
-            console.log('[Firebase Admin Initialize] Reused existing app instance');
         }
     } else {
         console.warn('[Firebase Admin Initialize] Warning: No service account credentials found!');
@@ -89,11 +87,6 @@ export const sendToDevice = async (tokenInput, title, body, imageUrl = null, dat
     if (tokens.length === 0) {
         return { success: false, error: 'No valid tokens provided' };
     }
-
-    console.log('[FCM Service] Attempting to send device notifications...');
-    console.log(`[FCM Service] Tokens (${tokens.length}):`, tokens);
-    console.log(`[FCM Service] Title: "${title}", Body: "${body}", Image: "${imageUrl}"`);
-    console.log('[FCM Service] Custom Data:', JSON.stringify(data, null, 2));
 
     try {
         if (!firebaseApp) {
@@ -172,7 +165,7 @@ export const sendToDevice = async (tokenInput, title, body, imageUrl = null, dat
                 };
 
                 const response = await getMessaging(firebaseApp).send(message);
-                console.log(`[FCM Service Success] Notification sent to token ${token.substring(0, 15)}... MessageID:`, response);
+
                 return { success: true, token };
             } catch (err) {
                 console.error(`[FCM Service Error] Failed to send to token ${token.substring(0, 15)}... Error:`, err.message);
@@ -202,9 +195,6 @@ export const sendToDevice = async (tokenInput, title, body, imageUrl = null, dat
  * Send notification to a topic
  */
 export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}) => {
-    console.log(`[FCM Service] Attempting to send topic notification to topic: "${topic}"...`);
-    console.log(`[FCM Service] Title: "${title}", Body: "${body}", Image: "${imageUrl}"`);
-    console.log('[FCM Service] Custom Data:', JSON.stringify(data, null, 2));
 
     try {
         if (!firebaseApp) {
@@ -275,7 +265,6 @@ export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}
         };
 
         const response = await getMessaging(firebaseApp).send(message);
-        console.log('[FCM Service Success] Topic notification sent successfully! MessageID:', response);
         return { success: true, response };
     } catch (error) {
         console.error('[FCM Service Error] Exception during sendToTopic:', error);

@@ -74,8 +74,6 @@ export const initReminderCron = () => {
             const hh24 = hours.toString().padStart(2, '0');
             const time24 = `${hh24}:${mm}`;
 
-            console.log(`[ReminderCron] Running minute-check... Current Time: ${time24} (IST)`);
-
             // Debug: Check specific test user 9106681629
             try {
                 const testUser = await User.findOne({

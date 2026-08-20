@@ -112,15 +112,21 @@ export const getDashboardStats = async (req, res) => {
             }
         }) || 0;
 
-        const outletOutstandingSum = await OutletOrder.sum(
-            literal('GREATEST(0, "grandTotal" - "paidAmount")'),
-            {
-                where: {
-                    ...godownFilter,
-                    orderStatus: { [Op.notIn]: cancelledStatuses }
-                }
+        const outletGrandTotalSum = await OutletOrder.sum('grandTotal', {
+            where: {
+                ...godownFilter,
+                orderStatus: { [Op.notIn]: cancelledStatuses }
             }
-        ) || 0;
+        }) || 0;
+
+        const outletPaidAmountSum = await OutletOrder.sum('paidAmount', {
+            where: {
+                ...godownFilter,
+                orderStatus: { [Op.notIn]: cancelledStatuses }
+            }
+        }) || 0;
+
+        const outletOutstandingSum = Math.max(0, Number(outletGrandTotalSum) - Number(outletPaidAmountSum));
 
         const totalOutstanding = Math.round((Number(appOutstandingSum) + Number(outletOutstandingSum)) * 100) / 100;
 
