@@ -2342,27 +2342,29 @@ export const getCustomerPaymentsReport = async (req, res) => {
         }
 
         let outletOrders = [];
-        try {
-            outletOrders = await OutletOrder.findAll({
-                where: outletWhere,
-                include: [
-                    {
-                        model: OutletOrderItem,
-                        as: 'items',
-                        include: [
-                            { model: Product, as: 'product', attributes: ['id', 'name'] },
-                            {
-                                model: ProductVariant,
-                                as: 'variant',
-                                attributes: ['id', 'volume', 'purchasePrice', 'baseUnitsPerPack', 'baseUnitLabel', 'innerUnitLabel'],
-                                include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
-                            }
-                        ]
-                    }
-                ]
-            });
-        } catch (e) {
-            logger.warn(`[Outlet Orders Fetch Warning]: ${e.message}`);
+        if (!deliveryBoyId || deliveryBoyId === 'all') {
+            try {
+                outletOrders = await OutletOrder.findAll({
+                    where: outletWhere,
+                    include: [
+                        {
+                            model: OutletOrderItem,
+                            as: 'items',
+                            include: [
+                                { model: Product, as: 'product', attributes: ['id', 'name'] },
+                                {
+                                    model: ProductVariant,
+                                    as: 'variant',
+                                    attributes: ['id', 'volume', 'purchasePrice', 'baseUnitsPerPack', 'baseUnitLabel', 'innerUnitLabel'],
+                                    include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'], required: false }]
+                                }
+                            ]
+                        }
+                    ]
+                });
+            } catch (e) {
+                logger.warn(`[Outlet Orders Fetch Warning]: ${e.message}`);
+            }
         }
 
         let customerCash = 0;
@@ -2429,7 +2431,17 @@ export const getCustomerPaymentsReport = async (req, res) => {
             let orderCash = 0;
             let orderOnline = 0;
 
-            if (paid > 0) {
+            if (Array.isArray(order.payments) && order.payments.length > 0) {
+                order.payments.forEach(p => {
+                    const pAmt = parseFloat(p.amount || 0);
+                    const pMethod = String(p.paymentMethod || p.method || '').toLowerCase();
+                    if (pMethod.includes('cash') || pMethod.includes('રોકડ')) {
+                        orderCash += pAmt;
+                    } else if (pMethod !== 'credit') {
+                        orderOnline += pAmt;
+                    }
+                });
+            } else if (paid > 0) {
                 if (method.includes('cash') || method.includes('રોકડ')) {
                     orderCash = paid;
                 } else if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr') || method.includes('gpay') || method.includes('paytm') || method.includes('cheque')) {
