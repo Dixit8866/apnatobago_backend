@@ -282,13 +282,17 @@ export const createOutletOrder = async (req, res) => {
  */
 export const getOutletOrders = async (req, res) => {
     try {
-        const { search, godownId, paymentStatus, status, date, startDate, endDate, today } = req.query;
+        const { search, godownId, paymentStatus, status, date, startDate, endDate, today, userId, all, allGodowns } = req.query;
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
         const whereCondition = {};
 
-        if (godownId) {
+        if (userId) {
+            whereCondition.userId = userId;
+        }
+
+        if (godownId && godownId !== 'all' && all !== 'true' && allGodowns !== 'true') {
             whereCondition.godownId = godownId;
         }
 
@@ -303,7 +307,7 @@ export const getOutletOrders = async (req, res) => {
                 { customerPhone: { [Op.iLike]: `%${search}%` } },
                 { shopName: { [Op.iLike]: `%${search}%` } }
             ];
-        } else {
+        } else if (!userId) {
             if (startDate || endDate) {
                 const sDate = startDate ? new Date(startDate) : new Date('2020-01-01');
                 sDate.setHours(0, 0, 0, 0);
