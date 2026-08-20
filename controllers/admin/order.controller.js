@@ -157,7 +157,7 @@ export const getAllOrders = async (req, res) => {
         let routeClause = null;
         let timingClause = null;
 
-        if (godownId) {
+        if (godownId && godownId !== 'all' && req.query.all !== 'true' && req.query.allGodowns !== 'true') {
             baseWhere.godownId = godownId;
         }
 
