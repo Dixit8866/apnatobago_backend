@@ -2373,6 +2373,7 @@ export const getCustomerPaymentsReport = async (req, res) => {
         let outletOnline = 0;
         let totalPendingDue = 0;
         const pendingShops = [];
+        const collectedShops = [];
         const stockMap = new Map();
         const dbSummaryMap = new Map();
 
@@ -2429,41 +2430,36 @@ export const getCustomerPaymentsReport = async (req, res) => {
             let orderOnline = 0;
             let orderCredit = 0;
 
-const payments = Array.isArray(order.payments) ? order.payments : [];
+            const payments = Array.isArray(order.payments) ? order.payments : [];
 
-if (payments.length > 0) {
-    payments.forEach(p => {
-        const amt = parseFloat(p.amount || 0);
-        const m = String(p.paymentMethod || p.method || p.paymentMode || '').toLowerCase();
-        if (m === 'cash' || m.includes('rokad') || m.includes('રોકડ')) {
-            orderCash += amt;
-        } else if (m === 'credit') {
-            orderCredit += amt;
-        } else if (amt > 0) {
-            orderOnline += amt;
-        }
-    });
-} else {
-    const paidAmt = (typeof paid !== 'undefined') ? parseFloat(paid || 0) : parseFloat(order.paidAmount || 0);
-    const methodStr = (typeof method !== 'undefined') ? String(method).toLowerCase() : String(order.paymentMethod || '').toLowerCase();
+            if (payments.length > 0) {
+                payments.forEach(p => {
+                    const amt = parseFloat(p.amount || 0);
+                    const m = String(p.paymentMethod || p.method || p.paymentMode || '').toUpperCase();
+                    if (m === 'CASH' || m.includes('ROKAD') || m.includes('રોકડ')) {
+                        orderCash += amt;
+                    } else if (m === 'CREDIT') {
+                        orderCredit += amt;
+                    } else if (amt > 0) {
+                        orderOnline += amt;
+                    }
+                });
+            } else {
+                const paid = parseFloat(order.paidAmount || 0);
+                const method = String(order.paymentMethod || '').toLowerCase();
 
-    if (paidAmt > 0) {
-        if (methodStr.includes('cash') || methodStr.includes('રોકડ')) {
-            orderCash = paidAmt;
-        } else if (methodStr.includes('online') || methodStr.includes('upi') || methodStr.includes('bank') || methodStr.includes('qr') || methodStr.includes('gpay') || methodStr.includes('paytm') || methodStr.includes('cheque')) {
-            orderOnline = paidAmt;
-        } else {
-            orderCash = paidAmt;
-        }
-    } else if (order.paymentStatus === 'Paid') {
-        if (methodStr.includes('online') || methodStr.includes('upi') || methodStr.includes('bank') || methodStr.includes('qr')) {
-            orderOnline = bill;
-        } else {
-            orderCash = bill;
-        }
-    }
-}
-
+                if (paid > 0) {
+                    if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr') || method.includes('gpay') || method.includes('paytm') || method.includes('cheque')) {
+                        orderOnline = paid;
+                    } else {
+                        orderCash = paid;
+                    }
+                } else if (order.paymentStatus === 'Paid') {
+                    if (method.includes('online') || method.includes('upi') || method.includes('bank') || method.includes('qr')) {
+                        orderOnline = bill;
+                    } else {
+                        orderCash = bill;
+                    }
                 }
             }
 
@@ -2498,6 +2494,18 @@ if (payments.length > 0) {
             dbEntry.credit += due;
             dbEntry.totalCollected = dbEntry.cash + dbEntry.online;
             dbEntry.totalOrders += 1;
+
+            collectedShops.push({
+                orderId: order.orderId,
+                shopName,
+                customerName: order.user?.fullname || order.customerName || '',
+                phone,
+                deliveryBoyName: dbName,
+                totalBill: bill,
+                cash: orderCash,
+                online: orderOnline,
+                credit: due
+            });
 
             if (due > 0.01) {
                 totalPendingDue += due;
@@ -2646,6 +2654,9 @@ if (payments.length > 0) {
 
             // Delivery Boy Wise Summary
             deliveryBoySummary,
+
+            // Shop Wise Collection List
+            collectedShops,
 
             // Pending Shops List
             pendingShops,
