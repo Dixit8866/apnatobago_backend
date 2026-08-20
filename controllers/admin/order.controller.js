@@ -485,7 +485,7 @@ export const getAllOrders = async (req, res) => {
             });
 
             // Attach to Sequelize models using setDataValue so they are serialized correctly
-            result.rows.forEach(order => {
+            result.rows = result.rows.map(order => {
                 if (order.deliveryMode === 'Round' && order.deliveryRoundId && !order.deliveryRoundTiming) {
                     const matchedRound = normalizedSchedules.find(r => r.id === order.deliveryRoundId);
                     if (matchedRound) {
@@ -495,6 +495,7 @@ export const getAllOrders = async (req, res) => {
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
+                return adjustOrderPayments(order);
             });
         }
 
