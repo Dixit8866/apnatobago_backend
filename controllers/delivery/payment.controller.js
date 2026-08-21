@@ -6,7 +6,7 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
-import { Op } from 'sequelize';
+import { Op, Sequelize } from 'sequelize';
 import { getPaginationOptions } from '../../helpers/query.helper.js';
 
 /**
@@ -647,7 +647,7 @@ export const getDeliveryBoyBankDetails = async (req, res) => {
                 status: 'Active',
                 [Op.or]: [
                     { deliveryBoyId },
-                    sequelize.literal(`"deliveryBoyIds" @> '["${deliveryBoyId}"]'::jsonb`)
+                    BankSetting.sequelize.literal(`"deliveryBoyIds" @> '["${deliveryBoyId}"]'::jsonb`)
                 ]
             },
             order: [['createdAt', 'DESC']]

@@ -524,7 +524,7 @@ export const getAllOrders = async (req, res) => {
         ];
 
         const countWhere = {};
-        if (godownId) {
+        if (godownId && godownId !== 'all' && req.query.all !== 'true' && req.query.allGodowns !== 'true') {
             countWhere.godownId = godownId;
         }
         const countInclude = search ? searchIncludes : [];
@@ -2041,7 +2041,7 @@ export const getUserCarts = async (req, res) => {
         const limit = parseInt(queryLimit) || 50;
 
         const userWhere = {};
-        if (godownId) {
+        if (godownId && godownId !== 'all' && req.query.all !== 'true' && req.query.allGodowns !== 'true') {
             userWhere.godownId = godownId;
         }
         if (routeCategoryId) {
@@ -2253,7 +2253,7 @@ export const getCustomerPaymentsReport = async (req, res) => {
             orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
         };
 
-        if (godownId) {
+        if (godownId && godownId !== 'all' && req.query.all !== 'true' && req.query.allGodowns !== 'true') {
             baseWhere.godownId = godownId;
         }
 
@@ -2337,7 +2337,7 @@ export const getCustomerPaymentsReport = async (req, res) => {
             orderStatus: { [Op.ne]: 'Cancelled' },
             createdAt: { [Op.between]: [startOfDate, endOfDate] }
         };
-        if (godownId) {
+        if (godownId && godownId !== 'all' && req.query.all !== 'true' && req.query.allGodowns !== 'true') {
             outletWhere.godownId = godownId;
         }
 

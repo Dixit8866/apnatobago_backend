@@ -20,7 +20,7 @@ export const getAllPayments = async (req, res) => {
             where.deliveryBoyId = deliveryBoyId;
         }
 
-        if (godownId) {
+        if (godownId && godownId !== 'all' && req.query.all !== 'true' && req.query.allGodowns !== 'true') {
             where['$order.godownId$'] = godownId;
         }
 
