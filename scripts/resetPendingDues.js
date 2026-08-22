@@ -41,7 +41,8 @@ async function main() {
 
     const exclusionOrders = await Order.findAll({
         where: { orderId: exclusionOrderIds },
-        include: [{ model: User, as: 'user' }]
+        attributes: ['id', 'orderId', 'userId', 'customerName', 'customerNumber'],
+        include: [{ model: User, as: 'user', attributes: ['id', 'fullname', 'number'] }]
     });
 
     const excludedUserIds = new Set();
@@ -89,7 +90,8 @@ async function main() {
 
     const eligibleOrders = await Order.findAll({
         where: queryConditions,
-        include: [{ model: User, as: 'user' }],
+        attributes: ['id', 'orderId', 'userId', 'customerName', 'customerNumber', 'totalAmount', 'paidAmount', 'dueAmount', 'orderStatus', 'paymentStatus', 'notes', 'createdAt'],
+        include: [{ model: User, as: 'user', attributes: ['id', 'fullname', 'number'] }],
         order: [['createdAt', 'DESC']]
     });
 
