@@ -35,7 +35,7 @@ async function main() {
     await sequelize.authenticate();
     console.log('Database connected successfully.');
 
-    const exclusionOrderIds = ['27031'];
+    const exclusionOrderIds = ['269969'];
     console.log('\nSearching for exclusion orders:');
     exclusionOrderIds.forEach(id => console.log(` - Order ID: ${id}`));
 
