@@ -24,7 +24,7 @@ export const createGodown = async (req, res) => {
 
 export const getGodowns = async (req, res) => {
     try {
-        const { page = 1, limit = 50, search = '', type, all } = req.query;
+        const { page = 1, limit = 50, search = '', type, status, all } = req.query;
 
         let whereClause = {};
         if (search) {
@@ -32,6 +32,11 @@ export const getGodowns = async (req, res) => {
         }
         if (type) {
             whereClause.type = type;
+        }
+        if (status) {
+            whereClause.status = status;
+        } else {
+            whereClause.status = { [Op.ne]: 'Deleted' };
         }
 
         if (all === 'true') {
@@ -47,9 +52,13 @@ export const getGodowns = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        const allCount = await Godown.count();
-        const mainCount = await Godown.count({ where: { type: 'main' } });
-        const subCount = await Godown.count({ where: { type: 'sub' } });
+        const allCount = await Godown.count({ where: { status: { [Op.ne]: 'Deleted' } } });
+        const activeCount = await Godown.count({ where: { status: 'Active' } });
+        const inactiveCount = await Godown.count({ where: { status: 'Inactive' } });
+        const deletedCount = await Godown.count({ where: { status: 'Deleted' } });
+
+        const mainCount = await Godown.count({ where: { type: 'main', status: { [Op.ne]: 'Deleted' } } });
+        const subCount = await Godown.count({ where: { type: 'sub', status: { [Op.ne]: 'Deleted' } } });
 
         res.status(200).json({
             success: true,
@@ -62,6 +71,9 @@ export const getGodowns = async (req, res) => {
             },
             counts: {
                 all: allCount,
+                Active: activeCount,
+                Inactive: inactiveCount,
+                Deleted: deletedCount,
                 main: mainCount,
                 sub: subCount
             }
@@ -115,18 +127,18 @@ export const deleteGodown = async (req, res) => {
             await godown.destroy();
         } catch (dbErr) {
             if (dbErr.name === 'SequelizeForeignKeyConstraintError' || dbErr.code === '23503') {
-                await godown.update({ status: 'Inactive' });
+                await godown.update({ status: 'Deleted' });
 
                 logActivity(req, {
                     module: 'Godown Management',
                     action: 'DELETE',
-                    description: `Deactivated Godown "${godownName}" (has past stock transfers/records)`,
+                    description: `Marked Godown "${godownName}" as Deleted (has past stock transfers/records)`,
                     metadata: { godownId: req.params.id }
                 });
 
                 return res.status(200).json({
                     success: true,
-                    message: `Godown "${godownName}" contains historical stock transfer records, so its status was updated to Inactive.`
+                    message: `Godown "${godownName}" contains historical stock transfer records, so it was marked as Deleted.`
                 });
             }
             throw dbErr;
