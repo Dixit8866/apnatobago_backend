@@ -11,6 +11,7 @@ import User from '../../models/user/User.js';
 import BusinessProfile from '../../models/user/BusinessProfile.js';
 import OrderPayment from '../../models/user/OrderPayment.js';
 import DeliveryBoy from '../../models/superadmin-models/DeliveryBoy.js';
+import VendorOrder from '../../models/superadmin-models/VendorOrder.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 
 // Helper for CSV generation
@@ -615,6 +616,218 @@ export const getPaymentReconciliationReport = async (req, res, next) => {
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Payment reconciliation report fetched.', reportData);
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Report: Purchase vs Sales Demand Analytics (Product Stock Planning)
+ */
+export const getPurchaseVsSalesAnalytics = async (req, res, next) => {
+    try {
+        const { days = 7, godownId } = req.query;
+        const daysCount = Math.max(1, Math.min(7, parseInt(days) || 7));
+
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - (daysCount - 1));
+        startDate.setHours(0, 0, 0, 0);
+
+        const endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
+
+        // 1. Fetch all products with variants
+        const products = await Product.findAll({
+            include: [{ model: ProductVariant, as: 'variants' }],
+            order: [['createdAt', 'DESC']]
+        });
+
+        const metricsMap = new Map();
+
+        for (const p of products) {
+            const pName = typeof p.name === 'object' ? (p.name.en || p.name.gu || Object.values(p.name)[0] || 'Product') : String(p.name || 'Product');
+            for (const v of (p.variants || [])) {
+                const key = `${p.id}_${v.id}`;
+                metricsMap.set(key, {
+                    productId: p.id,
+                    variantId: v.id,
+                    productName: pName,
+                    variantVolume: v.volume || '-',
+                    unitLabel: v.unitLabel || 'Pcs',
+                    purchasedQty: 0,
+                    purchasedAmount: 0,
+                    soldQty: 0,
+                    salesAmount: 0,
+                    currentStock: 0,
+                    status: 'No Movement 💤'
+                });
+            }
+        }
+
+        // 2. Fetch Purchase Bills in date range
+        const pbWhere = { createdAt: { [Op.between]: [startDate, endDate] } };
+        if (godownId) pbWhere.godownId = godownId;
+
+        const purchaseBills = await PurchaseBill.findAll({ where: pbWhere });
+        for (const pb of purchaseBills) {
+            const items = Array.isArray(pb.items) ? pb.items : [];
+            for (const item of items) {
+                const key = `${item.productId}_${item.variantId}`;
+                const entry = metricsMap.get(key);
+                if (entry) {
+                    const qty = Number(item.qty || item.quantity || 0);
+                    const amount = Number(item.total || item.purchasePrice * qty || 0);
+                    entry.purchasedQty += qty;
+                    entry.purchasedAmount += amount;
+                }
+            }
+        }
+
+        // 3. Fetch Received Vendor Orders in date range
+        const voWhere = {
+            status: 'Received',
+            updatedAt: { [Op.between]: [startDate, endDate] }
+        };
+        const vendorOrders = await VendorOrder.findAll({ where: voWhere });
+        for (const vo of vendorOrders) {
+            const items = Array.isArray(vo.items) ? vo.items : [];
+            for (const item of items) {
+                const key = `${item.productId}_${item.variantId}`;
+                const entry = metricsMap.get(key);
+                if (entry) {
+                    const qty = Number(item.qty || item.quantity || 0);
+                    const amount = Number(item.price || item.estimatePrice || 0) * qty;
+                    entry.purchasedQty += qty;
+                    entry.purchasedAmount += amount;
+                }
+            }
+        }
+
+        // 4. Fetch Sales (Orders & OrderItems) in date range
+        const orderWhere = {
+            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+            createdAt: { [Op.between]: [startDate, endDate] }
+        };
+        if (godownId) orderWhere.godownId = godownId;
+
+        const salesItems = await OrderItem.findAll({
+            include: [{
+                model: Order,
+                as: 'order',
+                where: orderWhere,
+                attributes: ['id', 'godownId', 'createdAt']
+            }]
+        });
+
+        for (const sItem of salesItems) {
+            const key = `${sItem.productId}_${sItem.variantId}`;
+            const entry = metricsMap.get(key);
+            if (entry) {
+                const qty = Number(sItem.quantity || 0);
+                const amount = Number(sItem.totalPrice || (sItem.price * qty) || 0);
+                entry.soldQty += qty;
+                entry.salesAmount += amount;
+            }
+        }
+
+        // 5. Fetch Current Inventory Stock
+        const stockWhere = { status: 'Active' };
+        if (godownId) stockWhere.godownId = godownId;
+
+        const currentStocks = await InventoryStock.findAll({
+            where: stockWhere,
+            attributes: ['productId', 'variantId', [sequelize.fn('SUM', sequelize.col('totalBaseUnits')), 'totalStock']],
+            group: ['productId', 'variantId'],
+            raw: true
+        });
+
+        for (const st of currentStocks) {
+            const key = `${st.productId}_${st.variantId}`;
+            const entry = metricsMap.get(key);
+            if (entry) {
+                entry.currentStock = Number(st.totalStock || 0);
+            }
+        }
+
+        // 6. Calculate Demand Status for each entry
+        let totalPurchasedQty = 0;
+        let totalPurchasedAmount = 0;
+        let totalSoldQty = 0;
+        let totalSalesAmount = 0;
+
+        const reportList = Array.from(metricsMap.values()).map(e => {
+            totalPurchasedQty += e.purchasedQty;
+            totalPurchasedAmount += e.purchasedAmount;
+            totalSoldQty += e.soldQty;
+            totalSalesAmount += e.salesAmount;
+
+            let status = 'Balanced ✅';
+            if (e.soldQty > e.purchasedQty && e.soldQty > 0) {
+                status = 'High Velocity 🔥';
+            } else if (e.currentStock <= 5 && (e.soldQty > 0 || e.purchasedQty > 0)) {
+                status = 'Stock Deficit ⚠️';
+            } else if (e.soldQty === 0 && e.purchasedQty === 0) {
+                status = 'No Movement 💤';
+            }
+
+            return {
+                ...e,
+                purchasedAmount: Math.round(e.purchasedAmount * 100) / 100,
+                salesAmount: Math.round(e.salesAmount * 100) / 100,
+                status
+            };
+        });
+
+        const filteredList = reportList.filter(item => item.purchasedQty > 0 || item.soldQty > 0 || item.currentStock > 0);
+        filteredList.sort((a, b) => b.soldQty - a.soldQty || b.purchasedQty - a.purchasedQty);
+
+        const responsePayload = {
+            daysCount,
+            startDate: startDate.toISOString().split('T')[0],
+            endDate: endDate.toISOString().split('T')[0],
+            summary: {
+                totalPurchasedQty,
+                totalPurchasedAmount: Math.round(totalPurchasedAmount * 100) / 100,
+                totalSoldQty,
+                totalSalesAmount: Math.round(totalSalesAmount * 100) / 100,
+                totalProductsAnalyzed: filteredList.length
+            },
+            data: filteredList
+        };
+
+        if (req.query.format === 'excel') {
+            const excelRows = filteredList.map(item => ({
+                'Product Name': item.productName,
+                'Variant': item.variantVolume,
+                'Purchased Qty': item.purchasedQty,
+                'Purchased Value (₹)': item.purchasedAmount,
+                'Sold Qty': item.soldQty,
+                'Sales Revenue (₹)': item.salesAmount,
+                'Current Available Stock': item.currentStock,
+                'Stock Demand Status': item.status
+            }));
+            res.setHeader('Content-Type', 'application/vnd.ms-excel');
+            res.setHeader('Content-Disposition', `attachment; filename=purchase_vs_sales_last_${daysCount}_days.xls`);
+            return res.status(200).send(jsonToXls(excelRows));
+        }
+
+        if (req.query.format === 'csv') {
+            const csvRows = filteredList.map(item => ({
+                'Product Name': item.productName,
+                'Variant': item.variantVolume,
+                'Purchased Qty': item.purchasedQty,
+                'Purchased Value (₹)': item.purchasedAmount,
+                'Sold Qty': item.soldQty,
+                'Sales Revenue (₹)': item.salesAmount,
+                'Current Available Stock': item.currentStock,
+                'Stock Demand Status': item.status
+            }));
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', `attachment; filename=purchase_vs_sales_last_${daysCount}_days.csv`);
+            return res.status(200).send(jsonToCsv(csvRows));
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Purchase vs Sales analytics fetched successfully.', responsePayload);
     } catch (error) {
         next(error);
     }

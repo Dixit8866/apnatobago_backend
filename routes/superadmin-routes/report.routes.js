@@ -8,7 +8,8 @@ import {
     getPurchaseReport,
     getProductMasterReport,
     getPaymentCollectionReport,
-    getPaymentReconciliationReport
+    getPaymentReconciliationReport,
+    getPurchaseVsSalesAnalytics
 } from '../../controllers/admin/report.controller.js';
 
 const router = express.Router();
@@ -24,5 +25,6 @@ router.get('/purchase', getPurchaseReport);
 router.get('/products', getProductMasterReport);
 router.get('/payment-collection', getPaymentCollectionReport);
 router.get('/payment-reconciliation', getPaymentReconciliationReport);
+router.get('/purchase-vs-sales', getPurchaseVsSalesAnalytics);
 
 export default router;

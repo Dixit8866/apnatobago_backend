@@ -39,7 +39,7 @@ export const createVendor = async (req, res, next) => {
 
 export const getAllVendors = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status } = req.query;
+        const { page = 1, limit = 50, search = '', status, orderDay } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
         const searchWhere = {};
@@ -52,12 +52,31 @@ export const getAllVendors = async (req, res, next) => {
             ];
         }
 
+        if (orderDay && orderDay !== 'all' && orderDay !== 'All') {
+            const shortMap = {
+                'Sunday': 'Sun', 'Monday': 'Mon', 'Tuesday': 'Tue', 'Wednesday': 'Wed',
+                'Thursday': 'Thu', 'Friday': 'Fri', 'Saturday': 'Sat',
+                'Sun': 'Sunday', 'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday',
+                'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday'
+            };
+            const altDay = shortMap[orderDay];
+
+            const dayCondition = {
+                [Op.or]: [
+                    sequelize.where(sequelize.cast(sequelize.col('orderDays'), 'text'), { [Op.iLike]: `%${orderDay}%` }),
+                    ...(altDay ? [sequelize.where(sequelize.cast(sequelize.col('orderDays'), 'text'), { [Op.iLike]: `%${altDay}%` })] : [])
+                ]
+            };
+
+            searchWhere[Op.and] = [...(searchWhere[Op.and] || []), dayCondition];
+        }
+
         const where = { ...searchWhere };
         if (status) {
             where.status = status;
         }
 
-        // Parallel status counts (search-aware, not status-filtered, paranoid=false to include soft deleted if status counts require it, but since delete soft deletes them, we must check deleted count as paranoid false)
+        // Parallel status counts
         const [totalCount, activeCount, inactiveCount, deletedCount] = await Promise.all([
             Vendor.count({ where: searchWhere }),
             Vendor.count({ where: { ...searchWhere, status: 'Active' } }),
