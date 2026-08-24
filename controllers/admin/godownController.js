@@ -111,7 +111,26 @@ export const deleteGodown = async (req, res) => {
 
         const godownName = typeof godown.name === 'object' ? (godown.name.en || godown.name.gu || 'Godown') : String(godown.name || 'Godown');
 
-        await godown.destroy();
+        try {
+            await godown.destroy();
+        } catch (dbErr) {
+            if (dbErr.name === 'SequelizeForeignKeyConstraintError' || dbErr.code === '23503') {
+                await godown.update({ status: 'Inactive' });
+
+                logActivity(req, {
+                    module: 'Godown Management',
+                    action: 'DELETE',
+                    description: `Deactivated Godown "${godownName}" (has past stock transfers/records)`,
+                    metadata: { godownId: req.params.id }
+                });
+
+                return res.status(200).json({
+                    success: true,
+                    message: `Godown "${godownName}" contains historical stock transfer records, so its status was updated to Inactive.`
+                });
+            }
+            throw dbErr;
+        }
 
         logActivity(req, {
             module: 'Godown Management',
