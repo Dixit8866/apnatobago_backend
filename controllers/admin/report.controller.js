@@ -672,8 +672,12 @@ export const getPurchaseVsSalesAnalytics = async (req, res, next) => {
         for (const pb of purchaseBills) {
             const items = Array.isArray(pb.items) ? pb.items : [];
             for (const item of items) {
-                const key = `${item.productId}_${item.variantId}`;
-                const entry = metricsMap.get(key);
+                let entry = metricsMap.get(`${item.productId}_${item.variantId}`);
+                if (!entry && item.productId) {
+                    const pObj = products.find(p => p.id === item.productId);
+                    const firstVar = pObj?.variants?.[0];
+                    if (firstVar) entry = metricsMap.get(`${item.productId}_${firstVar.id}`);
+                }
                 if (entry) {
                     const qty = Number(item.qty || item.quantity || 0);
                     const amount = Number(item.total || item.purchasePrice * qty || 0);
@@ -692,8 +696,12 @@ export const getPurchaseVsSalesAnalytics = async (req, res, next) => {
         for (const vo of vendorOrders) {
             const items = Array.isArray(vo.items) ? vo.items : [];
             for (const item of items) {
-                const key = `${item.productId}_${item.variantId}`;
-                const entry = metricsMap.get(key);
+                let entry = metricsMap.get(`${item.productId}_${item.variantId}`);
+                if (!entry && item.productId) {
+                    const pObj = products.find(p => p.id === item.productId);
+                    const firstVar = pObj?.variants?.[0];
+                    if (firstVar) entry = metricsMap.get(`${item.productId}_${firstVar.id}`);
+                }
                 if (entry) {
                     const qty = Number(item.qty || item.quantity || 0);
                     const amount = Number(item.price || item.estimatePrice || 0) * qty;
@@ -720,8 +728,12 @@ export const getPurchaseVsSalesAnalytics = async (req, res, next) => {
         });
 
         for (const sItem of salesItems) {
-            const key = `${sItem.productId}_${sItem.variantId}`;
-            const entry = metricsMap.get(key);
+            let entry = metricsMap.get(`${sItem.productId}_${sItem.variantId}`);
+            if (!entry && sItem.productId) {
+                const pObj = products.find(p => p.id === sItem.productId);
+                const firstVar = pObj?.variants?.[0];
+                if (firstVar) entry = metricsMap.get(`${sItem.productId}_${firstVar.id}`);
+            }
             if (entry) {
                 const qty = Number(sItem.quantity || 0);
                 const amount = Number(sItem.totalPrice || (sItem.price * qty) || 0);
@@ -736,19 +748,26 @@ export const getPurchaseVsSalesAnalytics = async (req, res, next) => {
 
         const currentStocks = await InventoryStock.findAll({
             where: stockWhere,
-            attributes: ['productId', 'variantId', [sequelize.fn('SUM', sequelize.col('totalBaseUnits')), 'totalStock']],
-            group: ['productId', 'variantId'],
-            raw: false
+            attributes: ['productId', 'variantId', 'totalBaseUnits'],
+            raw: true
         });
 
         for (const st of currentStocks) {
-            const pId = st.productId || st.getDataValue('productId');
-            const vId = st.variantId || st.getDataValue('variantId');
-            const totalSt = Number(st.getDataValue('totalStock') || st.totalStock || 0);
-            const key = `${pId}_${vId}`;
-            const entry = metricsMap.get(key);
+            const pId = st.productId;
+            const vId = st.variantId;
+            const qty = Number(st.totalBaseUnits || 0);
+
+            if (!pId) continue;
+
+            let entry = metricsMap.get(`${pId}_${vId}`);
+            if (!entry) {
+                const pObj = products.find(p => p.id === pId);
+                const firstVar = pObj?.variants?.[0];
+                if (firstVar) entry = metricsMap.get(`${pId}_${firstVar.id}`);
+            }
+
             if (entry) {
-                entry.currentStock = totalSt;
+                entry.currentStock += qty;
             }
         }
 
