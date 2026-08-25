@@ -731,21 +731,24 @@ export const getPurchaseVsSalesAnalytics = async (req, res, next) => {
         }
 
         // 5. Fetch Current Inventory Stock
-        const stockWhere = { status: 'Active' };
+        const stockWhere = { status: { [Op.ne]: 'Deleted' } };
         if (godownId) stockWhere.godownId = godownId;
 
         const currentStocks = await InventoryStock.findAll({
             where: stockWhere,
             attributes: ['productId', 'variantId', [sequelize.fn('SUM', sequelize.col('totalBaseUnits')), 'totalStock']],
             group: ['productId', 'variantId'],
-            raw: true
+            raw: false
         });
 
         for (const st of currentStocks) {
-            const key = `${st.productId}_${st.variantId}`;
+            const pId = st.productId || st.getDataValue('productId');
+            const vId = st.variantId || st.getDataValue('variantId');
+            const totalSt = Number(st.getDataValue('totalStock') || st.totalStock || 0);
+            const key = `${pId}_${vId}`;
             const entry = metricsMap.get(key);
             if (entry) {
-                entry.currentStock = Number(st.totalStock || 0);
+                entry.currentStock = totalSt;
             }
         }
 

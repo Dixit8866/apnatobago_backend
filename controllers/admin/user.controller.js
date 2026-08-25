@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown, PartyBalanceLog } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -512,6 +512,97 @@ export const assignUserGodown = async (req, res, next) => {
             fullname: user.fullname,
             godownId: user.godownId,
         });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Adjust party balance manually (Jama / Baki)
+ * @route   POST /api/admin/users/:id/balance-adjustment
+ * @access  Private (Admin)
+ */
+export const adjustPartyBalance = async (req, res, next) => {
+    const t = await User.sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const { amount, type, note, orderId } = req.body; // type: 'JAMA' (+ credit) | 'BAKI' (- debit)
+
+        const numAmount = Math.abs(parseFloat(amount) || 0);
+        if (!numAmount || numAmount <= 0) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid amount greater than 0.');
+        }
+
+        if (type !== 'JAMA' && type !== 'BAKI') {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Type must be JAMA or BAKI.');
+        }
+
+        const user = await User.findByPk(id, { transaction: t });
+        if (!user) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Party not found.');
+        }
+
+        const prevBalance = parseFloat(user.walletBalance || 0);
+        const changeDelta = type === 'JAMA' ? numAmount : -numAmount;
+        const newBal = prevBalance + changeDelta;
+
+        await user.update({ walletBalance: newBal }, { transaction: t });
+
+        const adminName = req.user ? (req.user.name || req.user.fullname || 'Admin') : 'Admin';
+        const adminId = req.user ? req.user.id : null;
+
+        const logEntry = await PartyBalanceLog.create({
+            userId: user.id,
+            orderId: orderId || null,
+            type,
+            amount: numAmount,
+            previousBalance: prevBalance,
+            newBalance: newBal,
+            note: note || (type === 'JAMA' ? `Manual Jama (+₹${numAmount})` : `Manual Baki (-₹${numAmount})`),
+            createdById: adminId,
+            createdByName: adminName
+        }, { transaction: t });
+
+        await t.commit();
+
+        logActivity(req, {
+            module: 'Party Management',
+            action: 'UPDATE',
+            description: `Adjusted balance for "${user.fullname}": ${type} ₹${numAmount}. New Balance: ${newBal >= 0 ? 'Jama' : 'Baki'} ₹${Math.abs(newBal)}`,
+            metadata: { userId: user.id, type, amount: numAmount, newBalance: newBal }
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `Party balance updated (${type} ₹${numAmount}).`, {
+            user: {
+                id: user.id,
+                fullname: user.fullname,
+                walletBalance: newBal
+            },
+            log: logEntry
+        });
+    } catch (error) {
+        if (t) await t.rollback();
+        next(error);
+    }
+};
+
+/**
+ * @desc    Get party balance transaction history
+ * @route   GET /api/admin/users/:id/balance-logs
+ * @access  Private (Admin)
+ */
+export const getPartyBalanceLogs = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const logs = await PartyBalanceLog.findAll({
+            where: { userId: id },
+            order: [['createdAt', 'DESC']],
+            limit: 100
+        });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Balance logs fetched.', logs);
     } catch (error) {
         next(error);
     }

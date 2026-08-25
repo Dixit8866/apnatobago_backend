@@ -11,7 +11,8 @@ import {
     User,
     Godown,
     Product,
-    DeliveryBoy
+    DeliveryBoy,
+    PartyBalanceLog
 } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -577,6 +578,281 @@ export const approveAllSalesReturnByOrder = async (req, res) => {
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Approve All Sales Returns Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get delivered orders for a specific party for return bill selection dropdown
+ * @route   GET /api/admin/orders/party/:userId/orders-for-return
+ * @access  Private (Admin)
+ */
+export const getPartyOrdersForReturn = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { search } = req.query;
+
+        const where = { userId };
+        if (search) {
+            where[Op.or] = [
+                { orderId: { [Op.iLike]: `%${search}%` } }
+            ];
+        }
+
+        const orders = await Order.findAll({
+            where,
+            include: [
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    include: [
+                        {
+                            model: Product,
+                            as: 'product',
+                            attributes: ['id', 'name', 'thumbnail']
+                        },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'image', 'baseUnitsPerPack', 'innerUnitLabel', 'baseUnitLabel']
+                        }
+                    ]
+                }
+            ],
+            order: [['createdAt', 'DESC']],
+            limit: 50
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Party orders fetched for sales return.", orders);
+    } catch (error) {
+        logger.error(`[Get Party Orders For Return Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Create Direct Admin Sales Return with Good/Damaged Condition and Party Jama Credit
+ * @route   POST /api/admin/orders/sales-returns/direct
+ * @access  Private (Admin)
+ */
+export const createAdminSalesReturn = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { orderId, items, condition: globalCondition, reason: globalReason } = req.body;
+
+        if (!orderId || !Array.isArray(items) || items.length === 0) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Required fields: orderId and non-empty items array are required.");
+        }
+
+        // Find Order
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(orderId);
+        const orderWhere = isUuid ? { id: orderId } : { orderId: orderId };
+        const order = await Order.findOne({ where: orderWhere, transaction: t });
+
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const user = await User.findByPk(order.userId, { transaction: t });
+        if (!user) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Customer / Party not found for this order.");
+        }
+
+        let totalReturnAmount = 0;
+        const salesReturnEntries = [];
+        const actorName = req.user ? (req.user.name || req.user.fullname || 'Admin') : 'Admin';
+
+        for (const item of items) {
+            const { productId, variantId, quantity, price, sellUnit, condition: itemCondition, reason: itemReason } = item;
+            const returnQty = parseFloat(quantity || 0);
+            const itemPrice = parseFloat(price || 0);
+
+            if (!productId || !variantId || returnQty <= 0) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Each return item must have productId, variantId, and quantity > 0.");
+            }
+
+            const variant = await ProductVariant.findByPk(variantId, { transaction: t });
+            if (!variant) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant ${variantId} not found.`);
+            }
+
+            const orderItem = await OrderItem.findOne({
+                where: { orderId: order.id, productId, variantId },
+                transaction: t
+            });
+
+            if (!orderItem) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Item not found in order #${order.orderId}.`);
+            }
+
+            const orderedQty = parseFloat(orderItem.quantity);
+            if (returnQty > orderedQty) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Return quantity (${returnQty}) exceeds ordered quantity (${orderedQty}).`);
+            }
+
+            const returnAmt = returnQty * itemPrice;
+            totalReturnAmount += returnAmt;
+
+            const itemCond = itemCondition || globalCondition || 'GOOD'; // 'GOOD' | 'DAMAGED'
+            const itemNoteReason = itemReason || globalReason || 'Customer Return';
+            const unitPrefix = (sellUnit || orderItem.sellUnit) === 'Inner' ? '[Inner]' : '[Base]';
+
+            // Create Sales Return Record with Approved status
+            const salesReturn = await SalesReturn.create({
+                orderId: order.id,
+                userId: order.userId,
+                deliveryBoyId: req.user?.id || null,
+                productId,
+                variantId,
+                volumeId: variant.volumeId,
+                quantity: returnQty,
+                price: itemPrice,
+                returnAmount: returnAmt,
+                reason: `${unitPrefix} ${itemNoteReason}`,
+                condition: itemCond,
+                creditProcessed: true,
+                status: 'Approved'
+            }, { transaction: t });
+
+            salesReturnEntries.push(salesReturn);
+
+            // Handle Stock Inventory Adjustment based on Condition
+            const bUPP = Number(variant.baseUnitsPerPack || 1);
+            const isInner = (sellUnit || orderItem.sellUnit) === 'Inner';
+            const baseUnitsToRestore = Math.round(isInner ? returnQty : returnQty * bUPP);
+
+            // Find Godown target
+            let targetGodownId = order.godownId;
+            if (!targetGodownId && user.postcode) {
+                const godown = await Godown.findOne({
+                    where: { pincodes: { [Op.contains]: [user.postcode] } },
+                    transaction: t
+                });
+                if (godown) targetGodownId = godown.id;
+            }
+            if (!targetGodownId) {
+                const godown = await Godown.findOne({ transaction: t });
+                if (godown) targetGodownId = godown.id;
+            }
+
+            if (targetGodownId) {
+                let targetStock = await InventoryStock.findOne({
+                    where: { productId, variantId, godownId: targetGodownId },
+                    transaction: t
+                });
+
+                if (!targetStock) {
+                    targetStock = await InventoryStock.create({
+                        productId,
+                        variantId,
+                        godownId: targetGodownId,
+                        primaryUnitId: variant.baseUnitLabel || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
+                        totalBaseUnits: 0,
+                        status: 'Active'
+                    }, { transaction: t });
+                }
+
+                if (itemCond === 'GOOD') {
+                    // Restore stock for saleable inventory
+                    await targetStock.update({
+                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
+                    }, { transaction: t });
+
+                    await InventoryTransaction.create({
+                        stockId: targetStock.id,
+                        productId,
+                        variantId,
+                        godownId: targetGodownId,
+                        type: 'SALES_RETURN',
+                        primaryUnitId: targetStock.primaryUnitId,
+                        secondaryUnitId: targetStock.secondaryUnitId,
+                        secondaryPerPrimary: targetStock.secondaryPerPrimary,
+                        totalQtyBaseUnits: baseUnitsToRestore,
+                        balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
+                        note: `Sales Return Restocked (Good) for Order #${order.orderId}`,
+                        createdBy: actorName
+                    }, { transaction: t });
+                } else {
+                    // Log Damaged Loss Transaction without increasing sellable stock
+                    await InventoryTransaction.create({
+                        stockId: targetStock.id,
+                        productId,
+                        variantId,
+                        godownId: targetGodownId,
+                        type: 'DAMAGED_RETURN',
+                        primaryUnitId: targetStock.primaryUnitId,
+                        secondaryUnitId: targetStock.secondaryUnitId,
+                        secondaryPerPrimary: targetStock.secondaryPerPrimary,
+                        totalQtyBaseUnits: baseUnitsToRestore,
+                        balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
+                        note: `Sales Return Damaged Loss (Scrap) for Order #${order.orderId}`,
+                        createdBy: actorName
+                    }, { transaction: t });
+                }
+            }
+
+            // Adjust Order Item
+            const remainingQty = orderedQty - returnQty;
+            if (remainingQty <= 0) {
+                await orderItem.destroy({ transaction: t });
+            } else {
+                await orderItem.update({ quantity: remainingQty }, { transaction: t });
+            }
+        }
+
+        // Recalculate Order Total Amount
+        const remainingItems = await OrderItem.findAll({
+            where: { orderId: order.id },
+            transaction: t
+        });
+
+        let newSubtotal = 0;
+        for (const item of remainingItems) {
+            newSubtotal += parseFloat(item.price) * parseFloat(item.quantity);
+        }
+
+        const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
+        const newTotalAmount = roundTotal(newSubtotal + deliveryCharge);
+        order.totalAmount = newTotalAmount;
+        order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
+        await order.save({ transaction: t });
+
+        // Update Party Wallet Balance (Jama Credit +totalReturnAmount)
+        const prevBal = parseFloat(user.walletBalance || 0);
+        const newBal = prevBal + totalReturnAmount;
+        await user.update({ walletBalance: newBal }, { transaction: t });
+
+        // Create Party Balance Log Entry
+        await PartyBalanceLog.create({
+            userId: user.id,
+            orderId: order.id,
+            type: 'JAMA',
+            amount: totalReturnAmount,
+            previousBalance: prevBal,
+            newBalance: newBal,
+            note: `Sales Return Jama Credit (+₹${totalReturnAmount.toFixed(2)}) for Order #${order.orderId}`,
+            createdById: req.user?.id || null,
+            createdByName: actorName
+        }, { transaction: t });
+
+        await t.commit();
+
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, `Sales return created successfully. ₹${totalReturnAmount.toFixed(2)} Jama credited to ${user.fullname}'s wallet.`, {
+            salesReturns: salesReturnEntries,
+            partyWalletBalance: newBal,
+            newOrderTotal: newTotalAmount
+        });
+
+    } catch (error) {
+        if (t) await t.rollback();
+        logger.error(`[Create Admin Sales Return Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

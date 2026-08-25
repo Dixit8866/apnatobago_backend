@@ -38,6 +38,7 @@ import AdminNotification from './superadmin-models/AdminNotification.js';
 import BusinessProfile from './user/BusinessProfile.js';
 import HelpSupport from './user/HelpSupport.js';
 import OrderPayment from './user/OrderPayment.js';
+import PartyBalanceLog from './user/PartyBalanceLog.js';
 import SalesReturn from './superadmin-models/SalesReturn.js';
 import RouteCategory from './superadmin-models/RouteCategory.js';
 import RouteSection from './superadmin-models/RouteSection.js';
@@ -213,6 +214,10 @@ Cart.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 User.hasMany(PartyCalling, { foreignKey: 'userId', as: 'calls' });
 PartyCalling.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
+// User -> PartyBalanceLog Associations
+User.hasMany(PartyBalanceLog, { foreignKey: 'userId', as: 'balanceLogs' });
+PartyBalanceLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
 Product.hasMany(Cart, { foreignKey: 'productId', as: 'cartItems' });
 Cart.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 
@@ -305,9 +310,16 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Category tables update failed:', e.message); }
 
         try {
-            // Add blockcredit to users table if missing
+            // Add blockcredit and walletBalance to users table if missing
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "blockcredit" BOOLEAN DEFAULT false');
-        } catch (e) { console.log('[Migration Warning] Users blockcredit update failed:', e.message); }
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "walletBalance" DECIMAL(12, 2) DEFAULT 0.00');
+        } catch (e) { console.log('[Migration Warning] Users blockcredit/walletBalance update failed:', e.message); }
+
+        try {
+            await PartyBalanceLog.sync();
+            await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "condition" VARCHAR(50) DEFAULT \'GOOD\'');
+            await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "creditProcessed" BOOLEAN DEFAULT true');
+        } catch (e) { console.log('[Migration Warning] PartyBalanceLog / SalesReturn sync failed:', e.message); }
 
         try {
             // Drop NOT NULL constraints from email and password
@@ -652,6 +664,7 @@ export {
     BusinessProfile,
     HelpSupport,
     OrderPayment,
+    PartyBalanceLog,
     SalesReturn,
     RouteCategory,
     RouteSection,

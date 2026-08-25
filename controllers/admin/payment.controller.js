@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { OrderPayment, Order, User, DeliveryBoy, BankSetting, BusinessProfile } from '../../models/index.js';
+import { OrderPayment, Order, User, DeliveryBoy, BankSetting, BusinessProfile, PartyBalanceLog, SalesReturn } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -256,6 +256,176 @@ export const updatePaymentSubmission = async (req, res) => {
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Admin Update Payment Submission Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get Daily Reconciliation Report (Bank Breakdown, Pending Dues List, Difference Explanation)
+ * @route   GET /api/admin/payments/daily-reconciliation-report
+ * @access  Private (Admin)
+ */
+export const getDailyReconciliationReport = async (req, res) => {
+    try {
+        const { date, startDate, endDate, deliveryBoyId } = req.query;
+
+        // Build date range
+        let dateFilter = {};
+        if (startDate || endDate) {
+            if (startDate) {
+                const start = new Date(startDate);
+                start.setHours(0, 0, 0, 0);
+                dateFilter[Op.gte] = start;
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                dateFilter[Op.lte] = end;
+            }
+        } else {
+            const targetDate = date ? new Date(date) : new Date();
+            const startOfDay = new Date(targetDate);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(targetDate);
+            endOfDay.setHours(23, 59, 59, 999);
+            dateFilter = { [Op.between]: [startOfDay, endOfDay] };
+        }
+
+        const paymentWhere = { createdAt: dateFilter };
+        if (deliveryBoyId) paymentWhere.deliveryBoyId = deliveryBoyId;
+
+        // 1. Fetch Online Payments with Bank Setting Breakdown
+        const onlinePayments = await OrderPayment.findAll({
+            where: { ...paymentWhere, paymentMethod: 'ONLINE' },
+            include: [
+                {
+                    model: BankSetting,
+                    as: 'bankAccount',
+                    attributes: ['id', 'bankName', 'accountName', 'accountNumber', 'branchName']
+                }
+            ]
+        });
+
+        const bankBreakdownMap = {};
+        let totalOnlineSum = 0;
+
+        onlinePayments.forEach(p => {
+            const amt = parseFloat(p.amount || 0);
+            totalOnlineSum += amt;
+            const bankId = p.bankSettingId || 'UNASSIGNED';
+            const bankName = p.bankAccount ? `${p.bankAccount.bankName} (${p.bankAccount.accountNumber || ''})` : (p.onlineType || 'General Online / UPI');
+
+            if (!bankBreakdownMap[bankId]) {
+                bankBreakdownMap[bankId] = {
+                    bankSettingId: p.bankSettingId,
+                    bankName,
+                    accountName: p.bankAccount?.accountName || '-',
+                    accountNumber: p.bankAccount?.accountNumber || '-',
+                    branchName: p.bankAccount?.branchName || '-',
+                    onlineType: p.onlineType || 'Online',
+                    totalAmount: 0,
+                    count: 0
+                };
+            }
+            bankBreakdownMap[bankId].totalAmount += amt;
+            bankBreakdownMap[bankId].count += 1;
+        });
+
+        const bankBreakdownList = Object.values(bankBreakdownMap);
+
+        // 2. Fetch Pending Due Orders for the period
+        const orderWhere = { createdAt: dateFilter, dueAmount: { [Op.gt]: 0 } };
+        const pendingDueOrders = await Order.findAll({
+            where: orderWhere,
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['shopName', 'shopAddress', 'postcode']
+                        }
+                    ]
+                }
+            ],
+            order: [['dueAmount', 'DESC']]
+        });
+
+        let totalPendingDueSum = 0;
+        pendingDueOrders.forEach(o => {
+            totalPendingDueSum += parseFloat(o.dueAmount || 0);
+        });
+
+        // 3. Calculate Daily Reconciliation Breakdown
+        const cashPayments = await OrderPayment.findAll({
+            where: { ...paymentWhere, paymentMethod: 'CASH' }
+        });
+        let totalCashSum = 0;
+        cashPayments.forEach(p => { totalCashSum += parseFloat(p.amount || 0); });
+
+        const totalReceived = totalCashSum + totalOnlineSum;
+
+        // Fetch Today's Delivered / Completed Orders Total
+        const deliveredOrders = await Order.findAll({
+            where: {
+                createdAt: dateFilter,
+                orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+            }
+        });
+
+        let todayDeliveredOrdersTotal = 0;
+        deliveredOrders.forEach(o => { todayDeliveredOrdersTotal += parseFloat(o.totalAmount || 0); });
+
+        // Sales returns created today
+        const salesReturnsToday = await SalesReturn.findAll({
+            where: { createdAt: dateFilter }
+        });
+        let salesReturnsTotal = 0;
+        salesReturnsToday.forEach(sr => { salesReturnsTotal += parseFloat(sr.returnAmount || 0); });
+
+        // Jama Wallet logs created today
+        const jamaLogsToday = await PartyBalanceLog.findAll({
+            where: { createdAt: dateFilter, type: 'JAMA' }
+        });
+        let walletJamaTotal = 0;
+        jamaLogsToday.forEach(log => { walletJamaTotal += parseFloat(log.amount || 0); });
+
+        const netDifference = totalReceived - todayDeliveredOrdersTotal;
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Daily reconciliation report fetched.", {
+            totalCashCollect: totalCashSum,
+            totalOnlineCollect: totalOnlineSum,
+            totalReceived,
+            totalPendingDue: totalPendingDueSum,
+            todayDeliveredOrdersTotal,
+            netDifference,
+            bankBreakdownList,
+            pendingDueOrders: pendingDueOrders.map(o => ({
+                id: o.id,
+                orderId: o.orderId,
+                totalAmount: o.totalAmount,
+                dueAmount: o.dueAmount,
+                paidAmount: o.paidAmount,
+                createdAt: o.createdAt,
+                customerName: o.user?.businessProfile?.shopName || o.user?.fullname || o.customerName,
+                customerPhone: o.user?.number || o.customerNumber,
+                partyWalletBalance: o.user?.walletBalance || 0
+            })),
+            reconciliationExplanation: {
+                todayDeliveredOrdersTotal,
+                totalReceived,
+                netDifference,
+                salesReturnsTotal,
+                walletJamaTotal,
+                pendingDuesTotal: totalPendingDueSum
+            }
+        });
+
+    } catch (error) {
+        logger.error(`[Get Daily Reconciliation Report Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

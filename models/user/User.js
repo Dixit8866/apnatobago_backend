@@ -49,6 +49,10 @@ const User = sequelize.define('User', {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
     },
+    walletBalance: {
+        type: DataTypes.DECIMAL(12, 2),
+        defaultValue: 0.00,
+    },
     applevel: {
         type: DataTypes.UUID,
         allowNull: true,

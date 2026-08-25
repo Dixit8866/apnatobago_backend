@@ -17,7 +17,7 @@ import {
     clearUserCart,
     getCustomerPaymentsReport
 } from '../../controllers/admin/order.controller.js';
-import { getSalesReturns, approveSalesReturn, approveAllSalesReturnByOrder } from '../../controllers/common/salesReturn.controller.js';
+import { getSalesReturns, approveSalesReturn, approveAllSalesReturnByOrder, getPartyOrdersForReturn, createAdminSalesReturn } from '../../controllers/common/salesReturn.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
@@ -28,6 +28,8 @@ router.get('/user-carts', protect, getUserCarts);
 router.delete('/user-carts/clear/:userId', protect, clearUserCart);
 router.delete('/user-carts/:cartId', protect, deleteUserCartItem);
 router.get('/sales-returns', protect, getSalesReturns);
+router.post('/sales-returns/direct', protect, createAdminSalesReturn);
+router.get('/party/:userId/orders-for-return', protect, getPartyOrdersForReturn);
 router.post('/merge', protect, mergeOrders);
 router.get('/:id/mergeable', protect, getMergeableOrders);
 

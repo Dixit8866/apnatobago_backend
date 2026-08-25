@@ -52,6 +52,14 @@ const SalesReturn = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
         },
+        condition: {
+            type: DataTypes.STRING, // 'GOOD' (Restocked) | 'DAMAGED' (Loss/Scrap)
+            defaultValue: 'GOOD',
+        },
+        creditProcessed: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: true,
+        },
         status: {
             type: DataTypes.STRING,
             defaultValue: 'Approved',
