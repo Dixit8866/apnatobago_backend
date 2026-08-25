@@ -229,6 +229,31 @@ export const verifyRazorpayPayment = async (req, res) => {
                 logger.info(`[Delivery Razorpay Verify]: Order ${order.id} updated with payment ${razorpayPaymentId}. New Due: ${due}`);
             }
 
+            if (remainingOnline > 0 && orders[0]?.userId) {
+                const user = await User.findByPk(orders[0].userId);
+                if (user) {
+                    const prevBal = parseFloat(user.walletBalance || 0);
+                    const newBal = prevBal + remainingOnline;
+                    await user.update({ walletBalance: newBal });
+
+                    const PartyBalanceLog = Order.sequelize.models.PartyBalanceLog;
+                    if (PartyBalanceLog) {
+                        await PartyBalanceLog.create({
+                            userId: user.id,
+                            orderId: orders[0].id,
+                            type: 'JAMA',
+                            amount: remainingOnline,
+                            previousBalance: prevBal,
+                            newBalance: newBal,
+                            note: `Online Overpayment (+₹${remainingOnline.toFixed(2)} Jama)`,
+                            createdById: deliveryBoyId,
+                            createdByName: req.user ? req.user.name : 'Delivery Boy'
+                        });
+                    }
+                    logger.info(`[Delivery Razorpay Verify]: Credited excess online payment of ₹${remainingOnline} to party balance (Jama) for user ${user.id}`);
+                }
+            }
+
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment verified successfully.", { verified: true });
         } else {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid payment signature.");

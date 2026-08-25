@@ -1021,7 +1021,33 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             }, { transaction: t });
         }
 
-        if (user) {
+        // Handle Excess Payment / Overpayment -> Automatically Credit to Party Balance (Jama)
+        const excessAmount = remainingCash + remainingOnline;
+        if (excessAmount > 0 && userId) {
+            if (!user) user = await User.findByPk(userId, { transaction: t });
+            if (user) {
+                const prevBalance = parseFloat(user.walletBalance || 0);
+                const newBal = prevBalance + excessAmount;
+                user.walletBalance = newBal;
+                await user.save({ transaction: t });
+
+                const PartyBalanceLog = OrderAssignment.sequelize.models.PartyBalanceLog;
+                if (PartyBalanceLog) {
+                    await PartyBalanceLog.create({
+                        userId: user.id,
+                        orderId: assignment.orderId,
+                        type: 'JAMA',
+                        amount: excessAmount,
+                        previousBalance: prevBalance,
+                        newBalance: newBal,
+                        note: `Overpayment for Order #${assignment.order?.orderId || assignment.orderId} (+₹${excessAmount.toFixed(2)} Jama)`,
+                        createdById: deliveryBoyId,
+                        createdByName: req.user ? req.user.name : 'Delivery Boy'
+                    }, { transaction: t });
+                }
+                logger.info(`[Complete Order Settle]: Credited excess overpayment of ₹${excessAmount} to party balance (Jama) for user ${user.id}`);
+            }
+        } else if (user) {
             await user.save({ transaction: t });
         }
 

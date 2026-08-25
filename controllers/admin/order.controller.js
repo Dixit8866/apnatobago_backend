@@ -373,7 +373,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -967,7 +967,8 @@ export const updateOrderStatus = async (req, res) => {
             const currentPaid = parseFloat(order.paidAmount || 0);
             const total = parseFloat(order.totalAmount || 0);
             const addedReal = cash + online;
-            const newPaid = Math.min(total, currentPaid + addedReal);
+            const totalReceived = currentPaid + addedReal;
+            const newPaid = Math.min(total, totalReceived);
 
             order.paidAmount = newPaid.toFixed(2);
             const newDue = Math.max(0, total - newPaid - credit);
@@ -978,11 +979,35 @@ export const updateOrderStatus = async (req, res) => {
             } else if (newPaid > 0) {
                 order.paymentStatus = 'Partial';
             }
+
+            // Check if there is an excess overpayment over total bill amount -> Credit to Party Balance (Jama)
+            if (totalReceived > total && order.userId) {
+                const excess = totalReceived - total;
+                const user = await User.findByPk(order.userId);
+                if (user) {
+                    const prevBal = parseFloat(user.walletBalance || 0);
+                    const newBal = prevBal + excess;
+                    await user.update({ walletBalance: newBal });
+
+                    await PartyBalanceLog.create({
+                        userId: user.id,
+                        orderId: order.id,
+                        type: 'JAMA',
+                        amount: excess,
+                        previousBalance: prevBal,
+                        newBalance: newBal,
+                        note: `Overpayment for Order #${order.orderId} (+₹${excess.toFixed(2)} Jama)`,
+                        createdById: req.user ? req.user.id : null,
+                        createdByName: req.user ? (req.user.name || req.user.fullname) : 'Admin'
+                    });
+                    logger.info(`[Admin Order Payment]: Credited excess overpayment of ₹${excess} to party balance (Jama) for user ${user.id}`);
+                }
+            }
         } else if (newPaidAmount !== undefined) {
             const total = parseFloat(order.totalAmount);
             const paid = parseFloat(newPaidAmount);
 
-            order.paidAmount = paid;
+            order.paidAmount = Math.min(total, paid);
             order.dueAmount = Math.max(0, total - paid);
 
             if (paid >= total) {
@@ -991,6 +1016,29 @@ export const updateOrderStatus = async (req, res) => {
                 order.paymentStatus = 'Partial';
             } else {
                 order.paymentStatus = 'Pending';
+            }
+
+            if (paid > total && order.userId) {
+                const excess = paid - total;
+                const user = await User.findByPk(order.userId);
+                if (user) {
+                    const prevBal = parseFloat(user.walletBalance || 0);
+                    const newBal = prevBal + excess;
+                    await user.update({ walletBalance: newBal });
+
+                    await PartyBalanceLog.create({
+                        userId: user.id,
+                        orderId: order.id,
+                        type: 'JAMA',
+                        amount: excess,
+                        previousBalance: prevBal,
+                        newBalance: newBal,
+                        note: `Overpayment for Order #${order.orderId} (+₹${excess.toFixed(2)} Jama)`,
+                        createdById: req.user ? req.user.id : null,
+                        createdByName: req.user ? (req.user.name || req.user.fullname) : 'Admin'
+                    });
+                    logger.info(`[Admin Order Payment]: Credited excess overpayment of ₹${excess} to party balance (Jama) for user ${user.id}`);
+                }
             }
         } else if (paymentStatus) {
             const validPaymentStatuses = ['Pending', 'Paid', 'Partial', 'Failed', 'Refunded'];
