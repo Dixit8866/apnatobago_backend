@@ -977,31 +977,6 @@ export const updateOrderStatus = async (req, res) => {
             if (newDue <= 1e-5) {
                 order.paymentStatus = 'Paid';
             } else if (newPaid > 0) {
-                order.paymentStatus = 'Partial';
-            }
-
-            // Check if there is an excess overpayment over total bill amount -> Credit to Party Balance (Jama)
-            if (totalReceived > total && order.userId) {
-                const excess = totalReceived - total;
-                const user = await User.findByPk(order.userId);
-                if (user) {
-                    const prevBal = parseFloat(user.walletBalance || 0);
-                    const newBal = prevBal + excess;
-                    await user.update({ walletBalance: newBal });
-
-                    await PartyBalanceLog.create({
-                        userId: user.id,
-                        orderId: order.id,
-                        type: 'JAMA',
-                        amount: excess,
-                        previousBalance: prevBal,
-                        newBalance: newBal,
-                        note: `Overpayment for Order #${order.orderId} (+₹${excess.toFixed(2)} Jama)`,
-                        createdById: req.user ? req.user.id : null,
-                        createdByName: req.user ? (req.user.name || req.user.fullname) : 'Admin'
-                    });
-                    logger.info(`[Admin Order Payment]: Credited excess overpayment of ₹${excess} to party balance (Jama) for user ${user.id}`);
-                }
             }
         } else if (newPaidAmount !== undefined) {
             const total = parseFloat(order.totalAmount);
@@ -1016,29 +991,6 @@ export const updateOrderStatus = async (req, res) => {
                 order.paymentStatus = 'Partial';
             } else {
                 order.paymentStatus = 'Pending';
-            }
-
-            if (paid > total && order.userId) {
-                const excess = paid - total;
-                const user = await User.findByPk(order.userId);
-                if (user) {
-                    const prevBal = parseFloat(user.walletBalance || 0);
-                    const newBal = prevBal + excess;
-                    await user.update({ walletBalance: newBal });
-
-                    await PartyBalanceLog.create({
-                        userId: user.id,
-                        orderId: order.id,
-                        type: 'JAMA',
-                        amount: excess,
-                        previousBalance: prevBal,
-                        newBalance: newBal,
-                        note: `Overpayment for Order #${order.orderId} (+₹${excess.toFixed(2)} Jama)`,
-                        createdById: req.user ? req.user.id : null,
-                        createdByName: req.user ? (req.user.name || req.user.fullname) : 'Admin'
-                    });
-                    logger.info(`[Admin Order Payment]: Credited excess overpayment of ₹${excess} to party balance (Jama) for user ${user.id}`);
-                }
             }
         } else if (paymentStatus) {
             const validPaymentStatuses = ['Pending', 'Paid', 'Partial', 'Failed', 'Refunded'];

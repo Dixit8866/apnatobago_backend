@@ -526,7 +526,52 @@ export const adjustPartyBalance = async (req, res, next) => {
     const t = await User.sequelize.transaction();
     try {
         const { id } = req.params;
-        const { amount, type, note, orderId } = req.body; // type: 'JAMA' (+ credit) | 'BAKI' (- debit)
+        const { amount, targetBalance, type, note, orderId } = req.body; // type: 'JAMA' | 'BAKI' | 'SET'
+
+        const user = await User.findByPk(id, { transaction: t });
+        if (!user) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Party not found.');
+        }
+
+        const prevBalance = parseFloat(user.walletBalance || 0);
+
+        if (type === 'SET') {
+            const rawTarget = targetBalance !== undefined ? targetBalance : amount;
+            const targetBal = parseFloat(rawTarget);
+            if (isNaN(targetBal)) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please enter a valid target balance.');
+            }
+
+            const diff = targetBal - prevBalance;
+            const logType = diff >= 0 ? 'JAMA' : 'BAKI';
+            const logAmount = Math.abs(diff);
+
+            await user.update({ walletBalance: targetBal }, { transaction: t });
+
+            const adminName = req.user ? (req.user.name || req.user.fullname || 'Admin') : 'Admin';
+            const adminId = req.user ? req.user.id : null;
+
+            const logEntry = await PartyBalanceLog.create({
+                userId: user.id,
+                orderId: orderId || null,
+                type: logType,
+                amount: logAmount,
+                previousBalance: prevBalance,
+                newBalance: targetBal,
+                note: note || `Balance directly edited/corrected from ₹${prevBalance.toFixed(2)} to ₹${targetBal.toFixed(2)}`,
+                createdById: adminId,
+                createdByName: adminName
+            }, { transaction: t });
+
+            await t.commit();
+
+            return sendSuccessResponse(res, HTTP_STATUS.OK, `Party balance edited directly to ₹${targetBal.toFixed(2)}.`, {
+                user: { id: user.id, fullname: user.fullname, walletBalance: targetBal },
+                log: logEntry
+            });
+        }
 
         const numAmount = Math.abs(parseFloat(amount) || 0);
         if (!numAmount || numAmount <= 0) {
@@ -536,16 +581,9 @@ export const adjustPartyBalance = async (req, res, next) => {
 
         if (type !== 'JAMA' && type !== 'BAKI') {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Type must be JAMA or BAKI.');
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Type must be JAMA, BAKI, or SET.');
         }
 
-        const user = await User.findByPk(id, { transaction: t });
-        if (!user) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Party not found.');
-        }
-
-        const prevBalance = parseFloat(user.walletBalance || 0);
         const changeDelta = type === 'JAMA' ? numAmount : -numAmount;
         const newBal = prevBalance + changeDelta;
 
@@ -604,6 +642,41 @@ export const getPartyBalanceLogs = async (req, res, next) => {
         });
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Balance logs fetched.', logs);
     } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Delete/revert a party balance log entry and update party walletBalance
+ * @route   DELETE /api/admin/users/balance-logs/:logId
+ * @access  Private (Admin)
+ */
+export const deletePartyBalanceLog = async (req, res, next) => {
+    const t = await User.sequelize.transaction();
+    try {
+        const { logId } = req.params;
+        const log = await PartyBalanceLog.findByPk(logId, { transaction: t });
+        if (!log) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Balance log entry not found.');
+        }
+
+        const user = await User.findByPk(log.userId, { transaction: t });
+        if (user) {
+            const currentBal = parseFloat(user.walletBalance || 0);
+            const logAmt = parseFloat(log.amount || 0);
+            const revertDelta = log.type === 'JAMA' ? -logAmt : logAmt;
+            const newBal = currentBal + revertDelta;
+
+            await user.update({ walletBalance: newBal }, { transaction: t });
+        }
+
+        await log.destroy({ transaction: t });
+        await t.commit();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Balance entry deleted and party balance updated.');
+    } catch (error) {
+        if (t) await t.rollback();
         next(error);
     }
 };
