@@ -1339,7 +1339,7 @@ export const getOrderDetails = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel', 'walletBalance'],
                     include: [
                         {
                             model: BusinessProfile,
