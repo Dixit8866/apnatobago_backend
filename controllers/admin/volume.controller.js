@@ -8,7 +8,7 @@ import sequelize from '../../config/db.js';
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 export const createVolume = async (req, res, next) => {
     try {
-        const { name, status } = req.body;
+        const { name, status, icon } = req.body;
 
         if (!name || typeof name !== 'object' || !Object.values(name).some(v => v?.trim())) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please provide a volume name in at least one language.");
@@ -16,7 +16,8 @@ export const createVolume = async (req, res, next) => {
 
         const volume = await Volume.create({
             name,
-            status: status || 'Active'
+            status: status || 'Active',
+            icon: icon || null
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Volume created successfully.", volume);
@@ -95,13 +96,14 @@ export const getVolumeById = async (req, res, next) => {
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
 export const updateVolume = async (req, res, next) => {
     try {
-        const { name, status } = req.body;
+        const { name, status, icon } = req.body;
         const volume = await Volume.findByPk(req.params.id);
         if (!volume) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Volume not found.");
 
         await volume.update({
             name: name ?? volume.name,
             status: status ?? volume.status,
+            icon: icon !== undefined ? icon : volume.icon,
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Volume updated successfully.", volume);

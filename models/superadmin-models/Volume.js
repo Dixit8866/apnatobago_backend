@@ -15,6 +15,11 @@ const Volume = sequelize.define('Volume', {
     status: {
         type: DataTypes.STRING,
         defaultValue: 'Active'
+    },
+    icon: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        comment: 'Volume icon image URL'
     }
 }, {
     timestamps: true,

@@ -319,7 +319,8 @@ const runManualMigrations = async () => {
             await PartyBalanceLog.sync();
             await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "condition" VARCHAR(50) DEFAULT \'GOOD\'');
             await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "creditProcessed" BOOLEAN DEFAULT true');
-        } catch (e) { console.log('[Migration Warning] PartyBalanceLog / SalesReturn sync failed:', e.message); }
+            await sequelize.query('ALTER TABLE volumes ADD COLUMN IF NOT EXISTS "icon" VARCHAR(500)');
+        } catch (e) { console.log('[Migration Warning] PartyBalanceLog / SalesReturn / Volume sync failed:', e.message); }
 
         try {
             // Drop NOT NULL constraints from email and password
