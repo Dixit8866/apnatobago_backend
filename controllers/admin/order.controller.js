@@ -434,9 +434,9 @@ export const getAllOrders = async (req, res) => {
                         as: 'variant',
                         attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'],
                         include: [
-                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
-                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name', 'icon'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name', 'icon'] },
+                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name', 'icon'] }
                         ]
                     }
                 ]
