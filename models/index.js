@@ -217,6 +217,8 @@ PartyCalling.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 // User -> PartyBalanceLog Associations
 User.hasMany(PartyBalanceLog, { foreignKey: 'userId', as: 'balanceLogs' });
 PartyBalanceLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Order.hasMany(PartyBalanceLog, { foreignKey: 'orderId', as: 'balanceLogs' });
+PartyBalanceLog.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 
 Product.hasMany(Cart, { foreignKey: 'productId', as: 'cartItems' });
 Cart.belongsTo(Product, { foreignKey: 'productId', as: 'product' });

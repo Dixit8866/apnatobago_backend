@@ -523,6 +523,11 @@ export const getDailyReconciliationReport = async (req, res) => {
                     as: 'user',
                     attributes: ['id', 'fullname', 'number'],
                     include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName'] }]
+                },
+                {
+                    model: Order,
+                    as: 'order',
+                    attributes: ['id', 'orderId']
                 }
             ],
             distinct: true
@@ -552,12 +557,34 @@ export const getDailyReconciliationReport = async (req, res) => {
                 id: log.id,
                 type: log.type,
                 amount: lAmt,
-                note: log.notes || log.description || 'Party Balance Log',
+                orderId: log.order?.orderId || log.orderId || '-',
+                note: log.notes || log.description || log.note || 'Party Balance Log',
                 createdAt: log.createdAt,
                 customerName: log.user?.businessProfile?.shopName || log.user?.fullname || 'Guest',
                 customerPhone: log.user?.number || '-'
             };
         });
+
+        // Calculate overpaid and underpaid breakdown lists for difference explanation
+        const overpaidOrdersList = todayDeliveredOrdersList.filter(o => o.paidAmount > o.totalAmount).map(o => ({
+            id: o.id,
+            orderId: o.orderId,
+            customerName: o.customerName,
+            customerPhone: o.customerPhone,
+            totalAmount: o.totalAmount,
+            paidAmount: o.paidAmount,
+            extraAmount: parseFloat((o.paidAmount - o.totalAmount).toFixed(2))
+        }));
+
+        const underpaidOrdersList = todayDeliveredOrdersList.filter(o => o.paidAmount < o.totalAmount || o.dueAmount > 0).map(o => ({
+            id: o.id,
+            orderId: o.orderId,
+            customerName: o.customerName,
+            customerPhone: o.customerPhone,
+            totalAmount: o.totalAmount,
+            paidAmount: o.paidAmount,
+            shortAmount: parseFloat((o.totalAmount - o.paidAmount).toFixed(2))
+        }));
 
         const netDifference = totalReceived - todayDeliveredOrdersTotal;
 
@@ -572,6 +599,7 @@ export const getDailyReconciliationReport = async (req, res) => {
             pastDuesClearedTotal,
             salesReturnsTotal,
             walletJamaTotal,
+            walletBakiTotal,
             bankBreakdownList,
             todayDeliveredOrdersList,
             todayPendingDueOrdersList,
