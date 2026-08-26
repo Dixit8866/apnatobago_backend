@@ -514,7 +514,7 @@ export const getDailyReconciliationReport = async (req, res) => {
             };
         });
 
-        // 7. Jama Wallet logs created today
+        // 7. Jama & Baki Wallet logs created today
         const jamaLogsToday = await PartyBalanceLog.findAll({
             where: { createdAt: dateFilter },
             include: [
@@ -524,12 +524,30 @@ export const getDailyReconciliationReport = async (req, res) => {
                     attributes: ['id', 'fullname', 'number'],
                     include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName'] }]
                 }
-            ]
+            ],
+            distinct: true
         });
+
+        // Deduplicate logs by ID to eliminate any SQL join duplication
+        const uniqueJamaLogs = [];
+        const seenLogIds = new Set();
+        jamaLogsToday.forEach(log => {
+            if (!seenLogIds.has(log.id)) {
+                seenLogIds.add(log.id);
+                uniqueJamaLogs.push(log);
+            }
+        });
+
         let walletJamaTotal = 0;
-        const jamaAdjustmentsList = jamaLogsToday.map(log => {
+        let walletBakiTotal = 0;
+        const jamaAdjustmentsList = uniqueJamaLogs.map(log => {
             const lAmt = parseFloat(log.amount || 0);
-            if (log.type === 'JAMA') walletJamaTotal += lAmt;
+            const typeUpper = String(log.type || '').toUpperCase();
+            if (typeUpper.includes('JAMA') || typeUpper.includes('CREDIT')) {
+                walletJamaTotal += lAmt;
+            } else {
+                walletBakiTotal += lAmt;
+            }
             return {
                 id: log.id,
                 type: log.type,
