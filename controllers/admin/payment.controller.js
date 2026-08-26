@@ -384,8 +384,12 @@ export const getDailyReconciliationReport = async (req, res) => {
         // 3. Fetch Today's Delivered / Completed Orders
         const deliveredOrders = await Order.findAll({
             where: {
-                createdAt: dateFilter,
-                orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+                orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] },
+                [Op.or]: [
+                    { deliveredAt: dateFilter },
+                    { deliveredAt: null, updatedAt: dateFilter },
+                    { deliveredAt: null, updatedAt: null, createdAt: dateFilter }
+                ]
             },
             include: [
                 {
@@ -395,7 +399,7 @@ export const getDailyReconciliationReport = async (req, res) => {
                     include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'postcode'] }]
                 }
             ],
-            order: [['createdAt', 'DESC']]
+            order: [['updatedAt', 'DESC'], ['createdAt', 'DESC']]
         });
 
         let todayDeliveredOrdersTotal = 0;
@@ -449,13 +453,14 @@ export const getDailyReconciliationReport = async (req, res) => {
 
         // 5. Past Pending Dues Cleared Today (Payments collected today for orders DELIVERED BEFORE today)
         const allTodayPayments = [...cashPayments, ...onlinePayments];
+        const todayDeliveredOrderIds = new Set(deliveredOrders.map(o => o.id));
         const pastDuesClearedList = [];
         let pastDuesClearedTotal = 0;
 
         const effectiveStartOfDay = startOfDay ? startOfDay.getTime() : 0;
 
         allTodayPayments.forEach(p => {
-            if (p.order) {
+            if (p.order && !todayDeliveredOrderIds.has(p.order.id)) {
                 // Determine when the order was delivered / fulfilled
                 const deliveryTime = p.order.deliveredAt 
                     ? new Date(p.order.deliveredAt).getTime() 
