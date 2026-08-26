@@ -887,3 +887,33 @@ export const createAdminSalesReturn = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * @desc    Update Company Return Status for a Sales Return (Mark as Returned to Company or Pending)
+ * @route   PUT /api/admin/orders/sales-returns/:id/company-status
+ * @access  Private (Admin)
+ */
+export const updateCompanyReturnStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, note } = req.body; // status: 'RETURNED' | 'PENDING'
+
+        const salesReturn = await SalesReturn.findByPk(id);
+        if (!salesReturn) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Sales return entry not found.");
+        }
+
+        const newStatus = status === 'RETURNED' ? 'RETURNED' : 'PENDING';
+        salesReturn.companyReturnStatus = newStatus;
+        salesReturn.companyReturnedAt = newStatus === 'RETURNED' ? new Date() : null;
+        if (note !== undefined) {
+            salesReturn.companyReturnNote = note;
+        }
+        await salesReturn.save();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `Sales return company status updated to ${newStatus}.`, salesReturn);
+    } catch (error) {
+        logger.error(`[Update Company Return Status Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};

@@ -64,6 +64,19 @@ const SalesReturn = sequelize.define(
             type: DataTypes.STRING,
             defaultValue: 'Approved',
         },
+        companyReturnStatus: {
+            type: DataTypes.STRING, // 'PENDING' | 'RETURNED'
+            allowNull: true,
+            defaultValue: 'PENDING',
+        },
+        companyReturnedAt: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        companyReturnNote: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,

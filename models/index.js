@@ -566,6 +566,13 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] AppSettings min/max order amount columns migration failed:', e.message); }
 
         try {
+            // Add companyReturnStatus, companyReturnedAt, companyReturnNote to sales_returns table
+            await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "companyReturnStatus" VARCHAR(255) DEFAULT \'PENDING\'');
+            await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "companyReturnedAt" TIMESTAMP WITH TIME ZONE');
+            await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "companyReturnNote" TEXT');
+        } catch (e) { console.log('[Migration Warning] SalesReturn company return columns migration failed:', e.message); }
+
+        try {
             await RouteSection.sync();
         } catch (e) { console.log('[Migration Warning] RouteSection sync failed:', e.message); }
 
