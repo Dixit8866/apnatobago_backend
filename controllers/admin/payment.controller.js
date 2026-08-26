@@ -533,12 +533,13 @@ export const getDailyReconciliationReport = async (req, res) => {
             distinct: true
         });
 
-        // Deduplicate logs by ID to eliminate any SQL join duplication
+        // Deduplicate logs by orderId or log.id so each bill/order has only 1 balance log entry
         const uniqueJamaLogs = [];
-        const seenLogIds = new Set();
+        const seenOrderOrLogKeys = new Set();
         jamaLogsToday.forEach(log => {
-            if (!seenLogIds.has(log.id)) {
-                seenLogIds.add(log.id);
+            const oKey = (log.order?.orderId || log.orderId) ? `ORDER_${log.order?.orderId || log.orderId}` : `LOG_${log.id}`;
+            if (!seenOrderOrLogKeys.has(oKey)) {
+                seenOrderOrLogKeys.add(oKey);
                 uniqueJamaLogs.push(log);
             }
         });
@@ -565,26 +566,49 @@ export const getDailyReconciliationReport = async (req, res) => {
             };
         });
 
-        // Calculate overpaid and underpaid breakdown lists for difference explanation
-        const overpaidOrdersList = todayDeliveredOrdersList.filter(o => o.paidAmount > o.totalAmount).map(o => ({
-            id: o.id,
-            orderId: o.orderId,
-            customerName: o.customerName,
-            customerPhone: o.customerPhone,
-            totalAmount: o.totalAmount,
-            paidAmount: o.paidAmount,
-            extraAmount: parseFloat((o.paidAmount - o.totalAmount).toFixed(2))
-        }));
+        // Calculate overpaid and underpaid breakdown lists by summing today's OrderPayment collections per order
+        const orderPaymentMap = {};
+        allTodayPayments.forEach(p => {
+            if (p.order) {
+                const oid = p.order.id;
+                if (!orderPaymentMap[oid]) {
+                    orderPaymentMap[oid] = {
+                        id: oid,
+                        orderId: p.order.orderId,
+                        totalAmount: parseFloat(p.order.totalAmount || 0),
+                        paidToday: 0,
+                        customerName: p.order.user?.businessProfile?.shopName || p.order.user?.fullname || p.order.customerName || 'Guest'
+                    };
+                }
+                orderPaymentMap[oid].paidToday += parseFloat(p.amount || 0);
+            }
+        });
 
-        const underpaidOrdersList = todayDeliveredOrdersList.filter(o => o.paidAmount < o.totalAmount || o.dueAmount > 0).map(o => ({
-            id: o.id,
-            orderId: o.orderId,
-            customerName: o.customerName,
-            customerPhone: o.customerPhone,
-            totalAmount: o.totalAmount,
-            paidAmount: o.paidAmount,
-            shortAmount: parseFloat((o.totalAmount - o.paidAmount).toFixed(2))
-        }));
+        const overpaidOrdersList = [];
+        const underpaidOrdersList = [];
+
+        Object.values(orderPaymentMap).forEach(item => {
+            const diff = item.paidToday - item.totalAmount;
+            if (diff > 0.01) {
+                overpaidOrdersList.push({
+                    id: item.id,
+                    orderId: item.orderId,
+                    customerName: item.customerName,
+                    totalAmount: item.totalAmount,
+                    paidAmount: item.paidToday,
+                    extraAmount: parseFloat(diff.toFixed(2))
+                });
+            } else if (diff < -0.01) {
+                underpaidOrdersList.push({
+                    id: item.id,
+                    orderId: item.orderId,
+                    customerName: item.customerName,
+                    totalAmount: item.totalAmount,
+                    paidAmount: item.paidToday,
+                    shortAmount: parseFloat(Math.abs(diff).toFixed(2))
+                });
+            }
+        });
 
         const netDifference = totalReceived - todayDeliveredOrdersTotal;
 
