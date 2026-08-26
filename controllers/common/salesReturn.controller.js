@@ -671,6 +671,19 @@ export const createAdminSalesReturn = async (req, res) => {
         const salesReturnEntries = [];
         const actorName = req.user ? (req.user.name || req.user.fullname || 'Admin') : 'Admin';
 
+        // Check assigned delivery boy (and verify existence to satisfy foreign key constraint)
+        const assignment = await OrderAssignment.findOne({
+            where: { orderId: order.id },
+            transaction: t
+        });
+        let validDeliveryBoyId = null;
+        if (assignment && assignment.deliveryBoyId) {
+            const dbExists = await DeliveryBoy.findByPk(assignment.deliveryBoyId, { transaction: t });
+            if (dbExists) {
+                validDeliveryBoyId = assignment.deliveryBoyId;
+            }
+        }
+
         for (const item of items) {
             const { productId, variantId, quantity, price, sellUnit, condition: itemCondition, reason: itemReason } = item;
             const returnQty = parseFloat(quantity || 0);
@@ -714,7 +727,7 @@ export const createAdminSalesReturn = async (req, res) => {
             const salesReturn = await SalesReturn.create({
                 orderId: order.id,
                 userId: order.userId,
-                deliveryBoyId: req.user?.id || null,
+                deliveryBoyId: validDeliveryBoyId,
                 productId,
                 variantId,
                 volumeId: variant.volumeId,
