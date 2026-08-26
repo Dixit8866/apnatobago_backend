@@ -63,12 +63,18 @@ export const createSalesReturn = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        // 3. Find Delivery Boy from Assignment
+        // 3. Find Delivery Boy from Assignment (and verify existence to satisfy foreign key constraint)
         const assignment = await OrderAssignment.findOne({
             where: { orderId: order.id },
             transaction: t
         });
-        const deliveryBoyId = assignment ? assignment.deliveryBoyId : null;
+        let deliveryBoyId = null;
+        if (assignment && assignment.deliveryBoyId) {
+            const dbExists = await DeliveryBoy.findByPk(assignment.deliveryBoyId, { transaction: t });
+            if (dbExists) {
+                deliveryBoyId = assignment.deliveryBoyId;
+            }
+        }
 
         let totalReturnAmount = 0;
         const salesReturnEntries = [];
