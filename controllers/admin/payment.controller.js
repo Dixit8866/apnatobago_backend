@@ -307,7 +307,7 @@ export const getDailyReconciliationReport = async (req, res) => {
                 {
                     model: Order,
                     as: 'order',
-                    attributes: ['id', 'orderId', 'createdAt', 'totalAmount', 'dueAmount', 'customerName', 'customerNumber'],
+                    attributes: ['id', 'orderId', 'createdAt', 'deliveredAt', 'updatedAt', 'totalAmount', 'dueAmount', 'customerName', 'customerNumber'],
                     include: [
                         {
                             model: User,
@@ -359,7 +359,7 @@ export const getDailyReconciliationReport = async (req, res) => {
                 {
                     model: Order,
                     as: 'order',
-                    attributes: ['id', 'orderId', 'createdAt', 'totalAmount', 'dueAmount', 'customerName', 'customerNumber'],
+                    attributes: ['id', 'orderId', 'createdAt', 'deliveredAt', 'updatedAt', 'totalAmount', 'dueAmount', 'customerName', 'customerNumber'],
                     include: [
                         {
                             model: User,
@@ -447,7 +447,7 @@ export const getDailyReconciliationReport = async (req, res) => {
             partyWalletBalance: o.user?.walletBalance || 0
         }));
 
-        // 5. Past Pending Dues Cleared Today (Payments collected today for orders created BEFORE today)
+        // 5. Past Pending Dues Cleared Today (Payments collected today for orders DELIVERED BEFORE today)
         const allTodayPayments = [...cashPayments, ...onlinePayments];
         const pastDuesClearedList = [];
         let pastDuesClearedTotal = 0;
@@ -456,8 +456,13 @@ export const getDailyReconciliationReport = async (req, res) => {
 
         allTodayPayments.forEach(p => {
             if (p.order) {
-                const orderCreated = new Date(p.order.createdAt).getTime();
-                if (orderCreated < effectiveStartOfDay) {
+                // Determine when the order was delivered / fulfilled
+                const deliveryTime = p.order.deliveredAt 
+                    ? new Date(p.order.deliveredAt).getTime() 
+                    : (p.order.updatedAt ? new Date(p.order.updatedAt).getTime() : new Date(p.order.createdAt).getTime());
+
+                // If the order was delivered BEFORE today, payment collected today is for Past Dues!
+                if (deliveryTime < effectiveStartOfDay) {
                     const pAmt = parseFloat(p.amount || 0);
                     pastDuesClearedTotal += pAmt;
                     pastDuesClearedList.push({
@@ -465,6 +470,7 @@ export const getDailyReconciliationReport = async (req, res) => {
                         orderId: p.order.orderId,
                         orderDbId: p.order.id,
                         orderDate: p.order.createdAt,
+                        deliveredDate: p.order.deliveredAt || p.order.createdAt,
                         paymentMethod: p.paymentMethod,
                         amount: pAmt,
                         paymentDate: p.createdAt,
