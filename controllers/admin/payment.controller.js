@@ -271,22 +271,23 @@ export const getDailyReconciliationReport = async (req, res) => {
 
         // Build date range
         let dateFilter = {};
+        let startOfDay, endOfDay;
         if (startDate || endDate) {
             if (startDate) {
-                const start = new Date(startDate);
-                start.setHours(0, 0, 0, 0);
-                dateFilter[Op.gte] = start;
+                startOfDay = new Date(startDate);
+                startOfDay.setHours(0, 0, 0, 0);
+                dateFilter[Op.gte] = startOfDay;
             }
             if (endDate) {
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999);
-                dateFilter[Op.lte] = end;
+                endOfDay = new Date(endDate);
+                endOfDay.setHours(23, 59, 59, 999);
+                dateFilter[Op.lte] = endOfDay;
             }
         } else {
             const targetDate = date ? new Date(date) : new Date();
-            const startOfDay = new Date(targetDate);
+            startOfDay = new Date(targetDate);
             startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(targetDate);
+            endOfDay = new Date(targetDate);
             endOfDay.setHours(23, 59, 59, 999);
             dateFilter = { [Op.between]: [startOfDay, endOfDay] };
         }
@@ -302,6 +303,24 @@ export const getDailyReconciliationReport = async (req, res) => {
                     model: BankSetting,
                     as: 'bankAccount',
                     attributes: ['id', 'bankName', 'accountName', 'accountNumber', 'branchName']
+                },
+                {
+                    model: Order,
+                    as: 'order',
+                    attributes: ['id', 'orderId', 'createdAt', 'totalAmount', 'dueAmount', 'customerName', 'customerNumber'],
+                    include: [
+                        {
+                            model: User,
+                            as: 'user',
+                            attributes: ['id', 'fullname', 'number', 'city'],
+                            include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
+                        }
+                    ]
+                },
+                {
+                    model: DeliveryBoy,
+                    as: 'deliveryBoy',
+                    attributes: ['id', 'name', 'phone']
                 }
             ]
         });
@@ -333,65 +352,183 @@ export const getDailyReconciliationReport = async (req, res) => {
 
         const bankBreakdownList = Object.values(bankBreakdownMap);
 
-        // 2. Fetch Pending Due Orders for the period
-        const orderWhere = { createdAt: dateFilter, dueAmount: { [Op.gt]: 0 } };
-        const pendingDueOrders = await Order.findAll({
-            where: orderWhere,
+        // 2. Fetch Cash Payments with Order & Delivery Boy Details
+        const cashPayments = await OrderPayment.findAll({
+            where: { ...paymentWhere, paymentMethod: 'CASH' },
             include: [
                 {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance'],
+                    model: Order,
+                    as: 'order',
+                    attributes: ['id', 'orderId', 'createdAt', 'totalAmount', 'dueAmount', 'customerName', 'customerNumber'],
                     include: [
                         {
-                            model: BusinessProfile,
-                            as: 'businessProfile',
-                            attributes: ['shopName', 'shopAddress', 'postcode']
+                            model: User,
+                            as: 'user',
+                            attributes: ['id', 'fullname', 'number', 'city'],
+                            include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
                         }
                     ]
+                },
+                {
+                    model: DeliveryBoy,
+                    as: 'deliveryBoy',
+                    attributes: ['id', 'name', 'phone']
                 }
-            ],
-            order: [['dueAmount', 'DESC']]
-        });
-
-        let totalPendingDueSum = 0;
-        pendingDueOrders.forEach(o => {
-            totalPendingDueSum += parseFloat(o.dueAmount || 0);
-        });
-
-        // 3. Calculate Daily Reconciliation Breakdown
-        const cashPayments = await OrderPayment.findAll({
-            where: { ...paymentWhere, paymentMethod: 'CASH' }
+            ]
         });
         let totalCashSum = 0;
         cashPayments.forEach(p => { totalCashSum += parseFloat(p.amount || 0); });
 
         const totalReceived = totalCashSum + totalOnlineSum;
 
-        // Fetch Today's Delivered / Completed Orders Total
+        // 3. Fetch Today's Delivered / Completed Orders
         const deliveredOrders = await Order.findAll({
             where: {
                 createdAt: dateFilter,
                 orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
-            }
+            },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance'],
+                    include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'postcode'] }]
+                }
+            ],
+            order: [['createdAt', 'DESC']]
         });
 
         let todayDeliveredOrdersTotal = 0;
-        deliveredOrders.forEach(o => { todayDeliveredOrdersTotal += parseFloat(o.totalAmount || 0); });
+        const todayDeliveredOrdersList = deliveredOrders.map(o => {
+            const tot = parseFloat(o.totalAmount || 0);
+            todayDeliveredOrdersTotal += tot;
+            return {
+                id: o.id,
+                orderId: o.orderId,
+                totalAmount: tot,
+                dueAmount: parseFloat(o.dueAmount || 0),
+                paidAmount: parseFloat(o.paidAmount || 0),
+                paymentMethod: o.paymentMethod,
+                paymentStatus: o.paymentStatus,
+                orderStatus: o.orderStatus,
+                createdAt: o.createdAt,
+                customerName: o.user?.businessProfile?.shopName || o.user?.fullname || o.customerName || 'Guest',
+                customerPhone: o.user?.number || o.customerNumber || '-',
+                shopAddress: o.user?.businessProfile?.shopAddress || '-'
+            };
+        });
 
-        // Sales returns created today
+        // 4. Today's Pending Due Orders (Delivered today with dueAmount > 0)
+        const todayPendingDueOrdersList = todayDeliveredOrdersList.filter(o => o.dueAmount > 0);
+        let totalTodayPendingDueSum = todayPendingDueOrdersList.reduce((sum, o) => sum + o.dueAmount, 0);
+
+        // All Pending Due Orders across all time
+        const allPendingDueOrders = await Order.findAll({
+            where: { dueAmount: { [Op.gt]: 0 } },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance'],
+                    include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'postcode'] }]
+                }
+            ],
+            order: [['dueAmount', 'DESC']]
+        });
+        const pendingDueOrdersFormatted = allPendingDueOrders.map(o => ({
+            id: o.id,
+            orderId: o.orderId,
+            totalAmount: parseFloat(o.totalAmount || 0),
+            dueAmount: parseFloat(o.dueAmount || 0),
+            paidAmount: parseFloat(o.paidAmount || 0),
+            createdAt: o.createdAt,
+            customerName: o.user?.businessProfile?.shopName || o.user?.fullname || o.customerName,
+            customerPhone: o.user?.number || o.customerNumber,
+            partyWalletBalance: o.user?.walletBalance || 0
+        }));
+
+        // 5. Past Pending Dues Cleared Today (Payments collected today for orders created BEFORE today)
+        const allTodayPayments = [...cashPayments, ...onlinePayments];
+        const pastDuesClearedList = [];
+        let pastDuesClearedTotal = 0;
+
+        const effectiveStartOfDay = startOfDay ? startOfDay.getTime() : 0;
+
+        allTodayPayments.forEach(p => {
+            if (p.order) {
+                const orderCreated = new Date(p.order.createdAt).getTime();
+                if (orderCreated < effectiveStartOfDay) {
+                    const pAmt = parseFloat(p.amount || 0);
+                    pastDuesClearedTotal += pAmt;
+                    pastDuesClearedList.push({
+                        paymentId: p.id,
+                        orderId: p.order.orderId,
+                        orderDbId: p.order.id,
+                        orderDate: p.order.createdAt,
+                        paymentMethod: p.paymentMethod,
+                        amount: pAmt,
+                        paymentDate: p.createdAt,
+                        customerName: p.order.user?.businessProfile?.shopName || p.order.user?.fullname || p.order.customerName || 'Guest',
+                        customerPhone: p.order.user?.number || p.order.customerNumber || '-',
+                        deliveryBoyName: p.deliveryBoy?.name || '-'
+                    });
+                }
+            }
+        });
+
+        // 6. Sales returns created today
         const salesReturnsToday = await SalesReturn.findAll({
-            where: { createdAt: dateFilter }
+            where: { createdAt: dateFilter },
+            include: [
+                {
+                    model: Order,
+                    as: 'order',
+                    attributes: ['id', 'orderId', 'customerName', 'customerNumber'],
+                    include: [{ model: User, as: 'user', attributes: ['id', 'fullname', 'number'], include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName'] }] }]
+                }
+            ]
         });
         let salesReturnsTotal = 0;
-        salesReturnsToday.forEach(sr => { salesReturnsTotal += parseFloat(sr.returnAmount || 0); });
+        const salesReturnsList = salesReturnsToday.map(sr => {
+            const rAmt = parseFloat(sr.returnAmount || 0);
+            salesReturnsTotal += rAmt;
+            return {
+                id: sr.id,
+                orderId: sr.order?.orderId || '-',
+                orderDbId: sr.orderId,
+                returnAmount: rAmt,
+                reason: sr.reason || 'Sales Return',
+                createdAt: sr.createdAt,
+                customerName: sr.order?.user?.businessProfile?.shopName || sr.order?.user?.fullname || sr.order?.customerName || 'Guest'
+            };
+        });
 
-        // Jama Wallet logs created today
+        // 7. Jama Wallet logs created today
         const jamaLogsToday = await PartyBalanceLog.findAll({
-            where: { createdAt: dateFilter, type: 'JAMA' }
+            where: { createdAt: dateFilter },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number'],
+                    include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName'] }]
+                }
+            ]
         });
         let walletJamaTotal = 0;
-        jamaLogsToday.forEach(log => { walletJamaTotal += parseFloat(log.amount || 0); });
+        const jamaAdjustmentsList = jamaLogsToday.map(log => {
+            const lAmt = parseFloat(log.amount || 0);
+            if (log.type === 'JAMA') walletJamaTotal += lAmt;
+            return {
+                id: log.id,
+                type: log.type,
+                amount: lAmt,
+                note: log.notes || log.description || 'Party Balance Log',
+                createdAt: log.createdAt,
+                customerName: log.user?.businessProfile?.shopName || log.user?.fullname || 'Guest',
+                customerPhone: log.user?.number || '-'
+            };
+        });
 
         const netDifference = totalReceived - todayDeliveredOrdersTotal;
 
@@ -399,28 +536,28 @@ export const getDailyReconciliationReport = async (req, res) => {
             totalCashCollect: totalCashSum,
             totalOnlineCollect: totalOnlineSum,
             totalReceived,
-            totalPendingDue: totalPendingDueSum,
+            totalPendingDue: totalTodayPendingDueSum,
+            allTimePendingDue: pendingDueOrdersFormatted.reduce((sum, o) => sum + o.dueAmount, 0),
             todayDeliveredOrdersTotal,
             netDifference,
+            pastDuesClearedTotal,
+            salesReturnsTotal,
+            walletJamaTotal,
             bankBreakdownList,
-            pendingDueOrders: pendingDueOrders.map(o => ({
-                id: o.id,
-                orderId: o.orderId,
-                totalAmount: o.totalAmount,
-                dueAmount: o.dueAmount,
-                paidAmount: o.paidAmount,
-                createdAt: o.createdAt,
-                customerName: o.user?.businessProfile?.shopName || o.user?.fullname || o.customerName,
-                customerPhone: o.user?.number || o.customerNumber,
-                partyWalletBalance: o.user?.walletBalance || 0
-            })),
+            todayDeliveredOrdersList,
+            todayPendingDueOrdersList,
+            pendingDueOrders: pendingDueOrdersFormatted,
+            pastDuesClearedList,
+            salesReturnsList,
+            jamaAdjustmentsList,
             reconciliationExplanation: {
                 todayDeliveredOrdersTotal,
                 totalReceived,
                 netDifference,
                 salesReturnsTotal,
                 walletJamaTotal,
-                pendingDuesTotal: totalPendingDueSum
+                pendingDuesTotal: totalTodayPendingDueSum,
+                pastDuesClearedTotal
             }
         });
 
