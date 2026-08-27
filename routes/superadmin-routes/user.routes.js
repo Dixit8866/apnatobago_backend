@@ -16,6 +16,7 @@ router.put('/:id/location', updateUserLocation);
 router.patch('/:id/assign-godown', userController.assignUserGodown);
 router.post('/:id/balance-adjustment', userController.adjustPartyBalance);
 router.get('/:id/balance-logs', userController.getPartyBalanceLogs);
+router.put('/balance-logs/:logId', userController.updatePartyBalanceLog);
 router.delete('/balance-logs/:logId', userController.deletePartyBalanceLog);
 router.delete('/:id', userController.deleteUser);
 

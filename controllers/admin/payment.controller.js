@@ -675,3 +675,94 @@ export const getDailyReconciliationReport = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * @desc    Update Order Payment Collection details (Admin edit from Daily Reconciliation Ledger)
+ * @route   PUT /api/admin/payments/order/:orderId/collection
+ * @access  Private (Admin)
+ */
+export const updateOrderCollectionDetails = async (req, res) => {
+    const t = await Order.sequelize.transaction();
+    try {
+        const { orderId } = req.params;
+        const { paidAmount, dueAmount, paymentMethod, note } = req.body;
+
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(orderId);
+        const orderWhere = isUuid ? { id: orderId } : { orderId };
+        const order = await Order.findOne({ where: orderWhere, transaction: t });
+
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const tot = parseFloat(order.totalAmount || 0);
+        const newPaid = paidAmount !== undefined ? parseFloat(paidAmount) : parseFloat(order.paidAmount || 0);
+        const newDue = dueAmount !== undefined ? parseFloat(dueAmount) : parseFloat(order.dueAmount || 0);
+
+        order.paidAmount = newPaid;
+        order.dueAmount = newDue;
+
+        if (paymentMethod) {
+            order.paymentMethod = paymentMethod;
+        }
+
+        if (newDue <= 0 && newPaid >= tot) {
+            order.paymentStatus = 'Paid';
+        } else if (newPaid > 0) {
+            order.paymentStatus = 'Partial';
+        } else {
+            order.paymentStatus = 'Pending';
+        }
+
+        await order.save({ transaction: t });
+
+        // Update or create main OrderPayment record for this order
+        let mainPayment = await OrderPayment.findOne({
+            where: { orderId: order.id },
+            order: [['createdAt', 'DESC']],
+            transaction: t
+        });
+
+        if (mainPayment) {
+            mainPayment.amount = newPaid;
+            if (paymentMethod) mainPayment.paymentMethod = paymentMethod;
+            await mainPayment.save({ transaction: t });
+        } else if (newPaid > 0) {
+            await OrderPayment.create({
+                orderId: order.id,
+                amount: newPaid,
+                paymentMethod: paymentMethod || order.paymentMethod || 'CASH',
+                isSubmitted: true,
+                submittedAt: new Date()
+            }, { transaction: t });
+        }
+
+        await t.commit();
+
+        logActivity(req, {
+            module: 'Daily Reconciliation',
+            action: 'UPDATE',
+            description: `Updated collection for Order #${order.orderId}: Paid ₹${newPaid}, Due ₹${newDue}, Mode: ${paymentMethod || order.paymentMethod}`,
+            metadata: { orderId: order.id, paidAmount: newPaid, dueAmount: newDue }
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `Order #${order.orderId} collection details updated successfully.`, {
+            order: {
+                id: order.id,
+                orderId: order.orderId,
+                totalAmount: tot,
+                paidAmount: newPaid,
+                dueAmount: newDue,
+                paymentMethod: order.paymentMethod,
+                paymentStatus: order.paymentStatus
+            }
+        });
+
+    } catch (error) {
+        if (t) await t.rollback();
+        logger.error(`[Update Order Collection Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+

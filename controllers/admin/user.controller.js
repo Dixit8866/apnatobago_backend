@@ -680,3 +680,67 @@ export const deletePartyBalanceLog = async (req, res, next) => {
         next(error);
     }
 };
+
+/**
+ * @desc    Update an existing party balance log entry and re-adjust party walletBalance
+ * @route   PUT /api/admin/users/balance-logs/:logId
+ * @access  Private (Admin)
+ */
+export const updatePartyBalanceLog = async (req, res, next) => {
+    const t = await User.sequelize.transaction();
+    try {
+        const { logId } = req.params;
+        const { amount, type, note } = req.body;
+
+        const log = await PartyBalanceLog.findByPk(logId, { transaction: t });
+        if (!log) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Balance log entry not found.');
+        }
+
+        const user = await User.findByPk(log.userId, { transaction: t });
+        if (!user) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Associated user not found.');
+        }
+
+        const oldLogAmt = parseFloat(log.amount || 0);
+        const oldType = log.type;
+
+        const newLogAmt = amount !== undefined ? parseFloat(amount) : oldLogAmt;
+        const newType = type || oldType;
+        const newNote = note !== undefined ? note : log.note;
+
+        // Revert old effect: JAMA was +oldLogAmt, BAKI was -oldLogAmt
+        const currentBal = parseFloat(user.walletBalance || 0);
+        const revertOld = oldType === 'JAMA' ? -oldLogAmt : oldLogAmt;
+
+        // Apply new effect: JAMA is +newLogAmt, BAKI is -newLogAmt
+        const applyNew = newType === 'JAMA' ? newLogAmt : -newLogAmt;
+
+        const updatedWalletBal = currentBal + revertOld + applyNew;
+
+        await user.update({ walletBalance: updatedWalletBal }, { transaction: t });
+
+        log.amount = newLogAmt;
+        log.type = newType;
+        log.note = newNote;
+        log.newBalance = updatedWalletBal;
+        await log.save({ transaction: t });
+
+        await t.commit();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Balance log updated and party wallet balance recalculated.', {
+            log,
+            user: {
+                id: user.id,
+                fullname: user.fullname,
+                walletBalance: updatedWalletBal
+            }
+        });
+    } catch (error) {
+        if (t) await t.rollback();
+        next(error);
+    }
+};
+

@@ -644,7 +644,7 @@ export const getPartyOrdersForReturn = async (req, res) => {
 export const createAdminSalesReturn = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { orderId, items, condition: globalCondition, reason: globalReason } = req.body;
+        const { orderId, items, condition: globalCondition, reason: globalReason, applyJamaCredit = true } = req.body;
 
         if (!orderId || !Array.isArray(items) || items.length === 0) {
             await t.rollback();
@@ -843,11 +843,13 @@ export const createAdminSalesReturn = async (req, res) => {
         order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
         await order.save({ transaction: t });
 
-        // Calculate total Jama credit for GOOD condition returns only (Damaged returns are logged for Company Return, no Party Jama credit)
+        // Calculate total Jama credit for GOOD condition returns only (if applyJamaCredit is enabled)
         let totalJamaCredit = 0;
-        for (const sr of salesReturnEntries) {
-            if (sr.condition === 'GOOD') {
-                totalJamaCredit += parseFloat(sr.returnAmount || 0);
+        if (applyJamaCredit !== false) {
+            for (const sr of salesReturnEntries) {
+                if (sr.condition === 'GOOD') {
+                    totalJamaCredit += parseFloat(sr.returnAmount || 0);
+                }
             }
         }
 
