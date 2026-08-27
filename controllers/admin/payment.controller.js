@@ -702,7 +702,7 @@ export const updateOrderCollectionDetails = async (req, res) => {
     const t = await Order.sequelize.transaction();
     try {
         const { orderId } = req.params;
-        const { paidAmount, dueAmount, paymentMethod, note } = req.body;
+        const { paidAmount, cashAmount, onlineAmount, bankSettingId, dueAmount, paymentMethod, deliveryBoyId, note } = req.body;
 
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(orderId);
         const orderWhere = isUuid ? { id: orderId } : { orderId };
@@ -714,15 +714,27 @@ export const updateOrderCollectionDetails = async (req, res) => {
         }
 
         const tot = parseFloat(order.totalAmount || 0);
-        const newPaid = paidAmount !== undefined ? parseFloat(paidAmount) : parseFloat(order.paidAmount || 0);
+        const cashAmt = parseFloat(cashAmount ?? 0);
+        const onlineAmt = parseFloat(onlineAmount ?? 0);
+        const hasSplitAmounts = (cashAmount !== undefined || onlineAmount !== undefined);
+
+        let newPaid = 0;
+        let newMethod = paymentMethod || order.paymentMethod || 'CASH';
+
+        if (hasSplitAmounts) {
+            newPaid = cashAmt + onlineAmt;
+            if (cashAmt > 0 && onlineAmt > 0) newMethod = 'SPLIT';
+            else if (onlineAmt > 0) newMethod = 'ONLINE';
+            else if (cashAmt > 0) newMethod = 'CASH';
+        } else {
+            newPaid = paidAmount !== undefined ? parseFloat(paidAmount) : parseFloat(order.paidAmount || 0);
+        }
+
         const newDue = dueAmount !== undefined ? parseFloat(dueAmount) : parseFloat(order.dueAmount || 0);
 
         order.paidAmount = newPaid;
         order.dueAmount = newDue;
-
-        if (paymentMethod) {
-            order.paymentMethod = paymentMethod;
-        }
+        order.paymentMethod = newMethod;
 
         if (newDue <= 0 && newPaid >= tot) {
             order.paymentStatus = 'Paid';
@@ -734,25 +746,75 @@ export const updateOrderCollectionDetails = async (req, res) => {
 
         await order.save({ transaction: t });
 
-        // Update or create main OrderPayment record for this order
-        let mainPayment = await OrderPayment.findOne({
-            where: { orderId: order.id },
-            order: [['createdAt', 'DESC']],
-            transaction: t
-        });
+        // Update delivery boy assignment if specified
+        if (deliveryBoyId) {
+            let assignment = await OrderAssignment.findOne({ where: { orderId: order.id }, transaction: t });
+            if (assignment) {
+                assignment.deliveryBoyId = deliveryBoyId;
+                await assignment.save({ transaction: t });
+            } else {
+                await OrderAssignment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    assignedAt: new Date()
+                }, { transaction: t });
+            }
+        }
 
-        if (mainPayment) {
-            mainPayment.amount = newPaid;
-            if (paymentMethod) mainPayment.paymentMethod = paymentMethod;
-            await mainPayment.save({ transaction: t });
-        } else if (newPaid > 0) {
-            await OrderPayment.create({
-                orderId: order.id,
-                amount: newPaid,
-                paymentMethod: paymentMethod || order.paymentMethod || 'CASH',
-                isSubmitted: true,
-                submittedAt: new Date()
-            }, { transaction: t });
+        // Re-create or update OrderPayment records
+        if (hasSplitAmounts) {
+            await OrderPayment.destroy({ where: { orderId: order.id }, transaction: t });
+
+            if (cashAmt > 0) {
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId: deliveryBoyId || null,
+                    amount: cashAmt,
+                    paymentMethod: 'CASH',
+                    notes: note || 'Cash Collection Edit',
+                    isSubmitted: true,
+                    submittedAt: new Date()
+                }, { transaction: t });
+            }
+
+            if (onlineAmt > 0) {
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId: deliveryBoyId || null,
+                    amount: onlineAmt,
+                    paymentMethod: 'ONLINE',
+                    bankSettingId: bankSettingId || null,
+                    notes: note || 'Online Collection Edit',
+                    isSubmitted: true,
+                    submittedAt: new Date()
+                }, { transaction: t });
+            }
+        } else {
+            let mainPayment = await OrderPayment.findOne({
+                where: { orderId: order.id },
+                order: [['createdAt', 'DESC']],
+                transaction: t
+            });
+
+            if (mainPayment) {
+                mainPayment.amount = newPaid;
+                mainPayment.paymentMethod = newMethod;
+                if (bankSettingId) mainPayment.bankSettingId = bankSettingId;
+                if (deliveryBoyId) mainPayment.deliveryBoyId = deliveryBoyId;
+                if (note) mainPayment.notes = note;
+                await mainPayment.save({ transaction: t });
+            } else if (newPaid > 0) {
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId: deliveryBoyId || null,
+                    amount: newPaid,
+                    paymentMethod: newMethod,
+                    bankSettingId: bankSettingId || null,
+                    notes: note || null,
+                    isSubmitted: true,
+                    submittedAt: new Date()
+                }, { transaction: t });
+            }
         }
 
         await t.commit();
@@ -760,8 +822,8 @@ export const updateOrderCollectionDetails = async (req, res) => {
         logActivity(req, {
             module: 'Daily Reconciliation',
             action: 'UPDATE',
-            description: `Updated collection for Order #${order.orderId}: Paid ₹${newPaid}, Due ₹${newDue}, Mode: ${paymentMethod || order.paymentMethod}`,
-            metadata: { orderId: order.id, paidAmount: newPaid, dueAmount: newDue }
+            description: `Updated collection for Order #${order.orderId}: Cash ₹${cashAmt}, Online ₹${onlineAmt}, Bank: ${bankSettingId || 'N/A'}, Due ₹${newDue}`,
+            metadata: { orderId: order.id, cashAmount: cashAmt, onlineAmount: onlineAmt, dueAmount: newDue }
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `Order #${order.orderId} collection details updated successfully.`, {
