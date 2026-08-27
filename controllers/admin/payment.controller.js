@@ -329,8 +329,13 @@ export const getDailyReconciliationReport = async (req, res) => {
         let totalOnlineSum = 0;
 
         onlinePayments.forEach(p => {
-            const amt = parseFloat(p.amount || 0);
+            let amt = parseFloat(p.amount || 0);
+            if (p.order && p.order.totalAmount !== undefined && p.order.totalAmount !== null) {
+                const orderTot = parseFloat(p.order.totalAmount || 0);
+                if (amt > orderTot) amt = orderTot;
+            }
             totalOnlineSum += amt;
+
             const bankId = p.bankSettingId || 'UNASSIGNED';
             const bankName = p.bankAccount ? p.bankAccount.bankName : (p.onlineType || 'General Online / UPI');
 
@@ -384,15 +389,6 @@ export const getDailyReconciliationReport = async (req, res) => {
                 if (amt > orderTot) amt = orderTot;
             }
             totalCashSum += amt;
-        });
-
-        onlinePayments.forEach(p => {
-            let amt = parseFloat(p.amount || 0);
-            if (p.order && p.order.totalAmount !== undefined && p.order.totalAmount !== null) {
-                const orderTot = parseFloat(p.order.totalAmount || 0);
-                if (amt > orderTot) amt = orderTot;
-            }
-            totalOnlineSum += amt;
         });
 
         const totalReceived = totalCashSum + totalOnlineSum;
