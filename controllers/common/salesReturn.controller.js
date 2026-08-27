@@ -181,6 +181,30 @@ export const createSalesReturn = async (req, res) => {
         // Update Order total and outstanding dues IMMEDIATELY
         order.totalAmount = newTotalAmount;
         order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
+        if (parseFloat(order.paidAmount || 0) > newTotalAmount) {
+            order.paidAmount = newTotalAmount;
+        }
+
+        // Adjust existing OrderPayment records if total cash/online collected exceeds new total
+        const existingPayments = await OrderPayment.findAll({
+            where: { orderId: order.id },
+            transaction: t
+        });
+        let runningPaySum = 0;
+        for (const p of existingPayments) {
+            const pAmt = parseFloat(p.amount || 0);
+            if (runningPaySum + pAmt > newTotalAmount) {
+                const allowedAmt = Math.max(0, newTotalAmount - runningPaySum);
+                if (allowedAmt === 0) {
+                    await p.destroy({ transaction: t });
+                } else {
+                    await p.update({ amount: allowedAmt }, { transaction: t });
+                    runningPaySum += allowedAmt;
+                }
+            } else {
+                runningPaySum += pAmt;
+            }
+        }
 
         // If total outstanding becomes 0 and they paid rest, set paid status appropriately
         if (parseFloat(order.dueAmount) <= 0) {
@@ -841,6 +865,31 @@ export const createAdminSalesReturn = async (req, res) => {
         const newTotalAmount = roundTotal(newSubtotal + deliveryCharge);
         order.totalAmount = newTotalAmount;
         order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
+        if (parseFloat(order.paidAmount || 0) > newTotalAmount) {
+            order.paidAmount = newTotalAmount;
+        }
+
+        // Adjust existing OrderPayment records if total cash/online collected exceeds new total
+        const existingPaymentsAdmin = await OrderPayment.findAll({
+            where: { orderId: order.id },
+            transaction: t
+        });
+        let runningPaySumAdmin = 0;
+        for (const p of existingPaymentsAdmin) {
+            const pAmt = parseFloat(p.amount || 0);
+            if (runningPaySumAdmin + pAmt > newTotalAmount) {
+                const allowedAmt = Math.max(0, newTotalAmount - runningPaySumAdmin);
+                if (allowedAmt === 0) {
+                    await p.destroy({ transaction: t });
+                } else {
+                    await p.update({ amount: allowedAmt }, { transaction: t });
+                    runningPaySumAdmin += allowedAmt;
+                }
+            } else {
+                runningPaySumAdmin += pAmt;
+            }
+        }
+
         await order.save({ transaction: t });
 
         // Calculate total Jama credit for GOOD condition returns only (if applyJamaCredit is enabled)

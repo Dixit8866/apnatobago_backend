@@ -377,7 +377,23 @@ export const getDailyReconciliationReport = async (req, res) => {
             ]
         });
         let totalCashSum = 0;
-        cashPayments.forEach(p => { totalCashSum += parseFloat(p.amount || 0); });
+        cashPayments.forEach(p => {
+            let amt = parseFloat(p.amount || 0);
+            if (p.order && p.order.totalAmount !== undefined && p.order.totalAmount !== null) {
+                const orderTot = parseFloat(p.order.totalAmount || 0);
+                if (amt > orderTot) amt = orderTot;
+            }
+            totalCashSum += amt;
+        });
+
+        onlinePayments.forEach(p => {
+            let amt = parseFloat(p.amount || 0);
+            if (p.order && p.order.totalAmount !== undefined && p.order.totalAmount !== null) {
+                const orderTot = parseFloat(p.order.totalAmount || 0);
+                if (amt > orderTot) amt = orderTot;
+            }
+            totalOnlineSum += amt;
+        });
 
         const totalReceived = totalCashSum + totalOnlineSum;
 
@@ -428,6 +444,11 @@ export const getDailyReconciliationReport = async (req, res) => {
             const tot = parseFloat(o.totalAmount || 0);
             todayDeliveredOrdersTotal += tot;
 
+            let pAmt = parseFloat(o.paidAmount || 0);
+            if (pAmt > tot) {
+                pAmt = tot;
+            }
+
             // Resolve delivery boy from assignment, order payment association, or payment map
             const paymentBoy = o.payments?.find(p => p.deliveryBoy?.name)?.deliveryBoy;
             const dbBoy = o.assignment?.deliveryBoy || paymentBoy || paymentDeliveryBoyMap[o.id];
@@ -437,7 +458,7 @@ export const getDailyReconciliationReport = async (req, res) => {
                 orderId: o.orderId,
                 totalAmount: tot,
                 dueAmount: parseFloat(o.dueAmount || 0),
-                paidAmount: parseFloat(o.paidAmount || 0),
+                paidAmount: pAmt,
                 paymentMethod: o.paymentMethod,
                 paymentStatus: o.paymentStatus,
                 orderStatus: o.orderStatus,
