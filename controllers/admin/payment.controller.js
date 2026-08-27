@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { OrderPayment, Order, User, DeliveryBoy, BankSetting, BusinessProfile, PartyBalanceLog, SalesReturn } from '../../models/index.js';
+import { OrderPayment, Order, User, DeliveryBoy, BankSetting, BusinessProfile, PartyBalanceLog, SalesReturn, OrderAssignment } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -332,7 +332,7 @@ export const getDailyReconciliationReport = async (req, res) => {
             const amt = parseFloat(p.amount || 0);
             totalOnlineSum += amt;
             const bankId = p.bankSettingId || 'UNASSIGNED';
-            const bankName = p.bankAccount ? `${p.bankAccount.bankName} (${p.bankAccount.accountNumber || ''})` : (p.onlineType || 'General Online / UPI');
+            const bankName = p.bankAccount ? p.bankAccount.bankName : (p.onlineType || 'General Online / UPI');
 
             if (!bankBreakdownMap[bankId]) {
                 bankBreakdownMap[bankId] = {
@@ -381,6 +381,15 @@ export const getDailyReconciliationReport = async (req, res) => {
 
         const totalReceived = totalCashSum + totalOnlineSum;
 
+        // Build quick lookup map for DeliveryBoy from payment records
+        const paymentDeliveryBoyMap = {};
+        [...cashPayments, ...onlinePayments].forEach(p => {
+            const oId = p.orderId || p.order?.id;
+            if (oId && p.deliveryBoy) {
+                paymentDeliveryBoyMap[oId] = p.deliveryBoy;
+            }
+        });
+
         // 3. Fetch Today's Delivered / Completed Orders
         const deliveredOrders = await Order.findAll({
             where: {
@@ -397,6 +406,18 @@ export const getDailyReconciliationReport = async (req, res) => {
                     as: 'user',
                     attributes: ['id', 'fullname', 'number', 'city', 'walletBalance'],
                     include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'postcode'] }]
+                },
+                {
+                    model: OrderAssignment,
+                    as: 'assignment',
+                    required: false,
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', required: false, attributes: ['id', 'name', 'phone'] }]
+                },
+                {
+                    model: OrderPayment,
+                    as: 'payments',
+                    required: false,
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', required: false, attributes: ['id', 'name', 'phone'] }]
                 }
             ],
             order: [['updatedAt', 'DESC'], ['createdAt', 'DESC']]
@@ -406,6 +427,11 @@ export const getDailyReconciliationReport = async (req, res) => {
         const todayDeliveredOrdersList = deliveredOrders.map(o => {
             const tot = parseFloat(o.totalAmount || 0);
             todayDeliveredOrdersTotal += tot;
+
+            // Resolve delivery boy from assignment, order payment association, or payment map
+            const paymentBoy = o.payments?.find(p => p.deliveryBoy?.name)?.deliveryBoy;
+            const dbBoy = o.assignment?.deliveryBoy || paymentBoy || paymentDeliveryBoyMap[o.id];
+
             return {
                 id: o.id,
                 orderId: o.orderId,
@@ -418,7 +444,9 @@ export const getDailyReconciliationReport = async (req, res) => {
                 createdAt: o.createdAt,
                 customerName: o.user?.businessProfile?.shopName || o.user?.fullname || o.customerName || 'Guest',
                 customerPhone: o.user?.number || o.customerNumber || '-',
-                shopAddress: o.user?.businessProfile?.shopAddress || '-'
+                shopAddress: o.user?.businessProfile?.shopAddress || '-',
+                deliveryBoyName: dbBoy?.name || '-',
+                deliveryBoyPhone: dbBoy?.phone || '-'
             };
         });
 
