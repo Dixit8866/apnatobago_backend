@@ -12,7 +12,8 @@ import {
     Godown,
     Product,
     DeliveryBoy,
-    PartyBalanceLog
+    PartyBalanceLog,
+    OrderPayment
 } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
