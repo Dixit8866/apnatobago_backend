@@ -928,10 +928,11 @@ export const updateOrderStatus = async (req, res) => {
         }
 
         // Handle Payment Updates & Cash/Online/Credit Breakdown Entries
-        const { isDirectPaymentEdit } = req.body;
+        const { isDirectPaymentEdit, returnAmount, discountAmount } = req.body;
         const cash = parseFloat(cashAmount || 0);
         const online = parseFloat(onlineAmount || 0);
         const credit = parseFloat(creditAmount || 0);
+        const retDeduction = parseFloat(returnAmount || discountAmount || 0);
 
         if (isDirectPaymentEdit) {
             // Direct payment update from Order Details page
@@ -957,6 +958,16 @@ export const updateOrderStatus = async (req, res) => {
                     notes: paymentNotes || notes || 'Admin Updated Online Payment'
                 });
             }
+            if (retDeduction > 0) {
+                await OrderPayment.create({
+                    orderId: order.id,
+                    amount: retDeduction,
+                    paymentMethod: 'RETURN',
+                    isSubmitted: true,
+                    submittedAt: new Date(),
+                    notes: paymentNotes || notes || 'Sales Return / Item Exchange Deduction'
+                });
+            }
             if (credit > 0) {
                 await OrderPayment.create({
                     orderId: order.id,
@@ -968,10 +979,15 @@ export const updateOrderStatus = async (req, res) => {
                 });
             }
 
+            if (retDeduction > 0) {
+                order.discount = retDeduction.toFixed(2);
+            }
+
             const total = parseFloat(order.totalAmount || 0);
-            const newPaid = Math.min(total, cash + online);
+            const netTotal = Math.max(0, total - retDeduction);
+            const newPaid = Math.min(netTotal, cash + online);
             order.paidAmount = newPaid.toFixed(2);
-            const calculatedDue = Math.max(0, total - newPaid - credit);
+            const calculatedDue = Math.max(0, netTotal - newPaid - credit);
             order.dueAmount = calculatedDue.toFixed(2);
 
             if (paymentStatus && ['Pending', 'Paid', 'Partial', 'Failed', 'Refunded'].includes(paymentStatus)) {
@@ -988,7 +1004,7 @@ export const updateOrderStatus = async (req, res) => {
 
             if (paymentNotes) {
                 const timestamp = new Date().toLocaleString('en-IN');
-                const noteMsg = `[Payment Updated on ${timestamp}]: Cash: ₹${cash}, Online: ₹${online}, Credit: ₹${credit}. Note: ${paymentNotes}`;
+                const noteMsg = `[Payment Updated on ${timestamp}]: Cash: ₹${cash}, Online: ₹${online}, Return/Deduction: ₹${retDeduction}, Credit: ₹${credit}. Note: ${paymentNotes}`;
                 order.notes = order.notes ? `${order.notes}\n${noteMsg}` : noteMsg;
             }
         } else if (cash > 0 || online > 0 || credit > 0) {

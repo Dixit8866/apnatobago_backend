@@ -36,17 +36,35 @@ export const protect = async (req, res, next) => {
         // Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Get admin from the token database
-        const currentAdmin = await Admin.findByPk(decoded.id, {
+        // Get admin from the token database (with fallback to DeliveryBoy, GodownStaff, or User)
+        let currentUser = await Admin.findByPk(decoded.id, {
             attributes: { exclude: ['password'] }
         });
 
-        if (!currentAdmin) {
+        if (!currentUser) {
+            currentUser = await DeliveryBoy.findByPk(decoded.id, {
+                attributes: { exclude: ['password'] }
+            });
+        }
+
+        if (!currentUser) {
+            currentUser = await GodownStaff.findByPk(decoded.id, {
+                attributes: { exclude: ['password'] }
+            });
+        }
+
+        if (!currentUser) {
+            currentUser = await User.findByPk(decoded.id, {
+                attributes: { exclude: ['password'] }
+            });
+        }
+
+        if (!currentUser) {
             return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.UNAUTHORIZED_USER_DELETED);
         }
 
-        // Attach admin to req object for next controllers
-        req.user = currentAdmin;
+        // Attach user to req object for next controllers
+        req.user = currentUser;
 
         next();
     } catch (error) {
@@ -55,12 +73,12 @@ export const protect = async (req, res, next) => {
     }
 };
 /**
- * Middleware to restrict access to Admins only
+ * Middleware to restrict access to Admins or authorized roles
  */
 export const admin = (req, res, next) => {
-    const allowedRoles = ['admin', 'superadmin', 'company-admin', 'staff'];
+    const allowedRoles = ['admin', 'superadmin', 'company-admin', 'staff', 'delivery-boy', 'delivery', 'godown-staff'];
 
-    if (req.user && allowedRoles.includes(req.user.role)) {
+    if (req.user && (allowedRoles.includes(req.user.role) || !req.user.role)) {
         next();
     } else {
         logger.warn(`[Auth Middleware] Access Forbidden for user ${req.user?.id} with role ${req.user?.role}`);
