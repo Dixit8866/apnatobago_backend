@@ -567,6 +567,7 @@ export const getAllOrders = async (req, res) => {
         const packedCountWhere = { ...countWhere, orderStatus: 'Packed' };
         const shippingCountWhere = { ...countWhere, orderStatus: 'Shipping' };
 
+        const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
         const paymentCollectCountWhere = { 
             ...countWhere, 
             orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
