@@ -921,6 +921,8 @@ export const updateOrderStatus = async (req, res) => {
             // Direct payment update from Order Details page
             await OrderPayment.destroy({ where: { orderId: order.id } });
 
+            const cleanNotes = String(paymentNotes || notes || '').trim().slice(0, 240);
+
             if (cash > 0) {
                 await OrderPayment.create({
                     orderId: order.id,
@@ -928,7 +930,7 @@ export const updateOrderStatus = async (req, res) => {
                     paymentMethod: 'CASH',
                     isSubmitted: true,
                     submittedAt: new Date(),
-                    notes: paymentNotes || notes || 'Admin Updated Cash Payment'
+                    notes: cleanNotes || 'Admin Updated Cash Payment'
                 });
             }
             if (online > 0) {
@@ -938,7 +940,7 @@ export const updateOrderStatus = async (req, res) => {
                     paymentMethod: 'ONLINE',
                     isSubmitted: true,
                     submittedAt: new Date(),
-                    notes: paymentNotes || notes || 'Admin Updated Online Payment'
+                    notes: cleanNotes || 'Admin Updated Online Payment'
                 });
             }
             if (retDeduction > 0) {
@@ -948,7 +950,7 @@ export const updateOrderStatus = async (req, res) => {
                     paymentMethod: 'RETURN',
                     isSubmitted: true,
                     submittedAt: new Date(),
-                    notes: paymentNotes || notes || 'Sales Return / Item Exchange Deduction'
+                    notes: cleanNotes || 'Sales Return / Item Exchange Deduction'
                 });
             }
             if (credit > 0) {
@@ -958,7 +960,7 @@ export const updateOrderStatus = async (req, res) => {
                     paymentMethod: 'CREDIT',
                     isSubmitted: true,
                     submittedAt: new Date(),
-                    notes: paymentNotes || notes || 'Admin Updated Credit Payment'
+                    notes: cleanNotes || 'Admin Updated Credit Payment'
                 });
             }
 
@@ -998,12 +1000,11 @@ export const updateOrderStatus = async (req, res) => {
                 order.paymentStatus = 'Partial';
             }
 
-            if (paymentNotes) {
-                const timestamp = new Date().toLocaleString('en-IN');
-                const noteMsg = `[Payment Updated on ${timestamp}]: Cash: ₹${cash}, Online: ₹${online}, Return/Deduction: ₹${retDeduction}, Credit: ₹${credit}. Note: ${paymentNotes}`;
-                order.notes = order.notes ? `${order.notes}\n${noteMsg}` : noteMsg;
+            if (cleanNotes) {
+                order.notes = cleanNotes;
             }
         } else if (cash > 0 || online > 0 || credit > 0) {
+            const cleanNotes = String(paymentNotes || notes || '').trim().slice(0, 240);
             if (cash > 0) {
                 await OrderPayment.create({
                     orderId: order.id,
@@ -1011,7 +1012,7 @@ export const updateOrderStatus = async (req, res) => {
                     paymentMethod: 'CASH',
                     isSubmitted: true,
                     submittedAt: new Date(),
-                    notes: paymentNotes || notes || 'Admin Collected Cash Payment'
+                    notes: cleanNotes || 'Admin Collected Cash Payment'
                 });
             }
             if (online > 0) {
@@ -1021,7 +1022,7 @@ export const updateOrderStatus = async (req, res) => {
                     paymentMethod: 'ONLINE',
                     isSubmitted: true,
                     submittedAt: new Date(),
-                    notes: paymentNotes || notes || 'Admin Collected Online Payment'
+                    notes: cleanNotes || 'Admin Collected Online Payment'
                 });
             }
             if (credit > 0) {
@@ -1031,7 +1032,7 @@ export const updateOrderStatus = async (req, res) => {
                     paymentMethod: 'CREDIT',
                     isSubmitted: true,
                     submittedAt: new Date(),
-                    notes: paymentNotes || notes || 'Admin Recorded Credit Payment'
+                    notes: cleanNotes || 'Admin Recorded Credit Payment'
                 });
             }
 
