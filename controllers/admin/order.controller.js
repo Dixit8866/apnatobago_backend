@@ -1361,6 +1361,134 @@ export const bulkVerifyPayments = async (req, res) => {
 };
 
 /**
+ * @desc    Comprehensive Payment Verification & Settlement for an Order
+ * @route   PUT /api/admin/orders/:id/verify-settlement
+ * @access  Private (Admin)
+ */
+export const verifyAndSettleOrder = async (req, res) => {
+    const transaction = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const { 
+            cashAmount = 0, 
+            onlineAmount = 0, 
+            creditAmount = 0, 
+            bankAccountId, 
+            note, 
+            salesReturns = []
+        } = req.body;
+
+        const order = await Order.findByPk(id, {
+            include: [
+                { model: OrderItem, as: 'items' },
+                { model: User, as: 'user' }
+            ],
+            transaction
+        });
+
+        if (!order) {
+            await transaction.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+
+        const parsedCash = parseFloat(cashAmount) || 0;
+        const parsedOnline = parseFloat(onlineAmount) || 0;
+        const parsedCredit = parseFloat(creditAmount) || 0;
+        let totalReturnDeduction = 0;
+
+        // Process In-Bill Sales Returns if provided
+        if (Array.isArray(salesReturns) && salesReturns.length > 0) {
+            for (const itemReturn of salesReturns) {
+                const retQty = parseInt(itemReturn.quantity, 10);
+                const retPrice = parseFloat(itemReturn.price) || 0;
+                if (!retQty || retQty <= 0) continue;
+
+                const itemDeduction = retQty * retPrice;
+                totalReturnDeduction += itemDeduction;
+
+                const condition = itemReturn.condition === 'DAMAGED' ? 'DAMAGED' : 'GOOD';
+
+                // Create Sales Return record
+                await SalesReturn.create({
+                    orderId: order.id,
+                    userId: order.userId,
+                    productId: itemReturn.productId,
+                    variantId: itemReturn.variantId,
+                    quantity: retQty,
+                    price: retPrice,
+                    returnAmount: itemDeduction,
+                    condition,
+                    status: 'Approved',
+                    reason: itemReturn.reason || 'Payment verification sales return',
+                    approvedByAdminId: req.admin?.id || req.user?.id || null
+                }, { transaction });
+
+                // If GOOD condition, restock to product variant inventory!
+                if (condition === 'GOOD' && itemReturn.variantId) {
+                    const variant = await ProductVariant.findByPk(itemReturn.variantId, { transaction });
+                    if (variant) {
+                        variant.stock = (parseInt(variant.stock, 10) || 0) + retQty;
+                        await variant.save({ transaction });
+                    }
+                }
+            }
+        }
+
+        // Update Order Settlement Fields (Bill total stays intact as requested!)
+        order.orderStatus = 'Payment Verify';
+        order.paymentCollectStatus = 'Verified';
+        order.paidAmount = parsedCash + parsedOnline;
+        order.dueAmount = parsedCredit;
+        order.paymentStatus = parsedCredit > 0 ? 'Partial' : 'Paid';
+        order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
+        order.deliveredAt = order.deliveredAt || new Date();
+
+        if (note || totalReturnDeduction > 0) {
+            const timestamp = new Date().toLocaleString();
+            let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}, Credit: ₹${parsedCredit}`;
+            if (totalReturnDeduction > 0) {
+                noteStr += `, Sales Return Deduction: ₹${totalReturnDeduction.toFixed(2)}`;
+            }
+            if (note) {
+                noteStr += `\nNotes: ${note}`;
+            }
+            order.notes = order.notes ? `${order.notes}\n${noteStr}` : noteStr;
+        }
+
+        await order.save({ transaction });
+
+        // Upsert/Create OrderPayment record
+        let orderPayment = await OrderPayment.findOne({ where: { orderId: order.id }, transaction });
+        if (!orderPayment) {
+            orderPayment = new OrderPayment({ orderId: order.id, userId: order.userId });
+        }
+        orderPayment.cashAmount = parsedCash;
+        orderPayment.onlineAmount = parsedOnline;
+        orderPayment.creditAmount = parsedCredit;
+        orderPayment.paymentMethod = parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH');
+        orderPayment.bankAccountId = bankAccountId || null;
+        orderPayment.isSubmitted = true;
+        orderPayment.submittedAt = new Date();
+        await orderPayment.save({ transaction });
+
+        await transaction.commit();
+
+        logActivity(req, {
+            module: 'Payment',
+            action: 'UPDATE',
+            description: `Verified and settled payment for Order #${order.orderId}`,
+            metadata: { orderId: order.id, cashAmount: parsedCash, onlineAmount: parsedOnline, creditAmount: parsedCredit, totalReturnDeduction }
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment verified and settled successfully.", order);
+    } catch (error) {
+        await transaction.rollback();
+        logger.error(`[Admin Verify & Settle Order Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
  * @desc    Get single order details for admin
  * @route   GET /api/admin/orders/:id
  * @access  Private (Admin)

@@ -7,6 +7,7 @@ import {
     downloadDeliveryLabel,
     bulkUpdateOrderStatus,
     bulkVerifyPayments,
+    verifyAndSettleOrder,
     updateOrderItem,
     addOrderItem,
     deleteOrderItem,
@@ -47,6 +48,7 @@ router.get('/:id/invoice', downloadInvoice);
 router.get('/:id/delivery-label', downloadDeliveryLabel);
 router.put('/bulk-status', bulkUpdateOrderStatus);
 router.put('/bulk-verify-payments', bulkVerifyPayments);
+router.put('/:id/verify-settlement', verifyAndSettleOrder);
 router.put('/:id/status', updateOrderStatus);
 router.put('/:id/items/:itemId', updateOrderItem);
 router.post('/:id/items', addOrderItem);
