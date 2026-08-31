@@ -221,6 +221,11 @@ export const getAllOrders = async (req, res) => {
                 } else if (status === 'Payment Collect') {
                     baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect'] };
                     baseWhere.paymentCollectStatus = { [Op.ne]: 'Verified' };
+                } else if (status === 'Payment Verify') {
+                    baseWhere[Op.or] = [
+                        { orderStatus: 'Payment Verify' },
+                        { paymentCollectStatus: 'Verified' }
+                    ];
                 } else {
                     baseWhere.orderStatus = status;
                 }
