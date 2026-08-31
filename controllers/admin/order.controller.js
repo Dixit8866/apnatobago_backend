@@ -471,29 +471,35 @@ export const getAllOrders = async (req, res) => {
                     const unpaidOrdersList = await Order.findAll({
                         where: {
                             userId: { [Op.in]: userIds },
-                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
-                            paymentStatus: { [Op.notIn]: ['Paid', 'Refunded'] }
+                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
                         },
-                        attributes: ['id', 'userId', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus']
+                        attributes: ['id', 'userId', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'createdAt']
                     });
 
                     unpaidOrdersList.forEach(uo => {
                         const uId = uo.userId;
+                        const credit = parseFloat(uo.creditAmount || 0);
+                        const dueCol = parseFloat(uo.dueAmount || 0);
                         const tot = parseFloat(uo.totalAmount || 0);
                         const paid = parseFloat(uo.paidAmount || 0);
-                        const dueCol = parseFloat(uo.dueAmount || uo.creditAmount || 0);
+                        const pStatus = String(uo.paymentStatus || '').toLowerCase();
 
                         let due = 0;
-                        if (dueCol > 0) {
+                        if (credit > 0) {
+                            due = credit;
+                        } else if (dueCol > 0) {
                             due = dueCol;
-                        } else if (tot > 0 && String(uo.paymentStatus).toLowerCase() !== 'paid' && paid < tot - 0.99) {
+                        } else if (pStatus !== 'paid' && tot > 0 && paid < tot - 0.99) {
                             due = tot - paid;
                         }
 
                         if (due > 0) {
-                            if (!userUnpaidDuesMap[uId]) userUnpaidDuesMap[uId] = { totalDue: 0, orderIds: [] };
-                            userUnpaidDuesMap[uId].totalDue += due;
-                            userUnpaidDuesMap[uId].orderIds.push(uo.id);
+                            if (!userUnpaidDuesMap[uId]) userUnpaidDuesMap[uId] = [];
+                            userUnpaidDuesMap[uId].push({
+                                id: uo.id,
+                                due,
+                                createdAt: new Date(uo.createdAt).getTime()
+                            });
                         }
                     });
                 } catch (dueErr) {
@@ -511,10 +517,16 @@ export const getAllOrders = async (req, res) => {
                 }
 
                 const uId = order.userId;
-                const uInfo = userUnpaidDuesMap[uId] || { totalDue: 0, orderIds: [] };
-                const isCurrentInUnpaid = uInfo.orderIds.includes(order.id);
-                const currentDue = isCurrentInUnpaid ? parseFloat(order.dueAmount || order.creditAmount || 0) : 0;
-                const prevUnpaidDue = Math.max(0, uInfo.totalDue - currentDue);
+                const uOrders = userUnpaidDuesMap[uId] || [];
+                const currentCreated = new Date(order.createdAt).getTime();
+
+                // Calculate sum of dues from older orders of the same customer
+                const prevUnpaidDue = uOrders.reduce((sum, uo) => {
+                    if (uo.id !== order.id && uo.createdAt <= currentCreated) {
+                        return sum + uo.due;
+                    }
+                    return sum;
+                }, 0);
 
                 order.setDataValue('previousUnpaidDue', prevUnpaidDue);
                 order.setDataValue('items', itemsMap[order.id] || []);
