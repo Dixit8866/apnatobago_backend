@@ -501,7 +501,7 @@ export const getAllOrders = async (req, res) => {
                             attributes: ['id', 'amount', 'paymentMethod']
                         }
                     ],
-                    attributes: ['id', 'userId', 'customerNumber', 'customerPhone', 'customerName', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt']
+                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt']
                 });
 
                 unpaidOrdersStore = unpaidOrdersList.map(uo => {
@@ -534,12 +534,13 @@ export const getAllOrders = async (req, res) => {
                         due = tot - paid;
                     }
 
-                    const uPhone = String(uo.user?.number || uo.customerNumber || uo.customerPhone || '').replace(/\D/g, '').slice(-10);
+                    const uPhone = String(uo.user?.number || uo.customerNumber || '').replace(/\D/g, '').slice(-10);
                     const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
                     const uName = String(uo.user?.fullname || uo.customerName || '').toLowerCase().trim();
 
                     return {
                         id: uo.id,
+                        orderId: uo.orderId,
                         userId: uo.userId || uo.user?.id,
                         phone: uPhone,
                         shopName: uShop,
@@ -562,13 +563,13 @@ export const getAllOrders = async (req, res) => {
                 }
 
                 const uId = order.userId || order.user?.id;
-                const oPhone = String(order.user?.number || order.customerNumber || order.customerPhone || '').replace(/\D/g, '').slice(-10);
+                const oPhone = String(order.user?.number || order.customerNumber || '').replace(/\D/g, '').slice(-10);
                 const oShop = String(order.user?.businessProfile?.shopName || '').toLowerCase().trim();
                 const oName = String(order.user?.fullname || order.customerName || '').toLowerCase().trim();
 
                 // Calculate sum of dues from other credit/delivered orders of the same customer (matched by userId, phone, shopName, or name)
                 const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
-                    if (String(uo.id) !== String(order.id)) {
+                    if (String(uo.id) !== String(order.id) && String(uo.orderId || '') !== String(order.orderId || '')) {
                         const isSameUser = (uId && uo.userId && String(uId) === String(uo.userId));
                         const isSamePhone = (oPhone && uo.phone && oPhone.length === 10 && oPhone === uo.phone);
                         const isSameShop = (oShop && uo.shopName && oShop.length > 2 && oShop === uo.shopName);
