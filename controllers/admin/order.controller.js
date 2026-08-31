@@ -968,21 +968,34 @@ export const updateOrderStatus = async (req, res) => {
 
             const total = parseFloat(order.totalAmount || 0);
             const netTotal = Math.max(0, total - retDeduction);
-            const newPaid = Math.min(netTotal, cash + online);
-            order.paidAmount = newPaid.toFixed(2);
-            const calculatedDue = Math.max(0, netTotal - newPaid - credit);
-            order.dueAmount = calculatedDue.toFixed(2);
 
-            if (paymentStatus && ['Pending', 'Paid', 'Partial', 'Failed', 'Refunded'].includes(paymentStatus)) {
-                order.paymentStatus = paymentStatus;
+            // Explicitly set credit, paid, and due amounts
+            const explicitCredit = Math.max(0, credit);
+            const realPaid = Math.min(netTotal, cash + online);
+
+            let finalCredit = explicitCredit;
+            let finalPaid = realPaid;
+            let finalDue = 0;
+
+            if (explicitCredit > 0) {
+                finalDue = explicitCredit;
+                finalPaid = Math.max(0, netTotal - explicitCredit);
             } else {
-                if (calculatedDue <= 1e-5) {
-                    order.paymentStatus = 'Paid';
-                } else if (newPaid > 0) {
-                    order.paymentStatus = 'Partial';
-                } else {
-                    order.paymentStatus = 'Pending';
+                finalDue = Math.max(0, netTotal - realPaid);
+                if (finalDue <= 0.01) {
+                    finalPaid = netTotal;
+                    finalDue = 0;
                 }
+            }
+
+            order.paidAmount = finalPaid.toFixed(2);
+            order.dueAmount = finalDue.toFixed(2);
+            order.creditAmount = finalCredit.toFixed(2);
+
+            if (finalDue <= 0.01 && finalCredit <= 0.01) {
+                order.paymentStatus = 'Paid';
+            } else {
+                order.paymentStatus = 'Partial';
             }
 
             if (paymentNotes) {
