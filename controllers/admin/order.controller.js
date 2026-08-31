@@ -31,64 +31,35 @@ const adjustOrderPayments = (order) => {
     if (!order) return order;
 
     const rowData = order.toJSON ? order.toJSON() : order;
-    if (!rowData.payments || rowData.payments.length === 0) {
-        const fullTotal = parseFloat(rowData.totalAmount || 0);
-        const couponDisc = parseFloat(rowData.couponDiscount || 0);
-        const actualPaid = parseFloat(rowData.paidAmount || 0);
-        const payableAmt = Math.max(0, fullTotal - couponDisc);
-        const currentDue = Math.max(0, payableAmt - actualPaid);
-        rowData.payableAmount = payableAmt.toFixed(2);
-        rowData.dueAmount = currentDue.toFixed(2);
-        if (currentDue <= 1e-7) {
-            rowData.paymentStatus = 'Paid';
-        }
-        return rowData;
-    }
-
-    let payments = rowData.payments.map(p => p.toJSON ? p.toJSON() : { ...p });
-
-    const totalCredit = payments.filter(p => p.paymentMethod === 'CREDIT').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    const totalReal = payments.filter(p => p.paymentMethod === 'CASH' || p.paymentMethod === 'ONLINE').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    const orderTotal = parseFloat(rowData.totalAmount || 0);
-
-    const nonCreditPortion = Math.max(0, orderTotal - totalCredit);
-    const realPaidToCredit = Math.max(0, totalReal - nonCreditPortion);
-    const outstandingCredit = Math.max(0, totalCredit - realPaidToCredit);
-
-    let remainingCreditToDistribute = outstandingCredit;
-
-    const adjustedPayments = payments.map(payment => {
-        if (payment.paymentMethod === 'CREDIT') {
-            const currentAmount = parseFloat(payment.amount || 0);
-            const allowedAmount = Math.min(currentAmount, remainingCreditToDistribute);
-            remainingCreditToDistribute -= allowedAmount;
-            return {
-                ...payment,
-                amount: allowedAmount.toFixed(2)
-            };
-        }
-        return payment;
-    }).filter(p => parseFloat(p.amount) > 0);
-
-    rowData.payments = adjustedPayments;
+    const creditAmt = parseFloat(rowData.creditAmount || 0);
+    const dueAmt = parseFloat(rowData.dueAmount || 0);
+    const effectiveCredit = creditAmt > 0 ? creditAmt : dueAmt;
 
     const fullTotal = parseFloat(rowData.totalAmount || 0);
     const couponDisc = parseFloat(rowData.couponDiscount || 0);
     const couponPts = Number(rowData.couponPoints || 0);
     const actualPaid = parseFloat(rowData.paidAmount || 0);
     const payableAmt = Math.max(0, fullTotal - couponDisc);
-    const currentDue = Math.max(0, payableAmt - actualPaid);
+
+    if (effectiveCredit > 0) {
+        rowData.payableAmount = payableAmt.toFixed(2);
+        rowData.dueAmount = effectiveCredit.toFixed(2);
+        rowData.creditAmount = effectiveCredit.toFixed(2);
+        rowData.paymentStatus = 'Partial';
+    } else {
+        const currentDue = Math.max(0, payableAmt - actualPaid);
+        rowData.payableAmount = payableAmt.toFixed(2);
+        rowData.dueAmount = currentDue.toFixed(2);
+        if (currentDue <= 1e-7) {
+            rowData.paymentStatus = 'Paid';
+        } else {
+            rowData.paymentStatus = 'Partial';
+        }
+    }
 
     rowData.couponPoints = couponPts;
     rowData.couponDiscount = couponDisc.toFixed(2);
     rowData.discountType = (couponPts > 0 || couponDisc > 0) ? (rowData.discountType || 'Coupon Discount') : null;
-    rowData.payableAmount = payableAmt.toFixed(2);
-    rowData.paidAmount = actualPaid.toFixed(2);
-    rowData.dueAmount = currentDue.toFixed(2);
-
-    if (currentDue <= 1e-7) {
-        rowData.paymentStatus = 'Paid';
-    }
 
     return rowData;
 };
