@@ -501,11 +501,10 @@ export const getAllOrders = async (req, res) => {
                             attributes: ['id', 'amount', 'paymentMethod']
                         }
                     ],
-                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt']
+                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt']
                 });
 
                 unpaidOrdersStore = unpaidOrdersList.map(uo => {
-                    const credit = parseFloat(uo.creditAmount || 0);
                     const dueCol = parseFloat(uo.dueAmount || 0);
                     const tot = parseFloat(uo.totalAmount || 0);
                     const paid = parseFloat(uo.paidAmount || 0);
@@ -522,9 +521,7 @@ export const getAllOrders = async (req, res) => {
                     }
 
                     let due = 0;
-                    if (credit > 0) {
-                        due = credit;
-                    } else if (dueCol > 0) {
+                    if (dueCol > 0) {
                         due = dueCol;
                     } else if (creditFromPayments > 0) {
                         due = creditFromPayments;
