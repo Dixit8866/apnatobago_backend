@@ -467,23 +467,28 @@ export const getAllOrders = async (req, res) => {
             const userIds = Array.from(new Set(result.rows.map(o => o.userId).filter(Boolean)));
             let userUnpaidDuesMap = {};
             if (userIds.length > 0) {
-                const unpaidOrdersList = await Order.findAll({
-                    where: {
-                        userId: { [Op.in]: userIds },
-                        orderStatus: { [Op.notIn]: ['Cancelled'] },
-                        paymentStatus: { [Op.notIn]: ['Paid', 'Refunded'] },
-                        dueAmount: { [Op.gt]: 0 }
-                    },
-                    attributes: ['id', 'userId', 'dueAmount', 'creditAmount']
-                });
+                try {
+                    const unpaidOrdersList = await Order.findAll({
+                        where: {
+                            userId: { [Op.in]: userIds },
+                            orderStatus: { [Op.notIn]: ['Cancelled'] },
+                            paymentStatus: { [Op.notIn]: ['Paid', 'Refunded'] }
+                        },
+                        attributes: ['id', 'userId', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount']
+                    });
 
-                unpaidOrdersList.forEach(uo => {
-                    const uId = uo.userId;
-                    const due = parseFloat(uo.dueAmount || uo.creditAmount || 0);
-                    if (!userUnpaidDuesMap[uId]) userUnpaidDuesMap[uId] = { totalDue: 0, orderIds: [] };
-                    userUnpaidDuesMap[uId].totalDue += due;
-                    userUnpaidDuesMap[uId].orderIds.push(uo.id);
-                });
+                    unpaidOrdersList.forEach(uo => {
+                        const uId = uo.userId;
+                        const due = parseFloat(uo.dueAmount || uo.creditAmount || 0);
+                        if (due > 0) {
+                            if (!userUnpaidDuesMap[uId]) userUnpaidDuesMap[uId] = { totalDue: 0, orderIds: [] };
+                            userUnpaidDuesMap[uId].totalDue += due;
+                            userUnpaidDuesMap[uId].orderIds.push(uo.id);
+                        }
+                    });
+                } catch (dueErr) {
+                    logger.error(`[Previous Unpaid Dues Calc Error]: ${dueErr.message}`);
+                }
             }
 
             // Attach to Sequelize models using setDataValue so they are serialized correctly
