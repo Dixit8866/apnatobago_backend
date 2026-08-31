@@ -603,12 +603,8 @@ export const getAllOrders = async (req, res) => {
             ];
             cancelledCountWhere.updatedAt = countDateRange;
         } else {
-            // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set
+            // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set (Payment Collect shows all unverified orders across all dates)
             deliveredCountWhere[Op.or] = [
-                { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
-                { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
-            ];
-            paymentCollectCountWhere[Op.or] = [
                 { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
                 { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
             ];
@@ -1489,20 +1485,24 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.creditAmount = parsedCredit;
         order.paymentMethod = parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH');
         order.paidAmount = parsedCash + parsedOnline;
-        order.dueAmount = parsedCredit + parsedBaki;
-        order.paymentStatus = (parsedCredit + parsedBaki) > 0 ? 'Partial' : 'Paid';
+        order.dueAmount = parsedCredit; // Credit Amount represents THIS order's unpaid bill due amount
+        order.paymentStatus = parsedCredit > 0 ? 'Partial' : 'Paid';
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         order.deliveredAt = order.deliveredAt || new Date();
 
-        // If explicit Party Pending Due override provided, update user wallet balance
-        if (order.user && req.body.overridePartyDue !== undefined && req.body.overridePartyDue !== '') {
-            const parsedDueOverride = parseFloat(req.body.overridePartyDue) || 0;
-            // Negative walletBalance represents dues owed by party
-            order.user.walletBalance = -parsedDueOverride;
-            await order.user.save({ transaction });
-        } else if (order.user && parsedJama > 0) {
-            order.user.walletBalance = (parseFloat(order.user.walletBalance) || 0) + parsedJama;
-            await order.user.save({ transaction });
+        // Update Party Wallet/Account Balance for Jama (+) and Baki (-)
+        if (order.user) {
+            if (req.body.overridePartyDue !== undefined && req.body.overridePartyDue !== '') {
+                const parsedDueOverride = parseFloat(req.body.overridePartyDue) || 0;
+                // Negative walletBalance represents dues owed by party
+                order.user.walletBalance = -parsedDueOverride;
+                await order.user.save({ transaction });
+            } else if (parsedJama > 0 || parsedBaki > 0) {
+                const currentWallet = parseFloat(order.user.walletBalance) || 0;
+                // Jama (+) adds to party wallet balance, Baki (-) subtracts from party wallet balance
+                order.user.walletBalance = currentWallet + parsedJama - parsedBaki;
+                await order.user.save({ transaction });
+            }
         }
 
         const timestamp = new Date().toLocaleString();
