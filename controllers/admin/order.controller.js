@@ -1379,6 +1379,8 @@ export const verifyAndSettleOrder = async (req, res) => {
             previousReturnCredit = 0,
             previousReturnOrderId = null,
             previousSalesReturns = [],
+            jamaAmount = 0,
+            bakiAmount = 0,
             roundOffAmount = 0
         } = req.body;
 
@@ -1399,7 +1401,8 @@ export const verifyAndSettleOrder = async (req, res) => {
         const parsedOnline = parseFloat(onlineAmount) || 0;
         const parsedCredit = parseFloat(creditAmount) || 0;
         const parsedPrevReturn = parseFloat(previousReturnCredit) || 0;
-        const parsedRoundOff = parseFloat(roundOffAmount) || 0;
+        const parsedJama = parseFloat(jamaAmount) || 0;
+        const parsedBaki = parseFloat(bakiAmount) || 0;
         let totalReturnDeduction = 0;
 
         // Process In-Bill Sales Returns
@@ -1477,10 +1480,16 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.orderStatus = 'Payment Verify';
         order.paymentCollectStatus = 'Verified';
         order.paidAmount = parsedCash + parsedOnline;
-        order.dueAmount = parsedCredit;
-        order.paymentStatus = parsedCredit > 0 ? 'Partial' : 'Paid';
+        order.dueAmount = parsedCredit + parsedBaki;
+        order.paymentStatus = (parsedCredit + parsedBaki) > 0 ? 'Partial' : 'Paid';
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         order.deliveredAt = order.deliveredAt || new Date();
+
+        // If Jama Amount provided, add credit to party wallet balance
+        if (order.user && parsedJama > 0) {
+            order.user.walletBalance = (parseFloat(order.user.walletBalance) || 0) + parsedJama;
+            await order.user.save({ transaction });
+        }
 
         const timestamp = new Date().toLocaleString();
         let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}, Credit: ₹${parsedCredit}`;
@@ -1490,8 +1499,11 @@ export const verifyAndSettleOrder = async (req, res) => {
         if (parsedPrevReturn > 0) {
             noteStr += `, Previous Order Return Credit: ₹${parsedPrevReturn.toFixed(2)}`;
         }
-        if (parsedRoundOff !== 0) {
-            noteStr += `, Round-Off Adjustment: ${parsedRoundOff > 0 ? '+' : ''}₹${parsedRoundOff.toFixed(2)}`;
+        if (parsedJama > 0) {
+            noteStr += `, Account Jama (+): ₹${parsedJama.toFixed(2)}`;
+        }
+        if (parsedBaki > 0) {
+            noteStr += `, Account Baki (-): ₹${parsedBaki.toFixed(2)}`;
         }
         if (note) {
             noteStr += `\nNotes: ${note}`;
