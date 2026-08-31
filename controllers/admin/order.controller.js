@@ -1375,7 +1375,11 @@ export const verifyAndSettleOrder = async (req, res) => {
             creditAmount = 0, 
             bankAccountId, 
             note, 
-            salesReturns = []
+            salesReturns = [],
+            previousReturnCredit = 0,
+            previousReturnOrderId = null,
+            previousSalesReturns = [],
+            roundOffAmount = 0
         } = req.body;
 
         const order = await Order.findByPk(id, {
@@ -1394,9 +1398,11 @@ export const verifyAndSettleOrder = async (req, res) => {
         const parsedCash = parseFloat(cashAmount) || 0;
         const parsedOnline = parseFloat(onlineAmount) || 0;
         const parsedCredit = parseFloat(creditAmount) || 0;
+        const parsedPrevReturn = parseFloat(previousReturnCredit) || 0;
+        const parsedRoundOff = parseFloat(roundOffAmount) || 0;
         let totalReturnDeduction = 0;
 
-        // Process In-Bill Sales Returns if provided
+        // Process In-Bill Sales Returns
         if (Array.isArray(salesReturns) && salesReturns.length > 0) {
             for (const itemReturn of salesReturns) {
                 const retQty = parseInt(itemReturn.quantity, 10);
@@ -1408,7 +1414,6 @@ export const verifyAndSettleOrder = async (req, res) => {
 
                 const condition = itemReturn.condition === 'DAMAGED' ? 'DAMAGED' : 'GOOD';
 
-                // Create Sales Return record
                 await SalesReturn.create({
                     orderId: order.id,
                     userId: order.userId,
@@ -1419,15 +1424,49 @@ export const verifyAndSettleOrder = async (req, res) => {
                     returnAmount: itemDeduction,
                     condition,
                     status: 'Approved',
-                    reason: itemReturn.reason || 'Payment verification sales return',
+                    reason: itemReturn.reason || 'Payment verification in-bill sales return',
                     approvedByAdminId: req.admin?.id || req.user?.id || null
                 }, { transaction });
 
-                // If GOOD condition, restock to product variant inventory!
                 if (condition === 'GOOD' && itemReturn.variantId) {
                     const variant = await ProductVariant.findByPk(itemReturn.variantId, { transaction });
                     if (variant) {
                         variant.stock = (parseInt(variant.stock, 10) || 0) + retQty;
+                        await variant.save({ transaction });
+                    }
+                }
+            }
+        }
+
+        // Process Previous Order / Cross-Bill Sales Returns if specified
+        if (Array.isArray(previousSalesReturns) && previousSalesReturns.length > 0) {
+            const targetPrevOrderId = previousReturnOrderId || order.id;
+            for (const prevRet of previousSalesReturns) {
+                const pQty = parseInt(prevRet.quantity, 10);
+                const pPrice = parseFloat(prevRet.price) || 0;
+                if (!pQty || pQty <= 0) continue;
+
+                const pDeduction = pQty * pPrice;
+                const pCondition = prevRet.condition === 'DAMAGED' ? 'DAMAGED' : 'GOOD';
+
+                await SalesReturn.create({
+                    orderId: targetPrevOrderId,
+                    userId: order.userId,
+                    productId: prevRet.productId,
+                    variantId: prevRet.variantId,
+                    quantity: pQty,
+                    price: pPrice,
+                    returnAmount: pDeduction,
+                    condition: pCondition,
+                    status: 'Approved',
+                    reason: prevRet.reason || `Cross-bill return credit adjusted against Order #${order.orderId}`,
+                    approvedByAdminId: req.admin?.id || req.user?.id || null
+                }, { transaction });
+
+                if (pCondition === 'GOOD' && prevRet.variantId) {
+                    const variant = await ProductVariant.findByPk(prevRet.variantId, { transaction });
+                    if (variant) {
+                        variant.stock = (parseInt(variant.stock, 10) || 0) + pQty;
                         await variant.save({ transaction });
                     }
                 }
@@ -1443,21 +1482,25 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         order.deliveredAt = order.deliveredAt || new Date();
 
-        if (note || totalReturnDeduction > 0) {
-            const timestamp = new Date().toLocaleString();
-            let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}, Credit: ₹${parsedCredit}`;
-            if (totalReturnDeduction > 0) {
-                noteStr += `, Sales Return Deduction: ₹${totalReturnDeduction.toFixed(2)}`;
-            }
-            if (note) {
-                noteStr += `\nNotes: ${note}`;
-            }
-            order.notes = order.notes ? `${order.notes}\n${noteStr}` : noteStr;
+        const timestamp = new Date().toLocaleString();
+        let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}, Credit: ₹${parsedCredit}`;
+        if (totalReturnDeduction > 0) {
+            noteStr += `, In-Bill Return Deduction: ₹${totalReturnDeduction.toFixed(2)}`;
         }
+        if (parsedPrevReturn > 0) {
+            noteStr += `, Previous Order Return Credit: ₹${parsedPrevReturn.toFixed(2)}`;
+        }
+        if (parsedRoundOff !== 0) {
+            noteStr += `, Round-Off Adjustment: ${parsedRoundOff > 0 ? '+' : ''}₹${parsedRoundOff.toFixed(2)}`;
+        }
+        if (note) {
+            noteStr += `\nNotes: ${note}`;
+        }
+        order.notes = order.notes ? `${order.notes}\n${noteStr}` : noteStr;
 
         await order.save({ transaction });
 
-        // Upsert/Create OrderPayment record
+        // Upsert OrderPayment record
         let orderPayment = await OrderPayment.findOne({ where: { orderId: order.id }, transaction });
         if (!orderPayment) {
             orderPayment = new OrderPayment({ orderId: order.id, userId: order.userId });
@@ -1477,7 +1520,7 @@ export const verifyAndSettleOrder = async (req, res) => {
             module: 'Payment',
             action: 'UPDATE',
             description: `Verified and settled payment for Order #${order.orderId}`,
-            metadata: { orderId: order.id, cashAmount: parsedCash, onlineAmount: parsedOnline, creditAmount: parsedCredit, totalReturnDeduction }
+            metadata: { orderId: order.id, cashAmount: parsedCash, onlineAmount: parsedOnline, creditAmount: parsedCredit, totalReturnDeduction, parsedPrevReturn, parsedRoundOff }
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment verified and settled successfully.", order);
