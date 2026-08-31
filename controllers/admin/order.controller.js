@@ -1526,23 +1526,31 @@ export const verifyAndSettleOrder = async (req, res) => {
         orderPayment.onlineAmount = parsedOnline;
         orderPayment.creditAmount = parsedCredit;
         orderPayment.paymentMethod = parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH');
-        orderPayment.bankAccountId = bankAccountId || null;
+        
+        const isValidUUID = typeof bankAccountId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bankAccountId);
+        orderPayment.bankAccountId = isValidUUID ? bankAccountId : null;
         orderPayment.isSubmitted = true;
         orderPayment.submittedAt = new Date();
         await orderPayment.save({ transaction });
 
         await transaction.commit();
 
-        logActivity(req, {
-            module: 'Payment',
-            action: 'UPDATE',
-            description: `Verified and settled payment for Order #${order.orderId}`,
-            metadata: { orderId: order.id, cashAmount: parsedCash, onlineAmount: parsedOnline, creditAmount: parsedCredit, totalReturnDeduction, parsedPrevReturn, parsedRoundOff }
-        });
+        try {
+            logActivity(req, {
+                module: 'Payment',
+                action: 'UPDATE',
+                description: `Verified and settled payment for Order #${order.orderId}`,
+                metadata: { orderId: order.id, cashAmount: parsedCash, onlineAmount: parsedOnline, creditAmount: parsedCredit, totalReturnDeduction, parsedPrevReturn }
+            });
+        } catch (logErr) {
+            logger.warn(`Activity log skipped during settlement: ${logErr.message}`);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Payment verified and settled successfully.", order);
     } catch (error) {
-        await transaction.rollback();
+        if (transaction && !transaction.finished) {
+            await transaction.rollback();
+        }
         logger.error(`[Admin Verify & Settle Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
