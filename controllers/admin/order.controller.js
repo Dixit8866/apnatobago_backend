@@ -453,7 +453,7 @@ export const getAllOrders = async (req, res) => {
             // Fetch OrderPayments
             const payments = await OrderPayment.findAll({
                 where: { orderId: orderIds },
-                attributes: ['id', 'amount', 'cashAmount', 'onlineAmount', 'creditAmount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'orderId', 'bankAccountId']
+                attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'orderId', 'bankSettingId']
             });
 
             // Fetch SalesReturns
@@ -1526,21 +1526,45 @@ export const verifyAndSettleOrder = async (req, res) => {
 
         await order.save({ transaction });
 
-        // Upsert OrderPayment record
-        let orderPayment = await OrderPayment.findOne({ where: { orderId: order.id }, transaction });
-        if (!orderPayment) {
-            orderPayment = new OrderPayment({ orderId: order.id, userId: order.userId });
-        }
-        orderPayment.cashAmount = parsedCash;
-        orderPayment.onlineAmount = parsedOnline;
-        orderPayment.creditAmount = parsedCredit;
-        orderPayment.paymentMethod = parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH');
-        
+        // Clear existing OrderPayment records for this order to record clean verified payment entries
+        await OrderPayment.destroy({ where: { orderId: order.id }, transaction });
+
         const isValidUUID = typeof bankAccountId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bankAccountId);
-        orderPayment.bankAccountId = isValidUUID ? bankAccountId : null;
-        orderPayment.isSubmitted = true;
-        orderPayment.submittedAt = new Date();
-        await orderPayment.save({ transaction });
+        const validBankId = isValidUUID ? bankAccountId : null;
+
+        if (parsedCash > 0) {
+            await OrderPayment.create({
+                orderId: order.id,
+                userId: order.userId,
+                amount: parsedCash,
+                paymentMethod: 'CASH',
+                isSubmitted: true,
+                submittedAt: new Date()
+            }, { transaction });
+        }
+
+        if (parsedOnline > 0) {
+            await OrderPayment.create({
+                orderId: order.id,
+                userId: order.userId,
+                amount: parsedOnline,
+                paymentMethod: 'ONLINE',
+                bankSettingId: validBankId,
+                isSubmitted: true,
+                submittedAt: new Date()
+            }, { transaction });
+        }
+
+        if (parsedCash === 0 && parsedOnline === 0) {
+            await OrderPayment.create({
+                orderId: order.id,
+                userId: order.userId,
+                amount: parsedCredit > 0 ? parsedCredit : (order.totalAmount || 0),
+                paymentMethod: parsedCredit > 0 ? 'CREDIT' : 'CASH',
+                isSubmitted: true,
+                submittedAt: new Date()
+            }, { transaction });
+        }
 
         await transaction.commit();
 
