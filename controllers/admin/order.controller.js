@@ -352,15 +352,27 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'routeCategoryId'],
                     include: [
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
                             required: false,
                             attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
+                        },
+                        {
+                            model: RouteCategory,
+                            as: 'routeCategory',
+                            required: false,
+                            attributes: ['id', 'name']
                         }
                     ]
+                },
+                {
+                    model: RouteCategory,
+                    as: 'routeCategory',
+                    required: false,
+                    attributes: ['id', 'name']
                 },
                 {
                     model: OrderAssignment,
