@@ -477,7 +477,7 @@ export const getAllOrders = async (req, res) => {
             try {
                 const unpaidOrdersList = await Order.findAll({
                     where: {
-                        orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
                     },
                     include: [
                         {
@@ -501,7 +501,7 @@ export const getAllOrders = async (req, res) => {
                             attributes: ['id', 'amount', 'paymentMethod']
                         }
                     ],
-                    attributes: ['id', 'userId', 'customerNumber', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'createdAt']
+                    attributes: ['id', 'userId', 'customerNumber', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt']
                 });
 
                 unpaidOrdersStore = unpaidOrdersList.map(uo => {
@@ -509,6 +509,9 @@ export const getAllOrders = async (req, res) => {
                     const dueCol = parseFloat(uo.dueAmount || 0);
                     const tot = parseFloat(uo.totalAmount || 0);
                     const paid = parseFloat(uo.paidAmount || 0);
+                    const pStatus = String(uo.paymentStatus || '').toLowerCase();
+                    const oStatus = String(uo.orderStatus || '');
+                    const isDeliveredOrSettled = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(oStatus);
 
                     let creditFromPayments = 0;
                     if (Array.isArray(uo.payments) && uo.payments.length > 0) {
@@ -525,7 +528,9 @@ export const getAllOrders = async (req, res) => {
                         due = dueCol;
                     } else if (creditFromPayments > 0) {
                         due = creditFromPayments;
-                    } else if (tot > 0 && paid < tot - 0.99) {
+                    } else if (pStatus === 'partial' && tot > 0 && paid < tot - 0.99) {
+                        due = tot - paid;
+                    } else if (isDeliveredOrSettled && pStatus !== 'paid' && tot > 0 && paid < tot - 0.99) {
                         due = tot - paid;
                     }
 
@@ -558,7 +563,7 @@ export const getAllOrders = async (req, res) => {
                 const oPhone = String(order.user?.number || order.customerNumber || '').replace(/\D/g, '').slice(-10);
                 const oShop = String(order.user?.businessProfile?.shopName || '').toLowerCase().trim();
 
-                // Calculate sum of dues from other delivered/settled orders of the same customer (matched by userId, phone, or shopName)
+                // Calculate sum of dues from other credit/delivered orders of the same customer (matched by userId, phone, or shopName)
                 const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
                     if (uo.id !== order.id) {
                         const isSameUser = (uId && uo.userId && String(uId) === String(uo.userId));
