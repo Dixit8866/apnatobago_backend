@@ -463,6 +463,29 @@ export const getAllOrders = async (req, res) => {
                 returnsMap[oId].push(r);
             });
 
+            // Calculate previous unpaid credit dues for each user in the paginated result set
+            const userIds = Array.from(new Set(result.rows.map(o => o.userId).filter(Boolean)));
+            let userUnpaidDuesMap = {};
+            if (userIds.length > 0) {
+                const unpaidOrdersList = await Order.findAll({
+                    where: {
+                        userId: { [Op.in]: userIds },
+                        orderStatus: { [Op.notIn]: ['Cancelled'] },
+                        paymentStatus: { [Op.notIn]: ['Paid', 'Refunded'] },
+                        dueAmount: { [Op.gt]: 0 }
+                    },
+                    attributes: ['id', 'userId', 'dueAmount', 'creditAmount']
+                });
+
+                unpaidOrdersList.forEach(uo => {
+                    const uId = uo.userId;
+                    const due = parseFloat(uo.dueAmount || uo.creditAmount || 0);
+                    if (!userUnpaidDuesMap[uId]) userUnpaidDuesMap[uId] = { totalDue: 0, orderIds: [] };
+                    userUnpaidDuesMap[uId].totalDue += due;
+                    userUnpaidDuesMap[uId].orderIds.push(uo.id);
+                });
+            }
+
             // Attach to Sequelize models using setDataValue so they are serialized correctly
             result.rows = result.rows.map(order => {
                 if (order.deliveryMode === 'Round' && order.deliveryRoundId && !order.deliveryRoundTiming) {
@@ -471,6 +494,14 @@ export const getAllOrders = async (req, res) => {
                         order.setDataValue('deliveryRoundTiming', matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`);
                     }
                 }
+
+                const uId = order.userId;
+                const uInfo = userUnpaidDuesMap[uId] || { totalDue: 0, orderIds: [] };
+                const isCurrentInUnpaid = uInfo.orderIds.includes(order.id);
+                const currentDue = isCurrentInUnpaid ? parseFloat(order.dueAmount || order.creditAmount || 0) : 0;
+                const prevUnpaidDue = Math.max(0, uInfo.totalDue - currentDue);
+
+                order.setDataValue('previousUnpaidDue', prevUnpaidDue);
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
