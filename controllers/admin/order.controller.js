@@ -218,6 +218,14 @@ export const getAllOrders = async (req, res) => {
             if (isDeliveredType) {
                 if (status === 'Delivered') {
                     baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+                } else if (status === 'Payment Collect') {
+                    baseWhere[Op.or] = [
+                        { orderStatus: 'Payment Collect' },
+                        {
+                            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
+                            paymentCollectStatus: 'Unverified'
+                        }
+                    ];
                 } else {
                     baseWhere.orderStatus = status;
                 }
@@ -559,8 +567,17 @@ export const getAllOrders = async (req, res) => {
         const packedCountWhere = { ...countWhere, orderStatus: 'Packed' };
         const shippingCountWhere = { ...countWhere, orderStatus: 'Shipping' };
 
-        const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
-        const paymentCollectCountWhere = { ...countWhere, orderStatus: 'Payment Collect' };
+        const paymentCollectCountWhere = { 
+            ...countWhere, 
+            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+            [Op.or]: [
+                { orderStatus: 'Payment Collect' },
+                {
+                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
+                    paymentCollectStatus: 'Unverified'
+                }
+            ]
+        };
         const paymentVerifyCountWhere = { ...countWhere, orderStatus: 'Payment Verify' };
         const cancelledCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } };
 
