@@ -1590,6 +1590,96 @@ export const verifyAndSettleOrder = async (req, res) => {
 };
 
 /**
+ * @desc    Settle Past Due Payment for an Order
+ * @route   POST /api/admin/orders/:id/settle-due
+ * @access  Private (Admin)
+ */
+export const settlePastDuePayment = async (req, res) => {
+    const transaction = await Order.sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const { amount, paymentMethod = 'CASH', bankSettingId, deliveryBoyId, note } = req.body;
+
+        const parsedAmount = parseFloat(amount || 0);
+        if (!parsedAmount || parsedAmount <= 0) {
+            await transaction.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please provide a valid payment amount greater than zero.');
+        }
+
+        const order = await Order.findByPk(id, {
+            include: [
+                { model: User, as: 'user' },
+                { model: OrderAssignment, as: 'assignment' }
+            ],
+            transaction
+        });
+
+        if (!order) {
+            await transaction.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Order not found');
+        }
+
+        const methodUpper = String(paymentMethod).toUpperCase() === 'ONLINE' ? 'ONLINE' : 'CASH';
+        const assignedBoyId = deliveryBoyId || order.assignment?.deliveryBoyId || null;
+        const validBankId = methodUpper === 'ONLINE' && bankSettingId ? bankSettingId : null;
+
+        // 1. Create explicit OrderPayment record for this past due collection
+        await OrderPayment.create({
+            orderId: order.id,
+            amount: parsedAmount,
+            paymentMethod: methodUpper,
+            bankSettingId: validBankId,
+            deliveryBoyId: assignedBoyId,
+            isSubmitted: true,
+            submittedAt: new Date()
+        }, { transaction });
+
+        // 2. Update Order amounts
+        const currentCredit = parseFloat(order.creditAmount || 0);
+        const currentDue = parseFloat(order.dueAmount || currentCredit || 0);
+        const newCredit = Math.max(0, currentCredit - parsedAmount);
+        const newDue = Math.max(0, currentDue - parsedAmount);
+        const newPaid = parseFloat(order.paidAmount || 0) + parsedAmount;
+
+        order.creditAmount = newCredit;
+        order.dueAmount = newDue;
+        order.paidAmount = newPaid;
+
+        if (newDue <= 0) {
+            order.paymentStatus = 'Paid';
+        } else {
+            order.paymentStatus = 'Partial';
+        }
+
+        const timestamp = new Date().toLocaleString();
+        const auditNote = `[Past Due Cleared on ${timestamp}] Amount: ₹${parsedAmount} (${methodUpper})${note ? ` Notes: ${note}` : ''}`;
+        order.notes = order.notes ? `${order.notes}\n${auditNote}` : auditNote;
+
+        await order.save({ transaction });
+        await transaction.commit();
+
+        try {
+            logActivity(req, {
+                module: 'Payment',
+                action: 'UPDATE',
+                description: `Settled past due payment of ₹${parsedAmount} for Order #${order.orderId}`,
+                metadata: { orderId: order.id, amount: parsedAmount, paymentMethod: methodUpper }
+            });
+        } catch (logErr) {
+            logger.warn(`Activity log skipped during past due settlement: ${logErr.message}`);
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `Past due payment of ₹${parsedAmount} successfully settled for Order #${order.orderId}`, order);
+    } catch (error) {
+        if (transaction && !transaction.finished) {
+            await transaction.rollback();
+        }
+        logger.error(`[Admin Settle Past Due Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
  * @desc    Get single order details for admin
  * @route   GET /api/admin/orders/:id
  * @access  Private (Admin)
