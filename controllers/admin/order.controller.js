@@ -614,6 +614,10 @@ export const getAllOrders = async (req, res) => {
                 { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
                 { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
             ];
+            paymentCollectCountWhere[Op.or] = [
+                { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } }
+            ];
             cancelledCountWhere.updatedAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
         }
 
