@@ -471,15 +471,25 @@ export const getAllOrders = async (req, res) => {
                     const unpaidOrdersList = await Order.findAll({
                         where: {
                             userId: { [Op.in]: userIds },
-                            orderStatus: { [Op.notIn]: ['Cancelled'] },
+                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
                             paymentStatus: { [Op.notIn]: ['Paid', 'Refunded'] }
                         },
-                        attributes: ['id', 'userId', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount']
+                        attributes: ['id', 'userId', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus']
                     });
 
                     unpaidOrdersList.forEach(uo => {
                         const uId = uo.userId;
-                        const due = parseFloat(uo.dueAmount || uo.creditAmount || 0);
+                        const tot = parseFloat(uo.totalAmount || 0);
+                        const paid = parseFloat(uo.paidAmount || 0);
+                        const dueCol = parseFloat(uo.dueAmount || uo.creditAmount || 0);
+
+                        let due = 0;
+                        if (dueCol > 0) {
+                            due = dueCol;
+                        } else if (tot > 0 && String(uo.paymentStatus).toLowerCase() !== 'paid' && paid < tot - 0.99) {
+                            due = tot - paid;
+                        }
+
                         if (due > 0) {
                             if (!userUnpaidDuesMap[uId]) userUnpaidDuesMap[uId] = { totalDue: 0, orderIds: [] };
                             userUnpaidDuesMap[uId].totalDue += due;
