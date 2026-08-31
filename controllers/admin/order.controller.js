@@ -229,8 +229,8 @@ export const getAllOrders = async (req, res) => {
                 } else {
                     baseWhere.orderStatus = status;
                 }
-                // Restrict Delivered/Payment Collect/Payment Verify to today by default unless filtered
-                if (!startDate && !endDate && !date) {
+                // Restrict Delivered/Payment Verify to today by default unless filtered (Payment Collect shows all unverified orders across all dates)
+                if (!startDate && !endDate && !date && status !== 'Payment Collect') {
                     dateClause = {
                         [Op.or]: [
                             { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
