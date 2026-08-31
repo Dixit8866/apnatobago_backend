@@ -477,7 +477,7 @@ export const getAllOrders = async (req, res) => {
             try {
                 const unpaidOrdersList = await Order.findAll({
                     where: {
-                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                        orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
                     },
                     include: [
                         {
@@ -493,6 +493,12 @@ export const getAllOrders = async (req, res) => {
                                     attributes: ['id', 'shopName']
                                 }
                             ]
+                        },
+                        {
+                            model: OrderPayment,
+                            as: 'payments',
+                            required: false,
+                            attributes: ['id', 'amount', 'paymentMethod']
                         }
                     ],
                     attributes: ['id', 'userId', 'customerNumber', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'createdAt']
@@ -505,11 +511,21 @@ export const getAllOrders = async (req, res) => {
                     const paid = parseFloat(uo.paidAmount || 0);
                     const pStatus = String(uo.paymentStatus || '').toLowerCase();
 
+                    let creditFromPayments = 0;
+                    if (Array.isArray(uo.payments) && uo.payments.length > 0) {
+                        uo.payments.forEach(p => {
+                            const m = String(p.paymentMethod || '').toUpperCase();
+                            if (m === 'CREDIT') creditFromPayments += parseFloat(p.amount || 0);
+                        });
+                    }
+
                     let due = 0;
                     if (credit > 0) {
                         due = credit;
                     } else if (dueCol > 0) {
                         due = dueCol;
+                    } else if (creditFromPayments > 0) {
+                        due = creditFromPayments;
                     } else if (pStatus !== 'paid' && tot > 0 && paid < tot - 0.99) {
                         due = tot - paid;
                     }
@@ -542,11 +558,10 @@ export const getAllOrders = async (req, res) => {
                 const uId = order.userId || order.user?.id;
                 const oPhone = String(order.user?.number || order.customerNumber || '').replace(/\D/g, '').slice(-10);
                 const oShop = String(order.user?.businessProfile?.shopName || '').toLowerCase().trim();
-                const currentCreated = new Date(order.createdAt).getTime();
 
-                // Calculate sum of dues from older orders of the same customer (matched by userId, phone, or shopName)
+                // Calculate sum of dues from other delivered/settled orders of the same customer (matched by userId, phone, or shopName)
                 const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
-                    if (uo.id !== order.id && uo.createdAt <= currentCreated) {
+                    if (uo.id !== order.id) {
                         const isSameUser = (uId && uo.userId && String(uId) === String(uo.userId));
                         const isSamePhone = (oPhone && uo.phone && oPhone.length === 10 && oPhone === uo.phone);
                         const isSameShop = (oShop && uo.shopName && oShop.length > 2 && oShop === uo.shopName);
