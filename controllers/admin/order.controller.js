@@ -453,7 +453,7 @@ export const getAllOrders = async (req, res) => {
             // Fetch OrderPayments
             const payments = await OrderPayment.findAll({
                 where: { orderId: orderIds },
-                attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'orderId']
+                attributes: ['id', 'amount', 'cashAmount', 'onlineAmount', 'creditAmount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'orderId', 'bankAccountId']
             });
 
             // Fetch SalesReturns
@@ -1484,6 +1484,10 @@ export const verifyAndSettleOrder = async (req, res) => {
         // Update Order Settlement Fields (Bill total stays intact as requested!)
         order.orderStatus = 'Payment Verify';
         order.paymentCollectStatus = 'Verified';
+        order.cashAmount = parsedCash;
+        order.onlineAmount = parsedOnline;
+        order.creditAmount = parsedCredit;
+        order.paymentMethod = parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH');
         order.paidAmount = parsedCash + parsedOnline;
         order.dueAmount = parsedCredit + parsedBaki;
         order.paymentStatus = (parsedCredit + parsedBaki) > 0 ? 'Partial' : 'Paid';
