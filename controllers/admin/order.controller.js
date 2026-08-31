@@ -477,6 +477,7 @@ export const getAllOrders = async (req, res) => {
                     if (userIds.length > 0) orClauses.push({ userId: { [Op.in]: userIds } });
                     if (phoneNumbers.length > 0) {
                         orClauses.push({ customerNumber: { [Op.in]: phoneNumbers } });
+                        orClauses.push({ '$user.number$': { [Op.in]: phoneNumbers } });
                     }
 
                     const unpaidOrdersList = await Order.findAll({
