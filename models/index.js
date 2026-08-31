@@ -282,13 +282,6 @@ SalesReturn.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 ProductVariant.hasMany(SalesReturn, { foreignKey: 'variantId', as: 'returns' });
 SalesReturn.belongsTo(ProductVariant, { foreignKey: 'variantId', as: 'variant' });
 
-// RouteCategory Associations
-User.belongsTo(RouteCategory, { foreignKey: 'routeCategoryId', as: 'routeCategory' });
-RouteCategory.hasMany(User, { foreignKey: 'routeCategoryId', as: 'users' });
-
-Order.belongsTo(RouteCategory, { foreignKey: 'routeCategoryId', as: 'routeCategory' });
-RouteCategory.hasMany(Order, { foreignKey: 'routeCategoryId', as: 'orders' });
-
 // ─── Manual Migrations (Production Safe) ───────────────────────────────────
 // These ensure that new columns are added if they don't exist yet
 import sequelize from '../config/db.js';
