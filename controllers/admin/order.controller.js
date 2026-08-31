@@ -1588,19 +1588,12 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         order.deliveredAt = order.deliveredAt || new Date();
 
-        // Update Party Wallet/Account Balance for Jama (+) and Baki (-)
-        if (order.user) {
-            if (req.body.overridePartyDue !== undefined && req.body.overridePartyDue !== '') {
-                const parsedDueOverride = parseFloat(req.body.overridePartyDue) || 0;
-                // Negative walletBalance represents dues owed by party
-                order.user.walletBalance = -parsedDueOverride;
-                await order.user.save({ transaction });
-            } else if (parsedJama > 0 || parsedBaki > 0) {
-                const currentWallet = parseFloat(order.user.walletBalance) || 0;
-                // Jama (+) adds to party wallet balance, Baki (-) subtracts from party wallet balance
-                order.user.walletBalance = currentWallet + parsedJama - parsedBaki;
-                await order.user.save({ transaction });
-            }
+        // Update Party Wallet/Account Balance ONLY for explicit Jama (+) and Baki (-) ledger adjustments
+        if (order.user && (parsedJama > 0 || parsedBaki > 0)) {
+            const currentWallet = parseFloat(order.user.walletBalance) || 0;
+            // Jama (+) adds to party wallet balance, Baki (-) subtracts from party wallet balance
+            order.user.walletBalance = currentWallet + parsedJama - parsedBaki;
+            await order.user.save({ transaction });
         }
 
         const timestamp = new Date().toLocaleString();
