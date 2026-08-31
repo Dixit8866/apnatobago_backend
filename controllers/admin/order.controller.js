@@ -463,21 +463,39 @@ export const getAllOrders = async (req, res) => {
                 returnsMap[oId].push(r);
             });
 
-            // Calculate previous unpaid credit dues for each user in the paginated result set
+            // Calculate previous unpaid credit dues for each user/customer in the paginated result set
             const userIds = Array.from(new Set(result.rows.map(o => o.userId).filter(Boolean)));
-            let userUnpaidDuesMap = {};
-            if (userIds.length > 0) {
+            const phoneNumbers = Array.from(new Set(result.rows.map(o => {
+                const num = o.user?.number || o.customerNumber || o.customerPhone || '';
+                return String(num).replace(/\D/g, '').slice(-10);
+            }).filter(p => p && p.length === 10)));
+
+            let unpaidOrdersStore = [];
+            if (userIds.length > 0 || phoneNumbers.length > 0) {
                 try {
+                    const orClauses = [];
+                    if (userIds.length > 0) orClauses.push({ userId: { [Op.in]: userIds } });
+                    if (phoneNumbers.length > 0) {
+                        orClauses.push({ customerNumber: { [Op.in]: phoneNumbers } });
+                    }
+
                     const unpaidOrdersList = await Order.findAll({
                         where: {
-                            userId: { [Op.in]: userIds },
-                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+                            [Op.or]: orClauses.length > 0 ? orClauses : [{ id: null }]
                         },
-                        attributes: ['id', 'userId', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'createdAt']
+                        include: [
+                            {
+                                model: User,
+                                as: 'user',
+                                required: false,
+                                attributes: ['id', 'number', 'fullname']
+                            }
+                        ],
+                        attributes: ['id', 'userId', 'customerNumber', 'dueAmount', 'creditAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'createdAt']
                     });
 
-                    unpaidOrdersList.forEach(uo => {
-                        const uId = uo.userId;
+                    unpaidOrdersStore = unpaidOrdersList.map(uo => {
                         const credit = parseFloat(uo.creditAmount || 0);
                         const dueCol = parseFloat(uo.dueAmount || 0);
                         const tot = parseFloat(uo.totalAmount || 0);
@@ -493,15 +511,16 @@ export const getAllOrders = async (req, res) => {
                             due = tot - paid;
                         }
 
-                        if (due > 0) {
-                            if (!userUnpaidDuesMap[uId]) userUnpaidDuesMap[uId] = [];
-                            userUnpaidDuesMap[uId].push({
-                                id: uo.id,
-                                due,
-                                createdAt: new Date(uo.createdAt).getTime()
-                            });
-                        }
-                    });
+                        const uPhone = String(uo.user?.number || uo.customerNumber || '').replace(/\D/g, '').slice(-10);
+
+                        return {
+                            id: uo.id,
+                            userId: uo.userId,
+                            phone: uPhone,
+                            due,
+                            createdAt: new Date(uo.createdAt).getTime()
+                        };
+                    }).filter(o => o.due > 0);
                 } catch (dueErr) {
                     logger.error(`[Previous Unpaid Dues Calc Error]: ${dueErr.message}`);
                 }
@@ -517,13 +536,17 @@ export const getAllOrders = async (req, res) => {
                 }
 
                 const uId = order.userId;
-                const uOrders = userUnpaidDuesMap[uId] || [];
+                const oPhone = String(order.user?.number || order.customerNumber || '').replace(/\D/g, '').slice(-10);
                 const currentCreated = new Date(order.createdAt).getTime();
 
-                // Calculate sum of dues from older orders of the same customer
-                const prevUnpaidDue = uOrders.reduce((sum, uo) => {
+                // Calculate sum of dues from older orders of the same customer (matched by userId or phone)
+                const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
                     if (uo.id !== order.id && uo.createdAt <= currentCreated) {
-                        return sum + uo.due;
+                        const isSameUser = (uId && uo.userId && String(uId) === String(uo.userId));
+                        const isSamePhone = (oPhone && uo.phone && oPhone.length === 10 && oPhone === uo.phone);
+                        if (isSameUser || isSamePhone) {
+                            return sum + uo.due;
+                        }
                     }
                     return sum;
                 }, 0);
@@ -532,7 +555,10 @@ export const getAllOrders = async (req, res) => {
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
-                return adjustOrderPayments(order);
+
+                const adjusted = adjustOrderPayments(order);
+                if (adjusted) adjusted.previousUnpaidDue = prevUnpaidDue;
+                return adjusted;
             });
         }
 
