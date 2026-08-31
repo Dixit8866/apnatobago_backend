@@ -1485,8 +1485,13 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         order.deliveredAt = order.deliveredAt || new Date();
 
-        // If Jama Amount provided, add credit to party wallet balance
-        if (order.user && parsedJama > 0) {
+        // If explicit Party Pending Due override provided, update user wallet balance
+        if (order.user && req.body.overridePartyDue !== undefined && req.body.overridePartyDue !== '') {
+            const parsedDueOverride = parseFloat(req.body.overridePartyDue) || 0;
+            // Negative walletBalance represents dues owed by party
+            order.user.walletBalance = -parsedDueOverride;
+            await order.user.save({ transaction });
+        } else if (order.user && parsedJama > 0) {
             order.user.walletBalance = (parseFloat(order.user.walletBalance) || 0) + parsedJama;
             await order.user.save({ transaction });
         }
