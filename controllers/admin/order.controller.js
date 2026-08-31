@@ -549,7 +549,10 @@ export const getAllOrders = async (req, res) => {
                         createdAt: new Date(uo.createdAt).getTime()
                     };
                 }).filter(o => o.due > 0);
+
+                console.log(`[DEBUG DUES] Found ${unpaidOrdersStore.length} unpaid dues orders in DB:`, JSON.stringify(unpaidOrdersStore));
             } catch (dueErr) {
+                console.error(`[DEBUG DUES ERROR] Previous Unpaid Dues Calc Error: ${dueErr.message}`, dueErr);
                 logger.error(`[Previous Unpaid Dues Calc Error]: ${dueErr.message}`);
             }
 
@@ -581,6 +584,8 @@ export const getAllOrders = async (req, res) => {
                     }
                     return sum;
                 }, 0);
+
+                console.log(`[DEBUG DUES] Order #${order.orderId || order.id} (${oName} / ${oShop}): calculated prevUnpaidDue = ${prevUnpaidDue}`);
 
                 order.setDataValue('previousUnpaidDue', prevUnpaidDue);
                 order.setDataValue('items', itemsMap[order.id] || []);
