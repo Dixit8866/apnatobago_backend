@@ -910,3 +910,115 @@ export const updateOutletOrder = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to update outlet order.', error.message);
     }
 };
+
+/**
+ * @desc    Delete an Outlet Order and restore inventory stock
+ * @route   DELETE /api/admin/outlet-orders/:id
+ * @access  Private (Admin)
+ */
+export const deleteOutletOrder = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+
+        const order = await OutletOrder.findByPk(id, { transaction: t });
+        if (!order) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Outlet order not found.');
+        }
+
+        // 1. Restore stock for all order items
+        const oldItems = await OutletOrderItem.findAll({
+            where: { outletOrderId: order.id },
+            transaction: t
+        });
+
+        for (const oldItem of oldItems) {
+            const variant = await ProductVariant.findByPk(oldItem.variantId, { transaction: t });
+            const bUPP = Number(variant?.baseUnitsPerPack || oldItem.variantInfo?.baseUnitsPerPack || 1);
+            const qtyToRestore = Math.round(oldItem.sellUnit === 'Inner'
+                ? Number(oldItem.quantity)
+                : Number(oldItem.quantity) * bUPP);
+
+            let stock = await InventoryStock.findOne({
+                where: {
+                    productId: oldItem.productId,
+                    godownId: order.godownId
+                },
+                order: [['createdAt', 'DESC']],
+                transaction: t
+            });
+
+            if (stock) {
+                const newTotalBaseUnits = Number(stock.totalBaseUnits || 0) + qtyToRestore;
+                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
+
+                await InventoryTransaction.create({
+                    stockId: stock.id,
+                    productId: oldItem.productId,
+                    variantId: oldItem.variantId,
+                    godownId: order.godownId,
+                    type: 'ADJUSTMENT',
+                    primaryUnitId: stock.primaryUnitId,
+                    secondaryUnitId: stock.secondaryUnitId,
+                    secondaryPerPrimary: stock.secondaryPerPrimary,
+                    totalQtyBaseUnits: qtyToRestore,
+                    balanceAfterBaseUnits: newTotalBaseUnits,
+                    note: `Deleted Outlet Order #${order.orderId} (Stock Restored)`,
+                    createdBy: req.user?.fullname || 'Admin'
+                }, { transaction: t });
+            } else {
+                const newStock = await InventoryStock.create({
+                    productId: oldItem.productId,
+                    variantId: oldItem.variantId,
+                    godownId: order.godownId,
+                    primaryUnitId: variant?.volumeId || null,
+                    secondaryUnitId: null,
+                    secondaryPerPrimary: bUPP,
+                    totalBaseUnits: qtyToRestore,
+                    avgPurchasePricePerBaseUnit: oldItem.price || 0,
+                    lastPurchasePricePerBaseUnit: oldItem.price || 0
+                }, { transaction: t });
+
+                await InventoryTransaction.create({
+                    stockId: newStock.id,
+                    productId: oldItem.productId,
+                    variantId: oldItem.variantId,
+                    godownId: order.godownId,
+                    type: 'ADJUSTMENT',
+                    primaryUnitId: newStock.primaryUnitId,
+                    secondaryUnitId: newStock.secondaryUnitId,
+                    secondaryPerPrimary: newStock.secondaryPerPrimary,
+                    totalQtyBaseUnits: qtyToRestore,
+                    balanceAfterBaseUnits: qtyToRestore,
+                    note: `Deleted Outlet Order #${order.orderId} (Stock Restored)`,
+                    createdBy: req.user?.fullname || 'Admin'
+                }, { transaction: t });
+            }
+        }
+
+        // 2. Delete order items
+        await OutletOrderItem.destroy({
+            where: { outletOrderId: order.id },
+            transaction: t
+        });
+
+        // 3. Delete order
+        await order.destroy({ transaction: t });
+
+        await t.commit();
+
+        logActivity(req, {
+            module: 'Outlet Orders',
+            action: 'DELETE',
+            description: `Deleted Outlet Order #${order.orderId}`,
+            metadata: { orderId: order.id, orderIdString: order.orderId }
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Outlet order deleted successfully.');
+    } catch (error) {
+        await t.rollback();
+        logger.error(`[deleteOutletOrder Error]: ${error.message}`, { stack: error.stack });
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to delete outlet order.', error.message);
+    }
+};
