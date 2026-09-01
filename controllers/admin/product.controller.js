@@ -1204,6 +1204,12 @@ export const updateProductPrices = async (req, res, next) => {
                                 { price: p.price, mrp: p.mrp, purchasePrice: currentPurchasePrice },
                                 { where: { id: p.id }, transaction: t }
                             );
+                            if (p.mrp !== undefined) {
+                                await ProductPricing.update(
+                                    { mrp: p.mrp },
+                                    { where: { variantId: variant.id }, transaction: t }
+                                );
+                            }
                         }
                     }
                 }
