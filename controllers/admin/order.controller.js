@@ -260,8 +260,9 @@ export const getAllOrders = async (req, res) => {
             } : { createdAt: { [Op.between]: [sDate, eDate] } };
         };
 
-        // Restrict Delivered/Payment Verify to today by default unless filtered (Payment Collect shows all unverified orders across all dates)
-        if (!startDate && !endDate && !date && status !== 'Payment Collect' && status && status !== 'All') {
+        // Restrict statuses (except Pending and Payment Collect) to today by default unless filtered
+        // Pending shows all pending orders across all dates; Packaging, Packed, Shipping, Delivered, etc. show today's orders only
+        if (!startDate && !endDate && !date && status !== 'Pending' && status !== 'Payment Collect' && status && status !== 'All') {
             dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
         }
 
