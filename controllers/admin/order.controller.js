@@ -676,7 +676,13 @@ export const getAllOrders = async (req, res) => {
             orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
             paymentCollectStatus: { [Op.ne]: 'Verified' }
         };
-        const paymentVerifyCountWhere = { ...countWhere, orderStatus: 'Payment Verify' };
+        const paymentVerifyCountWhere = {
+            ...countWhere,
+            [Op.or]: [
+                { orderStatus: 'Payment Verify' },
+                { paymentCollectStatus: 'Verified' }
+            ]
+        };
         const cancelledCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] } };
 
         const pendingDueCountWhere = {
@@ -692,14 +698,21 @@ export const getAllOrders = async (req, res) => {
             shippingCountWhere.createdAt = countDateRange;
             pendingDueCountWhere.createdAt = countDateRange;
 
-            deliveredCountWhere.createdAt = countDateRange;
-            paymentCollectCountWhere.createdAt = countDateRange;
-            paymentVerifyCountWhere.createdAt = countDateRange;
-            cancelledCountWhere.createdAt = countDateRange;
+            const dateClauseCount = buildDateClause(startOfDate, endOfDate);
+            if (dateClauseCount && dateClauseCount[Op.or]) {
+                deliveredCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
+                paymentCollectCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
+                paymentVerifyCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
+                cancelledCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
+            }
         } else {
-            // Restrict Delivered and Cancelled badges to today in IST by default if no active date filter is set (Payment Collect shows all unverified orders across all dates)
-            deliveredCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
-            cancelledCountWhere.createdAt = { [Op.between]: [startOfTodayUTC, endOfTodayUTC] };
+            // Restrict Delivered, Payment Verify and Cancelled badges to today in IST by default if no active date filter is set
+            const todayClauseCount = buildDateClause(startOfTodayUTC, endOfTodayUTC);
+            if (todayClauseCount && todayClauseCount[Op.or]) {
+                deliveredCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
+                paymentVerifyCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
+                cancelledCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
+            }
         }
 
         const countOptions = (whereObj) => ({
