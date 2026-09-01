@@ -707,21 +707,24 @@ export const getAllOrders = async (req, res) => {
             packagingCountWhere.createdAt = countDateRange;
             packedCountWhere.createdAt = countDateRange;
             shippingCountWhere.createdAt = countDateRange;
-            pendingDueCountWhere.createdAt = countDateRange;
 
             const dateClauseCount = buildDateClause(startOfDate, endOfDate);
             if (dateClauseCount && dateClauseCount[Op.or]) {
                 deliveredCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
                 paymentCollectCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
                 paymentVerifyCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
+                pendingDueCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
                 cancelledCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
+            } else if (dateClauseCount) {
+                pendingDueCountWhere.createdAt = countDateRange;
             }
         } else {
-            // Restrict Delivered, Payment Verify and Cancelled badges to today in IST by default if no active date filter is set
+            // Restrict Delivered, Payment Verify, Pending Due, and Cancelled badges to today in IST by default if no active date filter is set
             const todayClauseCount = buildDateClause(startOfTodayUTC, endOfTodayUTC);
             if (todayClauseCount && todayClauseCount[Op.or]) {
                 deliveredCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
                 paymentVerifyCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
+                pendingDueCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
                 cancelledCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
             }
         }
