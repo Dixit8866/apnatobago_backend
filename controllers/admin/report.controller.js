@@ -69,15 +69,23 @@ export const getOrderReport = async (req, res, next) => {
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
 
-            const dateField = status === 'Delivered' ? 'deliveredAt' : (status === 'Cancelled' ? 'updatedAt' : 'createdAt');
-            if (dateField === 'deliveredAt') {
-                where[Op.or] = [
-                    { deliveredAt: { [Op.between]: [start, end] } },
-                    { deliveredAt: null, updatedAt: { [Op.between]: [start, end] } }
-                ];
-            } else {
-                where[dateField] = { [Op.between]: [start, end] };
-            }
+            const formatYMD = (d) => {
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+            const sStr = formatYMD(start);
+            const eStr = formatYMD(end);
+            const dFilter = sStr === eStr ? sStr : { [Op.between]: [sStr, eStr] };
+
+            where[Op.or] = [
+                { deliveryDate: dFilter },
+                {
+                    deliveryDate: null,
+                    createdAt: { [Op.between]: [start, end] }
+                }
+            ];
         }
 
         const orders = await Order.findAll({
@@ -163,7 +171,7 @@ export const getOrderReport = async (req, res, next) => {
                 'Total Amount': totalAmount.toFixed(2),
                 'Payment Method': o.paymentMethod || '-',
                 'Status': o.orderStatus,
-                'Date': (status === 'Delivered' ? (o.deliveredAt || o.updatedAt || o.createdAt) : (status === 'Cancelled' ? (o.updatedAt || o.createdAt) : o.createdAt)).toLocaleDateString()
+                'Date': o.createdAt ? new Date(o.createdAt).toLocaleDateString() : ''
             };
         });
 

@@ -402,15 +402,46 @@ export const getDailyReconciliationReport = async (req, res) => {
             }
         });
 
-        // 3. Fetch Today's Delivered / Completed Orders
+        // Build deliveryDate filter strings
+        const formatDateOnly = (d) => {
+            if (!d) return null;
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        let startDeliveryDateStr = startOfDay ? formatDateOnly(startOfDay) : null;
+        let endDeliveryDateStr = endOfDay ? formatDateOnly(endOfDay) : null;
+
+        let deliveryDateFilter;
+        if (startDeliveryDateStr && endDeliveryDateStr) {
+            if (startDeliveryDateStr === endDeliveryDateStr) {
+                deliveryDateFilter = startDeliveryDateStr;
+            } else {
+                deliveryDateFilter = { [Op.between]: [startDeliveryDateStr, endDeliveryDateStr] };
+            }
+        } else if (startDeliveryDateStr) {
+            deliveryDateFilter = { [Op.gte]: startDeliveryDateStr };
+        } else if (endDeliveryDateStr) {
+            deliveryDateFilter = { [Op.lte]: endDeliveryDateStr };
+        }
+
+        const orderSalesDateWhere = deliveryDateFilter ? {
+            [Op.or]: [
+                { deliveryDate: deliveryDateFilter },
+                {
+                    deliveryDate: null,
+                    createdAt: dateFilter
+                }
+            ]
+        } : { createdAt: dateFilter };
+
+        // 3. Fetch Today's Delivered / Completed Orders (Filtered by deliveryDate or createdAt)
         const deliveredOrders = await Order.findAll({
             where: {
                 orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] },
-                [Op.or]: [
-                    { deliveredAt: dateFilter },
-                    { deliveredAt: null, updatedAt: dateFilter },
-                    { deliveredAt: null, updatedAt: null, createdAt: dateFilter }
-                ]
+                ...orderSalesDateWhere
             },
             include: [
                 {
@@ -506,13 +537,16 @@ export const getDailyReconciliationReport = async (req, res) => {
 
         allTodayPayments.forEach(p => {
             if (p.order && !todayDeliveredOrderIds.has(p.order.id)) {
-                // Determine when the order was delivered / fulfilled
-                const deliveryTime = p.order.deliveredAt 
-                    ? new Date(p.order.deliveredAt).getTime() 
-                    : (p.order.updatedAt ? new Date(p.order.updatedAt).getTime() : new Date(p.order.createdAt).getTime());
+                // Determine the order's effective sales / delivery date
+                let orderSalesTime = 0;
+                if (p.order.deliveryDate) {
+                    orderSalesTime = new Date(`${p.order.deliveryDate}T00:00:00.000+05:30`).getTime();
+                } else if (p.order.createdAt) {
+                    orderSalesTime = new Date(p.order.createdAt).getTime();
+                }
 
-                // If the order was delivered BEFORE today, payment collected today is for Past Dues!
-                if (deliveryTime < effectiveStartOfDay) {
+                // If the order's sales/delivery date was BEFORE today, payment collected today is for Past Dues!
+                if (orderSalesTime < effectiveStartOfDay) {
                     const pAmt = parseFloat(p.amount || 0);
                     pastDuesClearedTotal += pAmt;
                     pastDuesClearedList.push({
