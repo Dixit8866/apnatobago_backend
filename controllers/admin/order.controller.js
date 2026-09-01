@@ -210,6 +210,17 @@ export const getAllOrders = async (req, res) => {
             }
         }
 
+        const parseISTDate = (dateStr, isEnd = false) => {
+            if (!dateStr) return null;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                return new Date(`${dateStr}T${isEnd ? '23:59:59.999' : '00:00:00.000'}+05:30`);
+            }
+            const d = new Date(dateStr);
+            if (isEnd) d.setHours(23, 59, 59, 999);
+            else d.setHours(0, 0, 0, 0);
+            return d;
+        };
+
         const buildDateClause = (sDate, eDate) => {
             const formatYMD = (d) => {
                 if (!d) return null;
