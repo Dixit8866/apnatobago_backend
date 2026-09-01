@@ -205,7 +205,7 @@ export const getAllOrders = async (req, res) => {
                 baseWhere.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
             } else if (status === 'Pending Due Order') {
                 baseWhere.paymentStatus = { [Op.ne]: 'Paid' };
-                baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] };
+                baseWhere.orderStatus = { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
             } else {
                 baseWhere.orderStatus = status;
             }
@@ -225,9 +225,10 @@ export const getAllOrders = async (req, res) => {
         const buildDateClause = (sDate, eDate, forStatus) => {
             const formatYMD = (d) => {
                 if (!d) return null;
-                const year = d.getFullYear();
-                const month = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
+                const istTime = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+                const year = istTime.getUTCFullYear();
+                const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(istTime.getUTCDate()).padStart(2, '0');
                 return `${year}-${month}-${day}`;
             };
 
@@ -260,9 +261,8 @@ export const getAllOrders = async (req, res) => {
             } : { createdAt: { [Op.between]: [sDate, eDate] } };
         };
 
-        // Restrict statuses (except Pending and Payment Collect) to today by default unless filtered
-        // Pending shows all pending orders across all dates; Packaging, Packed, Shipping, Delivered, etc. show today's orders only
-        if (!startDate && !endDate && !date && status !== 'Pending' && status !== 'Payment Collect' && status && status !== 'All') {
+        // Restrict statuses (except Pending, Payment Collect, and Pending Due Order) to today by default unless filtered
+        if (!startDate && !endDate && !date && status !== 'Pending' && status !== 'Payment Collect' && status !== 'Pending Due Order' && status && status !== 'All') {
             dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
         }
 
