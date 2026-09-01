@@ -217,7 +217,7 @@ export const getAllOrders = async (req, res) => {
                 }
             } else if (status === 'Pending Due Order') {
                 baseWhere.paymentStatus = { [Op.ne]: 'Paid' };
-                baseWhere.orderStatus = { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
+                baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] };
             } else {
                 baseWhere.orderStatus = status;
             }
@@ -489,7 +489,7 @@ export const getAllOrders = async (req, res) => {
             try {
                 const unpaidOrdersList = await Order.findAll({
                     where: {
-                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                        orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
                     },
                     include: [
                         {
@@ -533,14 +533,14 @@ export const getAllOrders = async (req, res) => {
                     }
 
                     let due = 0;
-                    if (dueCol > 0) {
-                        due = dueCol;
-                    } else if (creditFromPayments > 0) {
-                        due = creditFromPayments;
-                    } else if (pStatus === 'partial' && tot > 0 && paid < tot - 0.99) {
-                        due = tot - paid;
-                    } else if (isDeliveredOrSettled && pStatus !== 'paid' && tot > 0 && paid < tot - 0.99) {
-                        due = tot - paid;
+                    if (isDeliveredOrSettled) {
+                        if (dueCol > 0) {
+                            due = dueCol;
+                        } else if (creditFromPayments > 0) {
+                            due = creditFromPayments;
+                        } else if (pStatus !== 'paid' && tot > 0 && paid < tot - 0.99) {
+                            due = tot - paid;
+                        }
                     }
 
                     const uPhone = String(uo.user?.number || uo.customerNumber || '').replace(/\D/g, '').slice(-10);
