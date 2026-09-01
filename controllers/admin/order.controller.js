@@ -578,15 +578,19 @@ export const getAllOrders = async (req, res) => {
                 const oShop = String(order.user?.businessProfile?.shopName || '').toLowerCase().trim();
                 const oName = String(order.user?.fullname || order.customerName || '').toLowerCase().trim();
 
-                // Calculate sum of dues from other credit/delivered orders of the same customer (matched by userId, phone, shopName, or name)
+                // Calculate sum of dues from other credit/delivered orders of the SAME customer
+                // Must match strictly by userId (Party ID). If userId is absent, match by 10-digit phone number.
+                // DO NOT match by shopName/fullname alone because different parties can have identical shop names (e.g. Patel Pan)!
                 const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
                     if (String(uo.id) !== String(order.id) && String(uo.orderId || '') !== String(order.orderId || '')) {
-                        const isSameUser = (uId && uo.userId && String(uId) === String(uo.userId));
-                        const isSamePhone = (oPhone && uo.phone && oPhone.length === 10 && oPhone === uo.phone);
-                        const isSameShop = (oShop && uo.shopName && oShop.length > 2 && oShop === uo.shopName);
-                        const isSameName = (oName && uo.name && oName.length > 2 && oName === uo.name);
+                        let isSameCustomer = false;
+                        if (uId && uo.userId) {
+                            isSameCustomer = (String(uId) === String(uo.userId));
+                        } else if (oPhone && uo.phone && oPhone.length === 10 && uo.phone.length === 10) {
+                            isSameCustomer = (oPhone === uo.phone);
+                        }
 
-                        if (isSameUser || isSamePhone || isSameShop || isSameName) {
+                        if (isSameCustomer) {
                             return sum + uo.due;
                         }
                     }
