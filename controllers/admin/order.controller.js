@@ -1613,6 +1613,51 @@ export const verifyAndSettleOrder = async (req, res) => {
             await order.user.save({ transaction });
         }
 
+        // If Admin explicitly edited/overrode customer's previous pending dues, update unpaid previous orders
+        if (req.body.overridePartyDue !== undefined && req.body.overridePartyDue !== null && !isNaN(parseFloat(req.body.overridePartyDue)) && order.userId) {
+            const newTargetPrevDue = Math.max(0, parseFloat(req.body.overridePartyDue));
+            const prevUnpaidOrders = await Order.findAll({
+                where: {
+                    userId: order.userId,
+                    id: { [Op.ne]: order.id },
+                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] },
+                    paymentStatus: { [Op.ne]: 'Paid' }
+                },
+                order: [['createdAt', 'ASC']],
+                transaction
+            });
+
+            if (newTargetPrevDue === 0) {
+                for (const pOrder of prevUnpaidOrders) {
+                    pOrder.dueAmount = 0;
+                    pOrder.paidAmount = pOrder.totalAmount;
+                    pOrder.paymentStatus = 'Paid';
+                    await pOrder.save({ transaction });
+                }
+            } else if (prevUnpaidOrders.length > 0) {
+                let remainingTargetDue = newTargetPrevDue;
+                for (const pOrder of prevUnpaidOrders) {
+                    const pTotal = parseFloat(pOrder.totalAmount || 0);
+                    if (remainingTargetDue <= 0) {
+                        pOrder.dueAmount = 0;
+                        pOrder.paidAmount = pTotal;
+                        pOrder.paymentStatus = 'Paid';
+                    } else if (remainingTargetDue >= pTotal) {
+                        pOrder.dueAmount = pTotal;
+                        pOrder.paidAmount = 0;
+                        pOrder.paymentStatus = 'Pending';
+                        remainingTargetDue -= pTotal;
+                    } else {
+                        pOrder.dueAmount = remainingTargetDue;
+                        pOrder.paidAmount = Math.max(0, pTotal - remainingTargetDue);
+                        pOrder.paymentStatus = 'Partial';
+                        remainingTargetDue = 0;
+                    }
+                    await pOrder.save({ transaction });
+                }
+            }
+        }
+
         const timestamp = new Date().toLocaleString();
         let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}, Credit: ₹${parsedCredit}`;
         if (totalReturnDeduction > 0) {

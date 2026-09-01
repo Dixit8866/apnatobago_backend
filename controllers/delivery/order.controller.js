@@ -304,14 +304,19 @@ export const getAssignmentDetails = async (req, res) => {
                 where: {
                     userId,
                     dueAmount: { [Op.gt]: 0 },
-                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
+                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] },
                     orderId: { [Op.ne]: assignment.order.orderId } // Exclude current order
                 },
                 attributes: ['id', 'orderId', 'totalAmount', 'dueAmount', 'paymentStatus'],
                 order: [['createdAt', 'DESC']]
             });
 
-            totalPastDueAmount = pastDueOrders.reduce((sum, order) => sum + parseFloat(order.dueAmount), 0);
+            const unpaidOrdersSum = pastDueOrders.reduce((sum, order) => sum + parseFloat(order.dueAmount || 0), 0);
+            const rawWallet = parseFloat(assignment.order?.user?.walletBalance || 0);
+            const walletBaki = rawWallet < 0 ? Math.abs(rawWallet) : 0;
+            const walletJama = rawWallet > 0 ? rawWallet : 0;
+
+            totalPastDueAmount = Math.max(0, unpaidOrdersSum + walletBaki - walletJama);
         }
 
         const data = assignment.toJSON();
