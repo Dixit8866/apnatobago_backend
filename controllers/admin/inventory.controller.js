@@ -362,12 +362,50 @@ export const getInventorySummary = async (req, res, next) => {
     }
 };
 
+const getCreatorName = (req) => {
+    if (!req || !req.user) return 'System';
+    return req.user.fullname || req.user.name || req.user.username || req.user.number || 'System Admin';
+};
+
 export const getInventoryTransactions = async (req, res, next) => {
     try {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
+        const { search, type, godownId } = req.query;
+
+        const where = {};
+        if (type && type !== 'all' && type !== 'ALL') {
+            where.type = type.toUpperCase();
+        }
+        if (godownId && godownId !== 'all') {
+            where.godownId = godownId;
+        }
+
+        const andConditions = [];
+
+        if (search && String(search).trim() !== '') {
+            const term = String(search).trim();
+            const searchPattern = `%${term}%`;
+            const escapedSearch = sequelize.escape(searchPattern);
+
+            andConditions.push(
+                sequelize.literal(`(
+                    COALESCE("InventoryTransaction"."createdBy", '') ILIKE ${escapedSearch}
+                    OR COALESCE("InventoryTransaction"."note", '') ILIKE ${escapedSearch}
+                    OR COALESCE(CAST("InventoryTransaction"."type" AS TEXT), '') ILIKE ${escapedSearch}
+                    OR COALESCE("product"."name"->>'en', '') ILIKE ${escapedSearch}
+                    OR COALESCE("product"."name"->>'gu', '') ILIKE ${escapedSearch}
+                    OR COALESCE("godown"."name", '') ILIKE ${escapedSearch}
+                )`)
+            );
+        }
+
+        if (andConditions.length > 0) {
+            where[Op.and] = andConditions;
+        }
 
         const result = await InventoryTransaction.findAndCountAll({
+            where,
             include: [
                 { model: Product, as: 'product', attributes: ['id', 'name'] },
                 {
@@ -526,6 +564,7 @@ export const createPurchaseTransaction = async (req, res, next) => {
                 avgPriceAfterTxn: newAvg,
                 balanceAfterBaseUnits: newQty,
                 note: note || null,
+                createdBy: getCreatorName(req),
             },
             { transaction: t }
         );
@@ -631,6 +670,7 @@ export const createSaleTransaction = async (req, res, next) => {
                 avgPriceAfterTxn: nextAvg,
                 balanceAfterBaseUnits: newQty,
                 note: note || null,
+                createdBy: getCreatorName(req),
             },
             { transaction: t }
         );
@@ -757,6 +797,7 @@ export const updateInventoryStock = async (req, res, next) => {
                 avgPriceAfterTxn: round2(avgPrice),
                 balanceAfterBaseUnits: qtyTotalBaseUnits,
                 note: note || 'Manual stock edit',
+                createdBy: getCreatorName(req),
             },
             { transaction: t }
         );

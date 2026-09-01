@@ -10,6 +10,7 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { sendToDevice } from '../../services/notification.service.js';
+import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 
 /**
  * Generate a unique human-readable Order ID (100% bulletproof with uniqueness check)
@@ -1570,65 +1571,8 @@ export const cancelOrder = async (req, res) => {
             order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
             await order.save();
         } else {
-            // Restore stock for all items (existing behaviour)
-            if (order.items && order.items.length > 0) {
-                for (const item of order.items) {
-                    const variant = await ProductVariant.findByPk(item.variantId, {
-                        include: [{ model: Product, as: 'product' }]
-                    });
-
-                    if (variant?.product?.isCombo) {
-                        const comboProducts = [
-                            variant.product.comboProduct1Id,
-                            variant.product.comboProduct2Id
-                        ];
-                        for (const cpId of comboProducts) {
-                            const compVariant = await ProductVariant.findOne({
-                                where: { 
-                                    productId: cpId,
-                                    ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
-                                }
-                            }) || await ProductVariant.findOne({
-                                where: { productId: cpId }
-                            });
-
-                            if (!compVariant) continue;
-
-                            const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
-                            const compSellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                            const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
-                                ? Number(item.quantity)
-                                : Number(item.quantity) * compSellingVolume * compBUPP);
-
-                            logger.info(`[Cancel Order Restore Combo]: comboProductId=${cpId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, compSellingVolume=${compSellingVolume}, compBUPP=${compBUPP}, restoring=${baseUnitsToRestore} base units`);
-
-                            const stock = await InventoryStock.findOne({
-                                where: { productId: cpId },
-                                order: [['createdAt', 'DESC']]
-                            });
-                            if (stock) {
-                                await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
-                            }
-                        }
-                    } else {
-                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
-                            ? Number(item.quantity) 
-                            : Number(item.quantity) * sellingVolume * bUPP);
-
-                        logger.info(`[Cancel Order Restore]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore} base units`);
-
-                        const stock = await InventoryStock.findOne({
-                            where: { productId: item.productId },
-                            order: [['createdAt', 'DESC']]
-                        });
-                        if (stock) {
-                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
-                        }
-                    }
-                }
-            }
+            // Restore inventory stock for all items & record InventoryTransaction log
+            await restoreOrderStock(order.id, req.user?.fullname || 'Customer');
         }
 
         // Cancel associated assignment if exists

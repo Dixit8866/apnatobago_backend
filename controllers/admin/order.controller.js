@@ -9,6 +9,7 @@ import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML 
 import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
+import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -1049,26 +1050,8 @@ export const updateOrderStatus = async (req, res) => {
                     order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
                     await order.save();
                 } else {
-                    // Restore inventory stock for all order items (existing behaviour)
-                    const orderItemsToRestore = await OrderItem.findAll({ where: { orderId: order.id } });
-                    for (const item of orderItemsToRestore) {
-                        const variant = await ProductVariant.findByPk(item.variantId);
-                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = item.sellUnit === 'Inner'
-                            ? Number(item.quantity)
-                            : Number(item.quantity) * sellingVolume * bUPP;
-
-                        logger.info(`[Admin Cancel Restore]: orderId=${order.id}, productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
-
-                        const stock = await InventoryStock.findOne({
-                            where: { productId: item.productId },
-                            order: [['createdAt', 'DESC']]
-                        });
-                        if (stock) {
-                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
-                        }
-                    }
+                    // Restore inventory stock for all order items & record InventoryTransaction log
+                    await restoreOrderStock(order.id, req.user?.fullname || req.user?.name || 'Admin');
                 }
             }
         }
@@ -1404,24 +1387,8 @@ export const bulkUpdateOrderStatus = async (req, res) => {
                     orderRecord.dueAmount = Math.max(0, orderRecord.dueAmount - totalReturn);
                     await orderRecord.save();
                 } else {
-                    for (const item of cancelOrder.items) {
-                        const variant = await ProductVariant.findByPk(item.variantId);
-                        const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                        const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = item.sellUnit === 'Inner'
-                            ? Number(item.quantity)
-                            : Number(item.quantity) * sellingVolume * bUPP;
-
-                        logger.info(`[Admin Bulk Cancel Restore]: orderId=${cancelOrder.id}, productId=${item.productId}, qty=${item.quantity}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
-
-                        const stock = await InventoryStock.findOne({
-                            where: { productId: item.productId },
-                            order: [['createdAt', 'DESC']]
-                        });
-                        if (stock) {
-                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
-                        }
-                    }
+                    // Restore inventory stock for all order items & record InventoryTransaction log
+                    await restoreOrderStock(cancelOrder.id, req.user?.fullname || req.user?.name || 'Admin');
                 }
             }
         }
