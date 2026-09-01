@@ -221,7 +221,7 @@ export const getAllOrders = async (req, res) => {
             return d;
         };
 
-        const buildDateClause = (sDate, eDate) => {
+        const buildDateClause = (sDate, eDate, forStatus) => {
             const formatYMD = (d) => {
                 if (!d) return null;
                 const year = d.getFullYear();
@@ -229,6 +229,16 @@ export const getAllOrders = async (req, res) => {
                 const day = String(d.getDate()).padStart(2, '0');
                 return `${year}-${month}-${day}`;
             };
+
+            // For Delivered and Payment Verify tabs, strictly filter by actual delivery/fulfillment date
+            if (forStatus === 'Delivered' || forStatus === 'Payment Verify') {
+                return {
+                    [Op.or]: [
+                        { deliveredAt: { [Op.between]: [sDate, eDate] } },
+                        { deliveredAt: null, updatedAt: { [Op.between]: [sDate, eDate] } }
+                    ]
+                };
+            }
 
             const sStr = formatYMD(sDate);
             const eStr = formatYMD(eDate);
@@ -251,7 +261,7 @@ export const getAllOrders = async (req, res) => {
 
         // Restrict Delivered/Payment Verify to today by default unless filtered (Payment Collect shows all unverified orders across all dates)
         if (!startDate && !endDate && !date && status !== 'Payment Collect' && status && status !== 'All') {
-            dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC);
+            dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
         }
 
         let startOfDate = null;
@@ -269,7 +279,7 @@ export const getAllOrders = async (req, res) => {
         }
 
         if (startOfDate && endOfDate) {
-            dateClause = buildDateClause(startOfDate, endOfDate);
+            dateClause = buildDateClause(startOfDate, endOfDate, status);
         }
 
         // Apply delivery boy filter
@@ -708,24 +718,30 @@ export const getAllOrders = async (req, res) => {
             packedCountWhere.createdAt = countDateRange;
             shippingCountWhere.createdAt = countDateRange;
 
-            const dateClauseCount = buildDateClause(startOfDate, endOfDate);
-            if (dateClauseCount && dateClauseCount[Op.or]) {
-                deliveredCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
-                paymentCollectCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
-                paymentVerifyCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
-                pendingDueCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
-                cancelledCountWhere[Op.and] = [{ [Op.or]: dateClauseCount[Op.or] }];
-            } else if (dateClauseCount) {
-                pendingDueCountWhere.createdAt = countDateRange;
+            const delClauseCount = buildDateClause(startOfDate, endOfDate, 'Delivered');
+            if (delClauseCount && delClauseCount[Op.or]) {
+                deliveredCountWhere[Op.and] = [{ [Op.or]: delClauseCount[Op.or] }];
+            }
+
+            const genericClauseCount = buildDateClause(startOfDate, endOfDate);
+            if (genericClauseCount && genericClauseCount[Op.or]) {
+                paymentCollectCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
+                paymentVerifyCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
+                pendingDueCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
+                cancelledCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
             }
         } else {
             // Restrict Delivered, Payment Verify, Pending Due, and Cancelled badges to today in IST by default if no active date filter is set
-            const todayClauseCount = buildDateClause(startOfTodayUTC, endOfTodayUTC);
-            if (todayClauseCount && todayClauseCount[Op.or]) {
-                deliveredCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
-                paymentVerifyCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
-                pendingDueCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
-                cancelledCountWhere[Op.and] = [{ [Op.or]: todayClauseCount[Op.or] }];
+            const delClauseToday = buildDateClause(startOfTodayUTC, endOfTodayUTC, 'Delivered');
+            if (delClauseToday && delClauseToday[Op.or]) {
+                deliveredCountWhere[Op.and] = [{ [Op.or]: delClauseToday[Op.or] }];
+            }
+
+            const genericClauseToday = buildDateClause(startOfTodayUTC, endOfTodayUTC);
+            if (genericClauseToday && genericClauseToday[Op.or]) {
+                paymentVerifyCountWhere[Op.and] = [{ [Op.or]: genericClauseToday[Op.or] }];
+                pendingDueCountWhere[Op.and] = [{ [Op.or]: genericClauseToday[Op.or] }];
+                cancelledCountWhere[Op.and] = [{ [Op.or]: genericClauseToday[Op.or] }];
             }
         }
 
