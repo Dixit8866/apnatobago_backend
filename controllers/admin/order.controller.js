@@ -683,7 +683,7 @@ export const getAllOrders = async (req, res) => {
         const pendingDueCountWhere = {
             ...countWhere,
             paymentStatus: { [Op.ne]: 'Paid' },
-            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
         };
 
         if (isDateFiltered && countDateRange) {
