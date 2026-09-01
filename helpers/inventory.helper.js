@@ -1,5 +1,5 @@
 import sequelize from '../config/db.js';
-import logger from '../utils/logger.util.js';
+import logger from '../logger/apiLogger.js';
 
 /**
  * Helper to restore inventory stock & create an InventoryTransaction log when an order is cancelled
