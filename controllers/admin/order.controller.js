@@ -889,8 +889,16 @@ export const getAllOrders = async (req, res) => {
         };
 
         try {
+            const totalsWhere = buildWhereClause({ includeRoute: true, includeTiming: true });
+            delete totalsWhere.orderStatus;
+            delete totalsWhere.paymentStatus;
+            delete totalsWhere.paymentCollectStatus;
+
+            // Ignore cancelled orders from daily totals
+            totalsWhere.orderStatus = { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
+
             const allMatchedOrders = await Order.findAll({
-                where,
+                where: totalsWhere,
                 include: [
                     ...(search ? searchIncludes : (deliveryBoyId ? [{ model: OrderAssignment, as: 'assignment' }] : [])),
                     { model: OrderPayment, as: 'payments', required: false }

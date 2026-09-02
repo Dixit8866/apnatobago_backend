@@ -381,21 +381,21 @@ export const getDailyReconciliationReport = async (req, res) => {
                 }
             ]
         });
-        let totalCashSum = 0;
-        cashPayments.forEach(p => {
-            let amt = parseFloat(p.amount || 0);
-            if (p.order && p.order.totalAmount !== undefined && p.order.totalAmount !== null) {
-                const orderTot = parseFloat(p.order.totalAmount || 0);
-                if (amt > orderTot) amt = orderTot;
-            }
-            totalCashSum += amt;
+        // 2b. Fetch Coupon Payments
+        const couponPayments = await OrderPayment.findAll({
+            where: { ...paymentWhere, paymentMethod: 'COUPON' },
+            attributes: ['id', 'amount', 'orderId']
+        });
+        let totalCouponSum = 0;
+        couponPayments.forEach(p => {
+            totalCouponSum += parseFloat(p.amount || 0);
         });
 
-        const totalReceived = totalCashSum + totalOnlineSum;
+        const totalReceived = totalCashSum + totalOnlineSum + totalCouponSum;
 
         // Build quick lookup map for DeliveryBoy from payment records
         const paymentDeliveryBoyMap = {};
-        [...cashPayments, ...onlinePayments].forEach(p => {
+        [...cashPayments, ...onlinePayments, ...couponPayments].forEach(p => {
             const oId = p.orderId || p.order?.id;
             if (oId && p.deliveryBoy) {
                 paymentDeliveryBoyMap[oId] = p.deliveryBoy;
@@ -694,6 +694,7 @@ export const getDailyReconciliationReport = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Daily reconciliation report fetched.", {
             totalCashCollect: totalCashSum,
             totalOnlineCollect: totalOnlineSum,
+            totalCouponCollect: totalCouponSum,
             totalReceived,
             totalPendingDue: totalTodayPendingDueSum,
             allTimePendingDue: pendingDueOrdersFormatted.reduce((sum, o) => sum + o.dueAmount, 0),
@@ -706,13 +707,17 @@ export const getDailyReconciliationReport = async (req, res) => {
             bankBreakdownList,
             todayDeliveredOrdersList,
             todayPendingDueOrdersList,
-            pendingDueOrders: pendingDueOrdersFormatted,
+            pendingDueOrders: todayPendingDueOrdersList,
+            allTimePendingDueOrders: pendingDueOrdersFormatted,
             pastDuesClearedList,
             salesReturnsList,
             jamaAdjustmentsList,
             reconciliationExplanation: {
                 todayDeliveredOrdersTotal,
                 totalReceived,
+                totalCashCollect: totalCashSum,
+                totalOnlineCollect: totalOnlineSum,
+                totalCouponCollect: totalCouponSum,
                 netDifference,
                 salesReturnsTotal,
                 walletJamaTotal,
