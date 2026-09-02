@@ -546,22 +546,23 @@ export const getAllOrders = async (req, res) => {
                     const oStatus = String(uo.orderStatus || '');
                     const isDeliveredOrSettled = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(oStatus);
 
-                    let creditFromPayments = 0;
-                    if (Array.isArray(uo.payments) && uo.payments.length > 0) {
-                        uo.payments.forEach(p => {
-                            const m = String(p.paymentMethod || '').toUpperCase();
-                            if (m === 'CREDIT') creditFromPayments += parseFloat(p.amount || 0);
-                        });
-                    }
-
                     let due = 0;
-                    if (isDeliveredOrSettled) {
-                        if (dueCol > 0) {
-                            due = dueCol;
-                        } else if (creditFromPayments > 0) {
-                            due = creditFromPayments;
-                        } else if (pStatus !== 'paid' && tot > 0 && paid < tot - 0.99) {
-                            due = tot - paid;
+                    // An order is only a due bill if it is delivered/fulfilled, NOT cancelled, and NOT paid!
+                    if (isDeliveredOrSettled && !oStatus.toLowerCase().includes('cancel') && pStatus !== 'paid') {
+                        let realPaid = paid;
+                        if (Array.isArray(uo.payments) && uo.payments.length > 0) {
+                            realPaid = uo.payments.reduce((pSum, p) => {
+                                const m = String(p.paymentMethod || p.method || '').toUpperCase();
+                                return m !== 'CREDIT' ? pSum + parseFloat(p.amount || 0) : pSum;
+                            }, 0);
+                        }
+
+                        if (realPaid < tot - 0.99) {
+                            if (dueCol > 0) {
+                                due = Math.min(tot, dueCol);
+                            } else {
+                                due = Math.max(0, tot - realPaid);
+                            }
                         }
                     }
 
@@ -599,21 +600,23 @@ export const getAllOrders = async (req, res) => {
                 const oPhone = String(order.user?.number || order.customerNumber || '').replace(/\D/g, '').slice(-10);
                 const oShop = String(order.user?.businessProfile?.shopName || '').toLowerCase().trim();
                 const oName = String(order.user?.fullname || order.customerName || '').toLowerCase().trim();
+                const orderTime = new Date(order.createdAt).getTime();
 
-                // Calculate sum of dues from other credit/delivered orders of the SAME customer
+                // Calculate sum of dues from other credit/delivered orders of the SAME customer created BEFORE this order
                 // Must match strictly by userId (Party ID). If userId is absent, match by 10-digit phone number.
-                // DO NOT match by shopName/fullname alone because different parties can have identical shop names (e.g. Patel Pan)!
                 const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
                     if (String(uo.id) !== String(order.id) && String(uo.orderId || '') !== String(order.orderId || '')) {
-                        let isSameCustomer = false;
-                        if (uId && uo.userId) {
-                            isSameCustomer = (String(uId) === String(uo.userId));
-                        } else if (oPhone && uo.phone && oPhone.length === 10 && uo.phone.length === 10) {
-                            isSameCustomer = (oPhone === uo.phone);
-                        }
+                        if (uo.createdAt < orderTime) {
+                            let isSameCustomer = false;
+                            if (uId && uo.userId) {
+                                isSameCustomer = (String(uId) === String(uo.userId));
+                            } else if (oPhone && uo.phone && oPhone.length === 10 && uo.phone.length === 10) {
+                                isSameCustomer = (oPhone === uo.phone);
+                            }
 
-                        if (isSameCustomer) {
-                            return sum + uo.due;
+                            if (isSameCustomer) {
+                                return sum + uo.due;
+                            }
                         }
                     }
                     return sum;
@@ -1083,9 +1086,10 @@ export const updateOrderStatus = async (req, res) => {
         const retDeduction = parseFloat(returnAmount || discountAmount || 0);
 
         if (isDirectPaymentEdit) {
-            // Direct payment update from Order Details page
+            // Direct payment update from Order Details page - preserve original order sales date
             await OrderPayment.destroy({ where: { orderId: order.id } });
 
+            const orderPaymentDate = order.deliveredAt || order.createdAt || new Date();
             const cleanNotes = String(paymentNotes || notes || '').trim().slice(0, 240);
 
             if (cash > 0) {
@@ -1094,7 +1098,9 @@ export const updateOrderStatus = async (req, res) => {
                     amount: cash,
                     paymentMethod: 'CASH',
                     isSubmitted: true,
-                    submittedAt: new Date(),
+                    submittedAt: orderPaymentDate,
+                    createdAt: orderPaymentDate,
+                    updatedAt: new Date(),
                     notes: cleanNotes || 'Admin Updated Cash Payment'
                 });
             }
@@ -1104,7 +1110,9 @@ export const updateOrderStatus = async (req, res) => {
                     amount: online,
                     paymentMethod: 'ONLINE',
                     isSubmitted: true,
-                    submittedAt: new Date(),
+                    submittedAt: orderPaymentDate,
+                    createdAt: orderPaymentDate,
+                    updatedAt: new Date(),
                     notes: cleanNotes || 'Admin Updated Online Payment'
                 });
             }
@@ -1114,7 +1122,9 @@ export const updateOrderStatus = async (req, res) => {
                     amount: retDeduction,
                     paymentMethod: 'RETURN',
                     isSubmitted: true,
-                    submittedAt: new Date(),
+                    submittedAt: orderPaymentDate,
+                    createdAt: orderPaymentDate,
+                    updatedAt: new Date(),
                     notes: cleanNotes || 'Sales Return / Item Exchange Deduction'
                 });
             }
@@ -1124,7 +1134,9 @@ export const updateOrderStatus = async (req, res) => {
                     amount: credit,
                     paymentMethod: 'CREDIT',
                     isSubmitted: true,
-                    submittedAt: new Date(),
+                    submittedAt: orderPaymentDate,
+                    createdAt: orderPaymentDate,
+                    updatedAt: new Date(),
                     notes: cleanNotes || 'Admin Updated Credit Payment'
                 });
             }
@@ -1770,7 +1782,7 @@ export const settlePastDuePayment = async (req, res) => {
     const transaction = await Order.sequelize.transaction();
     try {
         const { id } = req.params;
-        const { amount, paymentMethod = 'CASH', bankSettingId, deliveryBoyId, note } = req.body;
+        const { amount, paymentMethod = 'CASH', bankSettingId, deliveryBoyId, note, paymentDate, backdateToOrderDate = true } = req.body;
 
         const parsedAmount = parseFloat(amount || 0);
         if (!parsedAmount || parsedAmount <= 0) {
@@ -1795,7 +1807,16 @@ export const settlePastDuePayment = async (req, res) => {
         const assignedBoyId = deliveryBoyId || order.assignment?.deliveryBoyId || null;
         const validBankId = methodUpper === 'ONLINE' && bankSettingId ? bankSettingId : null;
 
-        // 1. Create explicit OrderPayment record for this past due collection
+        // Determine effective payment date:
+        // Default to original order date so today's daily cash count / rojmel is NOT distorted!
+        let effectivePaymentDate = new Date();
+        if (paymentDate) {
+            effectivePaymentDate = new Date(paymentDate);
+        } else if (backdateToOrderDate !== false && backdateToOrderDate !== 'false') {
+            effectivePaymentDate = new Date(order.deliveredAt || order.createdAt || new Date());
+        }
+
+        // 1. Create explicit OrderPayment record with effective date
         await OrderPayment.create({
             orderId: order.id,
             amount: parsedAmount,
@@ -1803,7 +1824,9 @@ export const settlePastDuePayment = async (req, res) => {
             bankSettingId: validBankId,
             deliveryBoyId: assignedBoyId,
             isSubmitted: true,
-            submittedAt: new Date()
+            submittedAt: effectivePaymentDate,
+            createdAt: effectivePaymentDate,
+            updatedAt: effectivePaymentDate
         }, { transaction });
 
         // 2. Update Order amounts
@@ -1823,7 +1846,7 @@ export const settlePastDuePayment = async (req, res) => {
             order.paymentStatus = 'Partial';
         }
 
-        const timestamp = new Date().toLocaleString();
+        const timestamp = effectivePaymentDate.toLocaleString('en-IN');
         const auditNote = `[Past Due Cleared on ${timestamp}] Amount: ₹${parsedAmount} (${methodUpper})${note ? ` Notes: ${note}` : ''}`;
         order.notes = order.notes ? `${order.notes}\n${auditNote}` : auditNote;
 
