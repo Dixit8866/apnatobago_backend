@@ -11,7 +11,7 @@ const Product = sequelize.define(
         },
         thumbnail: {
             type: DataTypes.STRING,
-            allowNull: false,
+            allowNull: true,
         },
         images: {
             type: DataTypes.ARRAY(DataTypes.STRING),

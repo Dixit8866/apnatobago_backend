@@ -200,10 +200,6 @@ export const createProduct = async (req, res, next) => {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please provide product name in at least one language.');
         }
-        if (!thumbnail || !String(thumbnail).trim()) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Thumbnail image is required.');
-        }
 
         const normalizedImages = normalizeImages(images);
         if (normalizedImages.length > 5) {
@@ -247,7 +243,7 @@ export const createProduct = async (req, res, next) => {
         const product = await Product.create(
             {
                 name,
-                thumbnail: String(thumbnail).trim(),
+                thumbnail: thumbnail ? String(thumbnail).trim() : null,
                 images: normalizedImages,
                 mainCategoryId,
                 subCategoryId,
@@ -745,10 +741,6 @@ export const updateProduct = async (req, res, next) => {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Please provide product name in at least one language.');
         }
-        if (!thumbnail || !String(thumbnail).trim()) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Thumbnail image is required.');
-        }
 
         const normalizedImages = normalizeImages(images);
         if (normalizedImages.length > 5) {
@@ -848,7 +840,7 @@ export const updateProduct = async (req, res, next) => {
         await product.update(
             {
                 name,
-                thumbnail: String(thumbnail).trim(),
+                thumbnail: thumbnail !== undefined ? (thumbnail ? String(thumbnail).trim() : null) : product.thumbnail,
                 images: normalizedImages,
                 mainCategoryId,
                 subCategoryId,
