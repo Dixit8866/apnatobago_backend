@@ -886,7 +886,10 @@ export const getAllOrders = async (req, res) => {
         try {
             const allMatchedOrders = await Order.findAll({
                 where,
-                include: search ? searchIncludes : (deliveryBoyId ? [{ model: OrderAssignment, as: 'assignment' }] : []),
+                include: [
+                    ...(search ? searchIncludes : (deliveryBoyId ? [{ model: OrderAssignment, as: 'assignment' }] : [])),
+                    { model: OrderPayment, as: 'payments', required: false }
+                ],
                 attributes: ['id', 'totalAmount', 'paidAmount', 'dueAmount', 'paymentMethod', 'paymentStatus', 'orderStatus']
             });
 
@@ -900,12 +903,27 @@ export const getAllOrders = async (req, res) => {
                 paymentTotals.totalPaidSum += paid;
                 paymentTotals.totalDueSum += due;
 
-                if (pm.includes('cash') || pm.includes('રોકડ')) {
-                    paymentTotals.cashPaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
-                } else if (pm.includes('online') || pm.includes('upi') || pm.includes('bank') || pm.includes('qr') || pm.includes('gpay') || pm.includes('paytm') || pm.includes('cheque')) {
-                    paymentTotals.onlinePaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
+                const payments = Array.isArray(o.payments) ? o.payments : [];
+                if (payments.length > 0) {
+                    payments.forEach(p => {
+                        const amt = Number(p.amount || 0);
+                        const m = String(p.paymentMethod || p.method || p.paymentMode || '').toUpperCase();
+                        if (m === 'CASH' || m.includes('ROKAD') || m.includes('રોકડ')) {
+                            paymentTotals.cashPaidSum += amt;
+                        } else if (m === 'CREDIT') {
+                            // credit ignored from paid sums
+                        } else if (amt > 0) {
+                            paymentTotals.onlinePaidSum += amt;
+                        }
+                    });
                 } else {
-                    if (paid > 0) paymentTotals.cashPaidSum += paid;
+                    if (pm.includes('cash') || pm.includes('રોકડ')) {
+                        paymentTotals.cashPaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
+                    } else if (pm.includes('online') || pm.includes('upi') || pm.includes('bank') || pm.includes('qr') || pm.includes('gpay') || pm.includes('paytm') || pm.includes('cheque')) {
+                        paymentTotals.onlinePaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
+                    } else {
+                        if (paid > 0) paymentTotals.cashPaidSum += paid;
+                    }
                 }
             });
 
