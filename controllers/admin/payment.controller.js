@@ -381,6 +381,16 @@ export const getDailyReconciliationReport = async (req, res) => {
                 }
             ]
         });
+        let totalCashSum = 0;
+        cashPayments.forEach(p => {
+            let amt = parseFloat(p.amount || 0);
+            if (p.order && p.order.totalAmount !== undefined && p.order.totalAmount !== null) {
+                const orderTot = parseFloat(p.order.totalAmount || 0);
+                if (amt > orderTot) amt = orderTot;
+            }
+            totalCashSum += amt;
+        });
+
         // 2b. Fetch Coupon Payments
         const couponPayments = await OrderPayment.findAll({
             where: { ...paymentWhere, paymentMethod: 'COUPON' },
