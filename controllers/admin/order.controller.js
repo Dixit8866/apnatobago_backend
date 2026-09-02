@@ -205,7 +205,7 @@ export const getAllOrders = async (req, res) => {
                 baseWhere.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
             } else if (status === 'Pending Due Order') {
                 baseWhere.paymentStatus = { [Op.ne]: 'Paid' };
-                baseWhere.orderStatus = { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
+                baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] };
             } else {
                 baseWhere.orderStatus = status;
             }
@@ -1568,8 +1568,13 @@ export const verifyAndSettleOrder = async (req, res) => {
         const parsedBaki = parseFloat(bakiAmount) || 0;
         let totalReturnDeduction = 0;
 
-        // Process In-Bill Sales Returns
+        // Process In-Bill Sales Returns (Clean up existing settlement returns to prevent duplicates)
         if (Array.isArray(salesReturns) && salesReturns.length > 0) {
+            await SalesReturn.destroy({
+                where: { orderId: order.id },
+                transaction
+            });
+
             for (const itemReturn of salesReturns) {
                 const retQty = parseInt(itemReturn.quantity, 10);
                 const retPrice = parseFloat(itemReturn.price) || 0;

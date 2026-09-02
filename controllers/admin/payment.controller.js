@@ -589,18 +589,25 @@ export const getDailyReconciliationReport = async (req, res) => {
             ]
         });
         let salesReturnsTotal = 0;
-        const salesReturnsList = salesReturnsToday.map(sr => {
+        const seenSalesReturnKeys = new Set();
+        const salesReturnsList = [];
+
+        salesReturnsToday.forEach(sr => {
             const rAmt = parseFloat(sr.returnAmount || 0);
-            salesReturnsTotal += rAmt;
-            return {
-                id: sr.id,
-                orderId: sr.order?.orderId || '-',
-                orderDbId: sr.orderId,
-                returnAmount: rAmt,
-                reason: sr.reason || 'Sales Return',
-                createdAt: sr.createdAt,
-                customerName: sr.order?.user?.businessProfile?.shopName || sr.order?.user?.fullname || sr.order?.customerName || 'Guest'
-            };
+            const srKey = `${sr.orderId}_${sr.productId || ''}_${sr.variantId || ''}_${rAmt}`;
+            if (!seenSalesReturnKeys.has(srKey)) {
+                seenSalesReturnKeys.add(srKey);
+                salesReturnsTotal += rAmt;
+                salesReturnsList.push({
+                    id: sr.id,
+                    orderId: sr.order?.orderId || '-',
+                    orderDbId: sr.orderId,
+                    returnAmount: rAmt,
+                    reason: sr.reason || 'Sales Return',
+                    createdAt: sr.createdAt,
+                    customerName: sr.order?.user?.businessProfile?.shopName || sr.order?.user?.fullname || sr.order?.customerName || 'Guest'
+                });
+            }
         });
 
         // 7. Jama & Baki Wallet logs created today
