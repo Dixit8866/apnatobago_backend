@@ -878,12 +878,13 @@ export const getAllOrders = async (req, res) => {
             'Pending Due Order': pendingDueCount
         };
 
-        let paymentTotals = {
+        const paymentTotals = {
             totalAmountSum: 0,
             totalPaidSum: 0,
             totalDueSum: 0,
             cashPaidSum: 0,
-            onlinePaidSum: 0
+            onlinePaidSum: 0,
+            couponPaidSum: 0
         };
 
         try {
@@ -913,6 +914,8 @@ export const getAllOrders = async (req, res) => {
                         const m = String(p.paymentMethod || p.method || p.paymentMode || '').toUpperCase();
                         if (m === 'CASH' || m.includes('ROKAD') || m.includes('રોકડ')) {
                             paymentTotals.cashPaidSum += amt;
+                        } else if (m === 'COUPON' || m.includes('COUPON') || m.includes('VOUCHER') || m.includes('કુપન')) {
+                            paymentTotals.couponPaidSum += amt;
                         } else if (m === 'CREDIT') {
                             // credit ignored from paid sums
                         } else if (amt > 0) {
@@ -922,6 +925,8 @@ export const getAllOrders = async (req, res) => {
                 } else {
                     if (pm.includes('cash') || pm.includes('રોકડ')) {
                         paymentTotals.cashPaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
+                    } else if (pm.includes('coupon') || pm.includes('voucher') || pm.includes('કુપન')) {
+                        paymentTotals.couponPaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
                     } else if (pm.includes('online') || pm.includes('upi') || pm.includes('bank') || pm.includes('qr') || pm.includes('gpay') || pm.includes('paytm') || pm.includes('cheque')) {
                         paymentTotals.onlinePaidSum += paid > 0 ? paid : (o.paymentStatus === 'Paid' ? bill : 0);
                     } else {
@@ -1519,6 +1524,7 @@ export const verifyAndSettleOrder = async (req, res) => {
         const { 
             cashAmount = 0, 
             onlineAmount = 0, 
+            couponAmount = 0,
             creditAmount = 0, 
             bankAccountId, 
             note, 
@@ -1546,6 +1552,7 @@ export const verifyAndSettleOrder = async (req, res) => {
 
         const parsedCash = parseFloat(cashAmount) || 0;
         const parsedOnline = parseFloat(onlineAmount) || 0;
+        const parsedCoupon = parseFloat(couponAmount) || 0;
         const parsedCredit = parseFloat(creditAmount) || 0;
         const parsedPrevReturn = parseFloat(previousReturnCredit) || 0;
         const parsedJama = parseFloat(jamaAmount) || 0;
@@ -1629,18 +1636,17 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.cashAmount = parsedCash;
         order.onlineAmount = parsedOnline;
         order.creditAmount = parsedCredit;
-        order.paymentMethod = parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH');
-        order.paidAmount = parsedCash + parsedOnline;
+        order.paymentMethod = parsedCoupon > 0 ? (parsedCash > 0 || parsedOnline > 0 ? 'MIXED' : 'COUPON') : (parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH'));
+        order.paidAmount = parsedCash + parsedOnline + parsedCoupon;
         order.dueAmount = parsedCredit; // Credit Amount represents THIS order's unpaid bill due amount
         order.paymentStatus = parsedCredit > 0 ? 'Partial' : 'Paid';
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         order.deliveredAt = order.deliveredAt || new Date();
 
-        // Update Party Wallet/Account Balance ONLY for explicit Jama (+) and Baki (-) ledger adjustments
+        // Update Party Wallet/Account Balance: Jama (-) utilizes advance balance, Baki (+) clears/adjusts due balance
         if (order.user && (parsedJama > 0 || parsedBaki > 0)) {
             const currentWallet = parseFloat(order.user.walletBalance) || 0;
-            // Jama (+) adds to party wallet balance, Baki (-) subtracts from party wallet balance
-            order.user.walletBalance = currentWallet + parsedJama - parsedBaki;
+            order.user.walletBalance = currentWallet - parsedJama + parsedBaki;
             await order.user.save({ transaction });
         }
 
@@ -1690,7 +1696,7 @@ export const verifyAndSettleOrder = async (req, res) => {
         }
 
         const timestamp = new Date().toLocaleString();
-        let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}, Credit: ₹${parsedCredit}`;
+        let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}${parsedCoupon > 0 ? `, Coupon: ₹${parsedCoupon}` : ''}, Credit: ₹${parsedCredit}`;
         if (totalReturnDeduction > 0) {
             noteStr += `, In-Bill Return Deduction: ₹${totalReturnDeduction.toFixed(2)}`;
         }
@@ -1716,6 +1722,8 @@ export const verifyAndSettleOrder = async (req, res) => {
         const isValidUUID = typeof bankAccountId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bankAccountId);
         const validBankId = isValidUUID ? bankAccountId : null;
 
+        const effectivePaymentDate = order.deliveredAt || order.createdAt || new Date();
+
         if (parsedCash > 0) {
             await OrderPayment.create({
                 orderId: order.id,
@@ -1723,7 +1731,9 @@ export const verifyAndSettleOrder = async (req, res) => {
                 amount: parsedCash,
                 paymentMethod: 'CASH',
                 isSubmitted: true,
-                submittedAt: new Date()
+                submittedAt: effectivePaymentDate,
+                createdAt: effectivePaymentDate,
+                updatedAt: new Date()
             }, { transaction });
         }
 
@@ -1735,18 +1745,35 @@ export const verifyAndSettleOrder = async (req, res) => {
                 paymentMethod: 'ONLINE',
                 bankSettingId: validBankId,
                 isSubmitted: true,
-                submittedAt: new Date()
+                submittedAt: effectivePaymentDate,
+                createdAt: effectivePaymentDate,
+                updatedAt: new Date()
             }, { transaction });
         }
 
-        if (parsedCash === 0 && parsedOnline === 0) {
+        if (parsedCoupon > 0) {
+            await OrderPayment.create({
+                orderId: order.id,
+                userId: order.userId,
+                amount: parsedCoupon,
+                paymentMethod: 'COUPON',
+                isSubmitted: true,
+                submittedAt: effectivePaymentDate,
+                createdAt: effectivePaymentDate,
+                updatedAt: new Date()
+            }, { transaction });
+        }
+
+        if (parsedCash === 0 && parsedOnline === 0 && parsedCoupon === 0) {
             await OrderPayment.create({
                 orderId: order.id,
                 userId: order.userId,
                 amount: parsedCredit > 0 ? parsedCredit : (order.totalAmount || 0),
                 paymentMethod: parsedCredit > 0 ? 'CREDIT' : 'CASH',
                 isSubmitted: true,
-                submittedAt: new Date()
+                submittedAt: effectivePaymentDate,
+                createdAt: effectivePaymentDate,
+                updatedAt: new Date()
             }, { transaction });
         }
 
