@@ -1643,10 +1643,10 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         order.deliveredAt = order.deliveredAt || new Date();
 
-        // Update Party Wallet/Account Balance: Jama (-) utilizes advance balance, Baki (+) clears/adjusts due balance
+        // Update Party Wallet/Account Balance: Jama (+) adds excess/advance to party wallet, Baki (-) subtracts shortage
         if (order.user && (parsedJama > 0 || parsedBaki > 0)) {
             const currentWallet = parseFloat(order.user.walletBalance) || 0;
-            order.user.walletBalance = currentWallet - parsedJama + parsedBaki;
+            order.user.walletBalance = currentWallet + parsedJama - parsedBaki;
             await order.user.save({ transaction });
         }
 
