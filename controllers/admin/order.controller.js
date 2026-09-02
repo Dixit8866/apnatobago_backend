@@ -261,8 +261,9 @@ export const getAllOrders = async (req, res) => {
             } : { createdAt: { [Op.between]: [sDate, eDate] } };
         };
 
-        // Restrict statuses (except Pending, Payment Collect, and Pending Due Order) to today by default unless filtered
-        if (!startDate && !endDate && !date && status !== 'Pending' && status !== 'Payment Collect' && status !== 'Pending Due Order' && status && status !== 'All') {
+        // Restrict historical statuses (Delivered, Payment Verify, Cancelled) to today by default unless filtered; keep active workflow tabs (Pending, Packaging, Packed, Shipping, Payment Collect) unrestricted so all open orders appear
+        const activeWorkflowStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Payment Collect', 'Pending Due Order', 'All'];
+        if (!startDate && !endDate && !date && status && !activeWorkflowStatuses.includes(status)) {
             dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
         }
 
