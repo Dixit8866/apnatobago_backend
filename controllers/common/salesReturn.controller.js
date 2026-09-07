@@ -12,7 +12,6 @@ import {
     Godown,
     Product,
     DeliveryBoy,
-    PartyBalanceLog,
     OrderPayment
 } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
@@ -903,33 +902,10 @@ export const createAdminSalesReturn = async (req, res) => {
             }
         }
 
-        let newBal = parseFloat(user.walletBalance || 0);
-        if (totalJamaCredit > 0) {
-            const prevBal = newBal;
-            newBal = prevBal + totalJamaCredit;
-            await user.update({ walletBalance: newBal }, { transaction: t });
-
-            // Create Party Balance Log Entry only when GOOD return Jama Credit is added
-            await PartyBalanceLog.create({
-                userId: user.id,
-                orderId: order.id,
-                type: 'JAMA',
-                amount: totalJamaCredit,
-                previousBalance: prevBal,
-                newBalance: newBal,
-                note: `Sales Return Jama Credit (+₹${totalJamaCredit.toFixed(2)}) for Order #${order.orderId}`,
-                createdById: req.user?.id || null,
-                createdByName: actorName
-            }, { transaction: t });
-        }
-
         await t.commit();
 
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, totalJamaCredit > 0 
-            ? `Sales return created successfully. ₹${totalJamaCredit.toFixed(2)} Jama credited to ${user.fullname}'s wallet.`
-            : `Damaged Sales Return recorded for Company Return. No party wallet credit applied.`, {
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Sales return created successfully.', {
             salesReturns: salesReturnEntries,
-            partyWalletBalance: newBal,
             newOrderTotal: newTotalAmount
         });
 

@@ -1541,8 +1541,6 @@ export const verifyAndSettleOrder = async (req, res) => {
             previousReturnCredit = 0,
             previousReturnOrderId = null,
             previousSalesReturns = [],
-            jamaAmount = 0,
-            bakiAmount = 0,
             roundOffAmount = 0
         } = req.body;
 
@@ -1564,8 +1562,6 @@ export const verifyAndSettleOrder = async (req, res) => {
         const parsedCoupon = parseFloat(couponAmount) || 0;
         const parsedCredit = parseFloat(creditAmount) || 0;
         const parsedPrevReturn = parseFloat(previousReturnCredit) || 0;
-        const parsedJama = parseFloat(jamaAmount) || 0;
-        const parsedBaki = parseFloat(bakiAmount) || 0;
         let totalReturnDeduction = 0;
 
         // Process In-Bill Sales Returns (Clean up existing settlement returns to prevent duplicates)
@@ -1655,15 +1651,6 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.dueAmount = parsedCredit; // Credit Amount represents THIS order's unpaid bill due amount
         order.paymentStatus = parsedCredit > 0 ? 'Partial' : 'Paid';
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
-        order.deliveredAt = order.deliveredAt || new Date();
-
-        // Update Party Wallet/Account Balance: Jama (+) adds excess/advance to party wallet, Baki (-) subtracts shortage
-        if (order.user && (parsedJama > 0 || parsedBaki > 0)) {
-            const currentWallet = parseFloat(order.user.walletBalance) || 0;
-            order.user.walletBalance = currentWallet + parsedJama - parsedBaki;
-            await order.user.save({ transaction });
-        }
-
         // If Admin explicitly edited/overrode customer's previous pending dues, update unpaid previous orders
         if (req.body.overridePartyDue !== undefined && req.body.overridePartyDue !== null && !isNaN(parseFloat(req.body.overridePartyDue)) && order.userId) {
             const newTargetPrevDue = Math.max(0, parseFloat(req.body.overridePartyDue));
