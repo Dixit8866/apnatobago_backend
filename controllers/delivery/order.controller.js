@@ -1488,9 +1488,9 @@ export const submitDeliveryBankPayment = async (req, res) => {
 export const getUserPreviousBills = async (req, res) => {
     try {
         const { userId } = req.params;
-        const { currentOrderId } = req.query; // optional: exclude current order being delivered/settled if provided
+        const currentOrdId = String(req.query.currentOrderId || req.query.excludeOrderId || req.query.orderId || req.query.excludeId || '').trim();
 
-        logger.info(`[Get User Previous Bills]: Fetching unpaid previous bills for user parameter ${userId}`);
+        logger.info(`[Get User Previous Bills]: Fetching unpaid previous bills for user parameter ${userId}, excluding current order ${currentOrdId}`);
 
         // Find user by UUID or by phone number
         const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1521,9 +1521,10 @@ export const getUserPreviousBills = async (req, res) => {
             userOrConditions.push({ customerNumber: { [Op.like]: `%${userPhoneClean}` } });
         }
 
-        // Include any order that is NOT cancelled (Delivered, Payment Collect, Payment Verify, Completed, Shipping, etc.)
+        // Delivered / Fulfilled order statuses ONLY (Active orders like Pending, Packaging, Packed, Shipping are current orders, NOT previous bills)
+        const deliveredStatuses = ['Delivered', 'delivered', 'DELIVERED', 'Payment Collect', 'payment collect', 'Payment Verify', 'payment verify', 'Completed', 'completed', 'COMPLETED'];
         const statusCondition = {
-            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+            orderStatus: { [Op.in]: deliveredStatuses }
         };
 
         const andConditions = [
@@ -1531,11 +1532,22 @@ export const getUserPreviousBills = async (req, res) => {
             statusCondition
         ];
 
-        if (currentOrderId) {
-            if (uuidPattern.test(currentOrderId)) {
-                andConditions.push({ id: { [Op.ne]: currentOrderId } });
+        // Exclude current order if provided
+        if (currentOrdId) {
+            const rawNum = currentOrdId.replace(/^ORD-?/i, '');
+            const possibleOrderIds = Array.from(new Set([
+                currentOrdId,
+                `ORD-${rawNum}`,
+                rawNum
+            ])).filter(Boolean);
+
+            if (uuidPattern.test(currentOrdId)) {
+                andConditions.push({ id: { [Op.ne]: currentOrdId } });
             } else {
-                andConditions.push({ orderId: { [Op.ne]: currentOrderId } });
+                andConditions.push({
+                    orderId: { [Op.notIn]: possibleOrderIds },
+                    id: { [Op.ne]: currentOrdId }
+                });
             }
         }
 
@@ -1607,6 +1619,12 @@ export const getUserPreviousBills = async (req, res) => {
             const pStatus = String(uo.paymentStatus || '').toLowerCase();
             const oStatus = String(uo.orderStatus || '');
 
+            const isDeliveredOrSettled = deliveredStatuses.some(s => s.toLowerCase() === oStatus.toLowerCase());
+
+            if (!isDeliveredOrSettled || oStatus.toLowerCase().includes('cancel') || pStatus === 'paid') {
+                return;
+            }
+
             let realPaid = paid;
             if (Array.isArray(uo.payments) && uo.payments.length > 0) {
                 realPaid = uo.payments.reduce((pSum, p) => {
@@ -1616,12 +1634,10 @@ export const getUserPreviousBills = async (req, res) => {
             }
 
             let due = 0;
-            if (!oStatus.toLowerCase().includes('cancel') && pStatus !== 'paid') {
-                if (dueCol > 0) {
-                    due = Math.min(tot, dueCol);
-                } else if (realPaid < tot - 0.01) {
-                    due = Math.max(0, tot - realPaid);
-                }
+            if (dueCol > 0) {
+                due = Math.min(tot, dueCol);
+            } else if (realPaid < tot - 0.01) {
+                due = Math.max(0, tot - realPaid);
             }
 
             if (due > 0) {
