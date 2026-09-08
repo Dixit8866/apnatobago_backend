@@ -242,6 +242,135 @@ export const getMyAssignedOrders = async (req, res) => {
 };
 
 /**
+ * Helper to enrich order items with volume options, base units, and single unit prices
+ */
+const enrichItemsWithProductVolumes = async (items) => {
+    if (!items || !Array.isArray(items) || items.length === 0) return items;
+
+    const productIds = [...new Set(items.map(item => item.productId).filter(Boolean))];
+    if (productIds.length === 0) return items;
+
+    let productVariantsMap = {};
+    try {
+        const variants = await ProductVariant.findAll({
+            where: {
+                productId: { [Op.in]: productIds },
+                status: 'Active'
+            },
+            include: [
+                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+            ]
+        });
+
+        variants.forEach(v => {
+            if (!productVariantsMap[v.productId]) {
+                productVariantsMap[v.productId] = [];
+            }
+            productVariantsMap[v.productId].push(v);
+        });
+    } catch (err) {
+        logger.error(`[enrichItemsWithProductVolumes] Error fetching variants: ${err.message}`);
+    }
+
+    const helperGetVolName = (vObj) => {
+        if (!vObj) return '';
+        if (typeof vObj.name === 'string') return vObj.name;
+        if (typeof vObj.name === 'object' && vObj.name !== null) {
+            return vObj.name.en || vObj.name.guj || Object.values(vObj.name)[0] || '';
+        }
+        return '';
+    };
+
+    for (const item of items) {
+        const itemVariant = item.variant || {};
+        const variantInfo = item.variantInfo || {};
+        
+        const baseUnitsPerPack = Number(itemVariant.baseUnitsPerPack || variantInfo.baseUnitsPerPack || 1);
+        const sellingVolume = Number(itemVariant.sellingVolume || variantInfo.sellingVolume || 1);
+        const packUnits = (baseUnitsPerPack * sellingVolume) > 0 ? (baseUnitsPerPack * sellingVolume) : 1;
+
+        const itemPrice = parseFloat(item.price || 0);
+        const singleUnitPrice = itemPrice / packUnits;
+
+        item.baseUnitsPerPack = baseUnitsPerPack;
+        item.sellingVolume = sellingVolume;
+        item.packUnits = packUnits;
+        item.singleUnitPrice = parseFloat(singleUnitPrice.toFixed(2));
+        item.unitPrice = parseFloat(singleUnitPrice.toFixed(2));
+        item.totalUnits = parseFloat((parseFloat(item.quantity || 0) * packUnits).toFixed(2));
+
+        const pVariants = productVariantsMap[item.productId] || [];
+        const volumeOptions = [];
+
+        pVariants.forEach(v => {
+            const volName = helperGetVolName(v.volumeRef) ||
+                           helperGetVolName(v.baseUnitRef) ||
+                           helperGetVolName(v.innerUnitRef) ||
+                           v.volume || v.extra || 'Unit';
+
+            const vBaseUnits = Number(v.baseUnitsPerPack || 1);
+            const vSellingVol = Number(v.sellingVolume || 1);
+            const vPackUnits = (vBaseUnits * vSellingVol) > 0 ? (vBaseUnits * vSellingVol) : 1;
+            const calculatedPrice = parseFloat((singleUnitPrice * vPackUnits).toFixed(2));
+
+            volumeOptions.push({
+                id: v.id,
+                variantId: v.id,
+                volumeId: v.volumeId,
+                volumeName: volName,
+                volume: volName,
+                baseUnitsPerPack: vBaseUnits,
+                sellingVolume: vSellingVol,
+                unitsPerPack: vPackUnits,
+                singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
+                price: calculatedPrice > 0 ? calculatedPrice : parseFloat(v.purchasePrice || 0),
+                purchasePrice: parseFloat(v.purchasePrice || 0)
+            });
+        });
+
+        if (volumeOptions.length === 0) {
+            const currentVolName = typeof variantInfo.volume === 'string' ? variantInfo.volume : '1 Pack';
+            volumeOptions.push({
+                id: item.variantId,
+                variantId: item.variantId,
+                volumeId: itemVariant.volumeId || null,
+                volumeName: currentVolName,
+                volume: currentVolName,
+                baseUnitsPerPack: baseUnitsPerPack,
+                sellingVolume: sellingVolume,
+                unitsPerPack: packUnits,
+                singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
+                price: itemPrice
+            });
+
+            if (packUnits > 1) {
+                volumeOptions.push({
+                    id: item.variantId,
+                    variantId: item.variantId,
+                    volumeId: null,
+                    volumeName: '1 Pcs / Unit',
+                    volume: '1 Pcs / Unit',
+                    baseUnitsPerPack: 1,
+                    sellingVolume: 1,
+                    unitsPerPack: 1,
+                    singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
+                    price: parseFloat(singleUnitPrice.toFixed(2))
+                });
+            }
+        }
+
+        item.allVolumes = volumeOptions;
+        item.allVariants = volumeOptions;
+        item.productVolumes = volumeOptions;
+        item.volumes = volumeOptions;
+    }
+
+    return items;
+};
+
+/**
  * @desc    Get order details for delivery boy
  * @route   GET /api/delivery/orders/:assignmentId
  * @access  Private (Delivery Boy)
@@ -281,7 +410,11 @@ export const getAssignmentDetails = async (req, res) => {
                                 {
                                     model: ProductVariant,
                                     as: 'variant',
-                                    include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
+                                    include: [
+                                        { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                                    ]
                                 }
                             ]
                         }
@@ -362,6 +495,7 @@ export const getAssignmentDetails = async (req, res) => {
                     });
                 }
             });
+            await enrichItemsWithProductVolumes(data.order.items);
         }
 
         const isSettled = ['Delivered', 'Payment Collect', 'Payment Verify'].includes(assignment.order?.orderStatus);
