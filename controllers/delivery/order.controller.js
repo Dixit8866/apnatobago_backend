@@ -1823,7 +1823,11 @@ export const getUserPreviousBills = async (req, res) => {
                     {
                         model: ProductVariant,
                         as: 'variant',
-                        include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
+                        include: [
+                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                        ]
                     }
                 ]
             });
@@ -1838,21 +1842,30 @@ export const getUserPreviousBills = async (req, res) => {
                         ? Object.values(itemData.variantInfo.volume)[0] || ''
                         : String(itemData.variantInfo.volume);
                 } else if (itemData.variant && itemData.variant.volumeRef) {
-                    volumeName = itemData.variant.volumeRef.name || '';
+                    volumeName = typeof itemData.variant.volumeRef.name === 'object' && itemData.variant.volumeRef.name !== null
+                        ? Object.values(itemData.variant.volumeRef.name)[0] || ''
+                        : String(itemData.variant.volumeRef.name || '');
                 }
 
                 itemsMap[it.orderId].push({
                     id: itemData.id,
                     productId: itemData.productId,
+                    variantId: itemData.variantId,
                     productName: itemData.product?.name || 'Product',
                     quantity: parseFloat(itemData.quantity || 0),
                     sellUnit: itemData.sellUnit || 'Base',
                     price: parseFloat(itemData.price || 0),
                     variantInfo: itemData.variantInfo || null,
+                    variant: itemData.variant || null,
+                    product: itemData.product || null,
                     volumeName: volumeName,
                     itemTotal: Math.round(parseFloat(itemData.quantity || 0) * parseFloat(itemData.price || 0) * 100) / 100
                 });
             });
+
+            // Enrich all items across all previous bills with product volumes for return sales
+            const allItemsFlat = Object.values(itemsMap).flat();
+            await enrichItemsWithProductVolumes(allItemsFlat);
         }
 
         // 5. Build previousBills array & totalPreviousDues
