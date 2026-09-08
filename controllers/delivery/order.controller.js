@@ -1490,34 +1490,57 @@ export const getUserPreviousBills = async (req, res) => {
         const { userId } = req.params;
         const { currentOrderId } = req.query; // optional: exclude current order being delivered/settled if provided
 
-        logger.info(`[Get User Previous Bills]: Fetching unpaid previous bills for user ${userId}`);
+        logger.info(`[Get User Previous Bills]: Fetching unpaid previous bills for user parameter ${userId}`);
 
-        // Find user to ensure existence
-        const user = await User.findByPk(userId, {
-            attributes: ['id', 'fullname', 'number', 'creditline'],
-            include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
-        });
+        // Find user by UUID or by phone number
+        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        let user = null;
+        if (uuidPattern.test(userId)) {
+            user = await User.findByPk(userId, {
+                attributes: ['id', 'fullname', 'number', 'creditline'],
+                include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
+            });
+        } else {
+            const cleanNum = String(userId).replace(/\D/g, '').slice(-10);
+            user = await User.findOne({
+                where: cleanNum ? { number: { [Op.like]: `%${cleanNum}` } } : { id: userId },
+                attributes: ['id', 'fullname', 'number', 'creditline'],
+                include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
+            });
+        }
 
         if (!user) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
         }
 
-        const orderWhere = {
-            userId,
-            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+        const userPhoneClean = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
+
+        // Build OR condition to match by userId OR customerNumber (for direct sales / admin created orders)
+        const userOrConditions = [{ userId: user.id }];
+        if (userPhoneClean && userPhoneClean.length >= 7) {
+            userOrConditions.push({ customerNumber: { [Op.like]: `%${userPhoneClean}` } });
+        }
+
+        // Include any order that is NOT cancelled (Delivered, Payment Collect, Payment Verify, Completed, Shipping, etc.)
+        const statusCondition = {
+            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
         };
 
+        const andConditions = [
+            { [Op.or]: userOrConditions },
+            statusCondition
+        ];
+
         if (currentOrderId) {
-            const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
             if (uuidPattern.test(currentOrderId)) {
-                orderWhere.id = { [Op.ne]: currentOrderId };
+                andConditions.push({ id: { [Op.ne]: currentOrderId } });
             } else {
-                orderWhere.orderId = { [Op.ne]: currentOrderId };
+                andConditions.push({ orderId: { [Op.ne]: currentOrderId } });
             }
         }
 
         const unpaidOrders = await Order.findAll({
-            where: orderWhere,
+            where: { [Op.and]: andConditions },
             include: [
                 {
                     model: OrderPayment,
@@ -1594,12 +1617,10 @@ export const getUserPreviousBills = async (req, res) => {
 
             let due = 0;
             if (!oStatus.toLowerCase().includes('cancel') && pStatus !== 'paid') {
-                if (realPaid < tot - 0.99) {
-                    if (dueCol > 0) {
-                        due = Math.min(tot, dueCol);
-                    } else {
-                        due = Math.max(0, tot - realPaid);
-                    }
+                if (dueCol > 0) {
+                    due = Math.min(tot, dueCol);
+                } else if (realPaid < tot - 0.01) {
+                    due = Math.max(0, tot - realPaid);
                 }
             }
 
@@ -1613,6 +1634,7 @@ export const getUserPreviousBills = async (req, res) => {
                     paidAmount: Math.round(realPaid * 100) / 100,
                     dueAmount: Math.round(due * 100) / 100,
                     paymentStatus: uo.paymentStatus,
+                    orderStatus: uo.orderStatus,
                     items: itemsMap[uo.id] || []
                 });
             }
