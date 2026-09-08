@@ -1479,3 +1479,159 @@ export const submitDeliveryBankPayment = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * @desc    Get user previous pending bills/orders with items for delivery boy payment settlement
+ * @route   GET /api/delivery/orders/user-previous-bills/:userId
+ * @access  Private (Delivery Boy)
+ */
+export const getUserPreviousBills = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { currentOrderId } = req.query; // optional: exclude current order being delivered/settled if provided
+
+        logger.info(`[Get User Previous Bills]: Fetching unpaid previous bills for user ${userId}`);
+
+        // Find user to ensure existence
+        const user = await User.findByPk(userId, {
+            attributes: ['id', 'fullname', 'number', 'creditline'],
+            include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
+        });
+
+        if (!user) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
+        }
+
+        const orderWhere = {
+            userId,
+            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+        };
+
+        if (currentOrderId) {
+            const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            if (uuidPattern.test(currentOrderId)) {
+                orderWhere.id = { [Op.ne]: currentOrderId };
+            } else {
+                orderWhere.orderId = { [Op.ne]: currentOrderId };
+            }
+        }
+
+        const unpaidOrders = await Order.findAll({
+            where: orderWhere,
+            include: [
+                {
+                    model: OrderPayment,
+                    as: 'payments',
+                    required: false,
+                    attributes: ['id', 'amount', 'paymentMethod']
+                }
+            ],
+            attributes: ['id', 'orderId', 'totalAmount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+            order: [['createdAt', 'DESC']]
+        });
+
+        // Filter orders that have pending dues
+        const previousBills = [];
+        let totalPreviousDues = 0;
+
+        const orderIds = unpaidOrders.map(o => o.id);
+
+        let itemsMap = {};
+        if (orderIds.length > 0) {
+            const items = await OrderItem.findAll({
+                where: { orderId: orderIds },
+                include: [
+                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                    {
+                        model: ProductVariant,
+                        as: 'variant',
+                        include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
+                    }
+                ]
+            });
+
+            items.forEach(it => {
+                if (!itemsMap[it.orderId]) itemsMap[it.orderId] = [];
+                const itemData = it.toJSON ? it.toJSON() : it;
+
+                let volumeName = '';
+                if (itemData.variantInfo && itemData.variantInfo.volume) {
+                    volumeName = typeof itemData.variantInfo.volume === 'object'
+                        ? Object.values(itemData.variantInfo.volume)[0] || ''
+                        : String(itemData.variantInfo.volume);
+                } else if (itemData.variant && itemData.variant.volumeRef) {
+                    volumeName = itemData.variant.volumeRef.name || '';
+                }
+
+                itemsMap[it.orderId].push({
+                    id: itemData.id,
+                    productId: itemData.productId,
+                    productName: itemData.product?.name || 'Product',
+                    quantity: parseFloat(itemData.quantity || 0),
+                    sellUnit: itemData.sellUnit || 'Base',
+                    price: parseFloat(itemData.price || 0),
+                    variantInfo: itemData.variantInfo || null,
+                    volumeName: volumeName,
+                    itemTotal: Math.round(parseFloat(itemData.quantity || 0) * parseFloat(itemData.price || 0) * 100) / 100
+                });
+            });
+        }
+
+        unpaidOrders.forEach(uo => {
+            const tot = parseFloat(uo.totalAmount || 0);
+            const dueCol = parseFloat(uo.dueAmount || 0);
+            const paid = parseFloat(uo.paidAmount || 0);
+            const pStatus = String(uo.paymentStatus || '').toLowerCase();
+            const oStatus = String(uo.orderStatus || '');
+
+            let realPaid = paid;
+            if (Array.isArray(uo.payments) && uo.payments.length > 0) {
+                realPaid = uo.payments.reduce((pSum, p) => {
+                    const m = String(p.paymentMethod || p.method || '').toUpperCase();
+                    return m !== 'CREDIT' ? pSum + parseFloat(p.amount || 0) : pSum;
+                }, 0);
+            }
+
+            let due = 0;
+            if (!oStatus.toLowerCase().includes('cancel') && pStatus !== 'paid') {
+                if (realPaid < tot - 0.99) {
+                    if (dueCol > 0) {
+                        due = Math.min(tot, dueCol);
+                    } else {
+                        due = Math.max(0, tot - realPaid);
+                    }
+                }
+            }
+
+            if (due > 0) {
+                totalPreviousDues += due;
+                previousBills.push({
+                    orderDbId: uo.id,
+                    billNo: uo.orderId,
+                    date: uo.createdAt,
+                    totalAmount: tot,
+                    paidAmount: Math.round(realPaid * 100) / 100,
+                    dueAmount: Math.round(due * 100) / 100,
+                    paymentStatus: uo.paymentStatus,
+                    items: itemsMap[uo.id] || []
+                });
+            }
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "User previous bills fetched successfully.", {
+            user: {
+                id: user.id,
+                fullname: user.fullname,
+                number: user.number,
+                shopName: user.businessProfile?.shopName || '',
+                creditline: parseFloat(user.creditline || 0)
+            },
+            totalPreviousDues: Math.round(totalPreviousDues * 100) / 100,
+            totalBillsCount: previousBills.length,
+            previousBills
+        });
+    } catch (error) {
+        logger.error(`[Get User Previous Bills Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};

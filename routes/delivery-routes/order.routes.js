@@ -7,6 +7,7 @@ import {
     completeOrderAndSettlePayment, 
     getAssignmentDetails, 
     getUserCreditDetails,
+    getUserPreviousBills,
     settleSingleOrderPayment,
     submitDeliveryBankPayment
 } from '../../controllers/delivery/order.controller.js';
@@ -33,6 +34,7 @@ router.use(protectDeliveryBoy);
 router.get('/', getMyAssignedOrders);
 router.get('/details/:assignmentId', getAssignmentDetails);
 router.get('/user-credit/:userId', getUserCreditDetails);
+router.get('/user-previous-bills/:userId', getUserPreviousBills);
 router.put('/reorder', reorderAssignments);
 router.put('/settle-single', settleSingleOrderPayment);
 router.put('/:assignmentId/status', updateMyAssignmentStatus);
