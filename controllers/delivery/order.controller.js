@@ -361,10 +361,7 @@ const enrichItemsWithProductVolumes = async (items) => {
             }
         }
 
-        item.allVolumes = volumeOptions;
-        item.allVariants = volumeOptions;
         item.productVolumes = volumeOptions;
-        item.volumes = volumeOptions;
     }
 
     return items;
