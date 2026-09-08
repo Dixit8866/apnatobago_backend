@@ -22,6 +22,7 @@ import InventoryTransaction from './superadmin-models/InventoryTransaction.js';
 import User from './user/User.js';
 import OTP from './user/Otp.js';
 import PartyCalling from './user/PartyCalling.js';
+import PartyBalanceLog from './user/PartyBalanceLog.js';
 import Vendor from './superadmin-models/Vendor.js';
 import VendorOrder from './superadmin-models/VendorOrder.js';
 import PurchaseBill from './superadmin-models/PurchaseBill.js';
@@ -268,6 +269,12 @@ SalesReturn.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 DeliveryBoy.hasMany(SalesReturn, { foreignKey: 'deliveryBoyId', as: 'returns' });
 SalesReturn.belongsTo(DeliveryBoy, { foreignKey: 'deliveryBoyId', as: 'deliveryBoy' });
+
+// PartyBalanceLog Associations
+User.hasMany(PartyBalanceLog, { foreignKey: 'userId', as: 'partyBalanceLogs' });
+PartyBalanceLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Order.hasMany(PartyBalanceLog, { foreignKey: 'orderId', as: 'partyBalanceLogs' });
+PartyBalanceLog.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 
 Product.hasMany(SalesReturn, { foreignKey: 'productId', as: 'returns' });
 SalesReturn.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
@@ -678,6 +685,7 @@ export {
     OutletOrder,
     OutletOrderItem,
     DailyReconciliation,
+    PartyBalanceLog,
     AppNoticeSetting,
     runManualMigrations
 };
