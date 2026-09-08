@@ -1492,7 +1492,7 @@ export const getUserPreviousBills = async (req, res) => {
 
         logger.info(`[Get User Previous Bills]: Fetching unpaid previous bills for user parameter ${userId}, excluding current order ${currentOrdId}`);
 
-        // Find user by UUID or by phone number
+        // 1. Find user by UUID or by phone number
         const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
         let user = null;
         if (uuidPattern.test(userId)) {
@@ -1514,45 +1514,48 @@ export const getUserPreviousBills = async (req, res) => {
         }
 
         const userPhoneClean = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
+        const shopNameClean = user.businessProfile?.shopName ? user.businessProfile.shopName.trim() : '';
 
-        // Build OR condition to match by userId OR customerNumber (for direct sales / admin created orders)
+        // 2. Build OR condition to match by userId OR customerNumber OR customerName (matching admin logic)
         const userOrConditions = [{ userId: user.id }];
         if (userPhoneClean && userPhoneClean.length >= 7) {
             userOrConditions.push({ customerNumber: { [Op.like]: `%${userPhoneClean}` } });
         }
+        if (shopNameClean && shopNameClean.length >= 3) {
+            userOrConditions.push({ customerName: { [Op.iLike]: `%${shopNameClean}%` } });
+        }
 
-        // Delivered / Fulfilled order statuses ONLY (Active orders like Pending, Packaging, Packed, Shipping are current orders, NOT previous bills)
+        // 3. Delivered / Fulfilled order statuses ONLY (Active orders like Pending, Packaging, Packed, Shipping are current orders, NOT previous bills)
         const deliveredStatuses = ['Delivered', 'delivered', 'DELIVERED', 'Payment Collect', 'payment collect', 'Payment Verify', 'payment verify', 'Completed', 'completed', 'COMPLETED'];
-        const statusCondition = {
-            orderStatus: { [Op.in]: deliveredStatuses }
-        };
+        
+        // 4. Current order lookup (if currentOrdId is provided, get its createdAt timestamp for strict timestamp filtering)
+        let currentOrderTime = null;
+        let currentOrderDbId = null;
+        let currentOrderIdStr = null;
 
-        const andConditions = [
-            { [Op.or]: userOrConditions },
-            statusCondition
-        ];
-
-        // Exclude current order if provided
         if (currentOrdId) {
-            const rawNum = currentOrdId.replace(/^ORD-?/i, '');
-            const possibleOrderIds = Array.from(new Set([
-                currentOrdId,
-                `ORD-${rawNum}`,
-                rawNum
-            ])).filter(Boolean);
-
-            if (uuidPattern.test(currentOrdId)) {
-                andConditions.push({ id: { [Op.ne]: currentOrdId } });
-            } else {
-                andConditions.push({
-                    orderId: { [Op.notIn]: possibleOrderIds },
-                    id: { [Op.ne]: currentOrdId }
-                });
+            const isUUID = uuidPattern.test(currentOrdId);
+            const curOrder = await Order.findOne({
+                where: isUUID ? { id: currentOrdId } : { orderId: currentOrdId },
+                attributes: ['id', 'orderId', 'createdAt']
+            });
+            if (curOrder) {
+                currentOrderDbId = String(curOrder.id);
+                currentOrderIdStr = String(curOrder.orderId);
+                if (curOrder.createdAt) {
+                    currentOrderTime = new Date(curOrder.createdAt).getTime();
+                }
             }
         }
 
-        const unpaidOrders = await Order.findAll({
-            where: { [Op.and]: andConditions },
+        // 5. Fetch all orders matching customer identity and delivered status
+        const candidateOrders = await Order.findAll({
+            where: {
+                [Op.and]: [
+                    { [Op.or]: userOrConditions },
+                    { orderStatus: { [Op.in]: deliveredStatuses } }
+                ]
+            },
             include: [
                 {
                     model: OrderPayment,
@@ -1565,16 +1568,44 @@ export const getUserPreviousBills = async (req, res) => {
             order: [['createdAt', 'DESC']]
         });
 
-        // Filter orders that have pending dues
+        // 6. Filter eligible previous orders
+        const eligibleOrders = candidateOrders.filter(uo => {
+            const uoDbId = String(uo.id);
+            const uoOrderId = String(uo.orderId || '');
+
+            // Exclude current order by DB ID or Order ID
+            if (currentOrdId) {
+                if (uoDbId === currentOrdId || uoOrderId === currentOrdId) return false;
+                if (currentOrderDbId && uoDbId === currentOrderDbId) return false;
+                if (currentOrderIdStr && uoOrderId === currentOrderIdStr) return false;
+            }
+
+            // Exclude orders created AFTER current order (if current order time is known)
+            if (currentOrderTime && uo.createdAt) {
+                const uoTime = new Date(uo.createdAt).getTime();
+                if (!isNaN(uoTime) && uoTime > currentOrderTime) return false;
+            }
+
+            const pStatus = String(uo.paymentStatus || '').toLowerCase();
+            const oStatus = String(uo.orderStatus || '');
+            const isDeliveredOrSettled = deliveredStatuses.some(s => s.toLowerCase() === oStatus.toLowerCase());
+
+            if (!isDeliveredOrSettled || oStatus.toLowerCase().includes('cancel') || pStatus === 'paid') {
+                return false;
+            }
+
+            return true;
+        });
+
         const previousBills = [];
         let totalPreviousDues = 0;
 
-        const orderIds = unpaidOrders.map(o => o.id);
+        const eligibleOrderIds = eligibleOrders.map(o => o.id);
 
         let itemsMap = {};
-        if (orderIds.length > 0) {
+        if (eligibleOrderIds.length > 0) {
             const items = await OrderItem.findAll({
-                where: { orderId: orderIds },
+                where: { orderId: eligibleOrderIds },
                 include: [
                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
                     {
@@ -1612,18 +1643,10 @@ export const getUserPreviousBills = async (req, res) => {
             });
         }
 
-        unpaidOrders.forEach(uo => {
+        eligibleOrders.forEach(uo => {
             const tot = parseFloat(uo.totalAmount || 0);
             const dueCol = parseFloat(uo.dueAmount || 0);
             const paid = parseFloat(uo.paidAmount || 0);
-            const pStatus = String(uo.paymentStatus || '').toLowerCase();
-            const oStatus = String(uo.orderStatus || '');
-
-            const isDeliveredOrSettled = deliveredStatuses.some(s => s.toLowerCase() === oStatus.toLowerCase());
-
-            if (!isDeliveredOrSettled || oStatus.toLowerCase().includes('cancel') || pStatus === 'paid') {
-                return;
-            }
 
             let realPaid = paid;
             if (Array.isArray(uo.payments) && uo.payments.length > 0) {
