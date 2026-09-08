@@ -1525,9 +1525,16 @@ export const getUserPreviousBills = async (req, res) => {
             userOrConditions.push({ customerName: { [Op.iLike]: `%${shopNameClean}%` } });
         }
 
-        // 3. Status condition: Non-cancelled order statuses (Delivered, Payment Collect, Shipping, Pending, etc.)
+        // 3. Delivered / Fulfilled order statuses ONLY (Active orders like Pending, Packaging, Packed, Shipping are current orders, NOT previous bills)
+        const deliveredStatuses = [
+            'Delivered', 'delivered', 'DELIVERED',
+            'Payment Collect', 'payment collect', 'PAYMENT COLLECT',
+            'Payment Verify', 'payment verify', 'PAYMENT VERIFY',
+            'Completed', 'completed', 'COMPLETED'
+        ];
+
         const statusCondition = {
-            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+            orderStatus: { [Op.in]: deliveredStatuses }
         };
         
         // 4. Current order lookup (if currentOrdId is provided, get its createdAt timestamp for strict timestamp filtering)
@@ -1550,7 +1557,7 @@ export const getUserPreviousBills = async (req, res) => {
             }
         }
 
-        // 5. Fetch all non-cancelled orders matching customer identity
+        // 5. Fetch all delivered/fulfilled orders matching customer identity
         const candidateOrders = await Order.findAll({
             where: {
                 [Op.and]: [
@@ -1589,9 +1596,10 @@ export const getUserPreviousBills = async (req, res) => {
             }
 
             const pStatus = String(uo.paymentStatus || '').toLowerCase();
-            const oStatus = String(uo.orderStatus || '').toLowerCase();
+            const oStatus = String(uo.orderStatus || '');
+            const isDeliveredOrSettled = deliveredStatuses.some(s => s.toLowerCase() === oStatus.toLowerCase());
 
-            if (oStatus.includes('cancel') || pStatus === 'paid') {
+            if (!isDeliveredOrSettled || oStatus.toLowerCase().includes('cancel') || pStatus === 'paid') {
                 return false;
             }
 
