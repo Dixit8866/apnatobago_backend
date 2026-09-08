@@ -1525,8 +1525,10 @@ export const getUserPreviousBills = async (req, res) => {
             userOrConditions.push({ customerName: { [Op.iLike]: `%${shopNameClean}%` } });
         }
 
-        // 3. Delivered / Fulfilled order statuses ONLY (Active orders like Pending, Packaging, Packed, Shipping are current orders, NOT previous bills)
-        const deliveredStatuses = ['Delivered', 'delivered', 'DELIVERED', 'Payment Collect', 'payment collect', 'Payment Verify', 'payment verify', 'Completed', 'completed', 'COMPLETED'];
+        // 3. Status condition: Non-cancelled order statuses (Delivered, Payment Collect, Shipping, Pending, etc.)
+        const statusCondition = {
+            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+        };
         
         // 4. Current order lookup (if currentOrdId is provided, get its createdAt timestamp for strict timestamp filtering)
         let currentOrderTime = null;
@@ -1548,12 +1550,12 @@ export const getUserPreviousBills = async (req, res) => {
             }
         }
 
-        // 5. Fetch all orders matching customer identity and delivered status
+        // 5. Fetch all non-cancelled orders matching customer identity
         const candidateOrders = await Order.findAll({
             where: {
                 [Op.and]: [
                     { [Op.or]: userOrConditions },
-                    { orderStatus: { [Op.in]: deliveredStatuses } }
+                    statusCondition
                 ]
             },
             include: [
@@ -1587,10 +1589,9 @@ export const getUserPreviousBills = async (req, res) => {
             }
 
             const pStatus = String(uo.paymentStatus || '').toLowerCase();
-            const oStatus = String(uo.orderStatus || '');
-            const isDeliveredOrSettled = deliveredStatuses.some(s => s.toLowerCase() === oStatus.toLowerCase());
+            const oStatus = String(uo.orderStatus || '').toLowerCase();
 
-            if (!isDeliveredOrSettled || oStatus.toLowerCase().includes('cancel') || pStatus === 'paid') {
+            if (oStatus.includes('cancel') || pStatus === 'paid') {
                 return false;
             }
 
