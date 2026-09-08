@@ -1,4 +1,4 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile } from '../../models/index.js';
+import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile, PartyBalanceLog } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -539,10 +539,24 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.payments = payments;
         }
 
+        const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
+        const jamaAmountVal = userCreditVal > 0 ? userCreditVal : 0;
+        const totalDueAmt = parseFloat(totalPastDueAmount) + calculatedDueAmt;
+        const netPayableVal = Math.max(0, totalDueAmt - jamaAmountVal);
+
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
         data.currentOrderAmount = calculatedDueAmt.toFixed(2);
-        data.grandTotalAmount = (parseFloat(totalPastDueAmount) + calculatedDueAmt).toFixed(2);
+        data.grandTotalAmount = totalDueAmt.toFixed(2);
+        data.jamaAmount = jamaAmountVal.toFixed(2);
+        data.advanceBalance = jamaAmountVal.toFixed(2);
+        data.userCreditline = userCreditVal.toFixed(2);
+        data.netPayableAmount = netPayableVal.toFixed(2);
+
+        if (data.order && data.order.user) {
+            data.order.user.creditline = userCreditVal.toFixed(2);
+            data.order.user.jamaAmount = jamaAmountVal.toFixed(2);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", data);
     } catch (error) {
@@ -1030,6 +1044,39 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let rzpId = order.razorpayPaymentId;
 
+            // Try Jama Credit (Advance Credit balance of customer)
+            const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
+            if (currentJama > 0 && due > 0) {
+                const jamaDeduction = Math.min(currentJama, due);
+                const prevCredit = currentJama;
+                user.creditline = currentJama - jamaDeduction;
+                const newCredit = user.creditline;
+                due -= jamaDeduction;
+                order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
+                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via Jama Credit`);
+                paymentMethodsUsed.push('JAMA_CREDIT');
+
+                logger.info(`[Complete Order Settle]: Deducted Jama Credit ${jamaDeduction} for order ${order.id}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: jamaDeduction,
+                    paymentMethod: 'JAMA_CREDIT',
+                    notes: `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`
+                }, { transaction: t });
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    type: 'ADJUSTMENT',
+                    amount: jamaDeduction,
+                    previousBalance: prevCredit,
+                    newBalance: newCredit,
+                    note: `Jama Balance used on Order #${order.orderId || order.id}: -₹${jamaDeduction.toFixed(2)} deducted from Jama Balance`,
+                    createdByName: 'Delivery Boy Settlement'
+                }, { transaction: t });
+            }
+
             // Try Cash
             if (remainingCash > 0 && due > 0) {
                 const deduction = Math.min(remainingCash, due);
@@ -1154,6 +1201,24 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         }
 
         if (user) {
+            const excessCollected = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
+            if (excessCollected > 0) {
+                const prevCredit = parseFloat(user.creditline || 0);
+                user.creditline = prevCredit + excessCollected;
+                const newCredit = user.creditline;
+                logger.info(`[Complete Order Settle Overpayment]: Added excess ${excessCollected} to user ${user.id} creditline. New creditline: ${user.creditline}`);
+                
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: assignment.orderId,
+                    type: 'JAMA',
+                    amount: excessCollected,
+                    previousBalance: prevCredit,
+                    newBalance: newCredit,
+                    note: `Overpayment on Order #${assignment.order?.orderId || assignment.orderId}: +₹${excessCollected.toFixed(2)} added to Jama Balance`,
+                    createdByName: 'Delivery Boy Settlement'
+                }, { transaction: t });
+            }
             await user.save({ transaction: t });
         }
 
@@ -1317,6 +1382,39 @@ export const settleSingleOrderPayment = async (req, res) => {
             let orderNotes = [];
             let paymentMethodsUsed = [];
 
+            // Try Jama Credit (Advance Credit balance of customer)
+            const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
+            if (currentJama > 0 && due > 0) {
+                const jamaDeduction = Math.min(currentJama, due);
+                const prevCredit = currentJama;
+                user.creditline = currentJama - jamaDeduction;
+                const newCredit = user.creditline;
+                due -= jamaDeduction;
+                order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
+                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via Jama Credit`);
+                paymentMethodsUsed.push('JAMA_CREDIT');
+
+                logger.info(`[Settle Single]: Deducted Jama Credit ${jamaDeduction} for order ${order.id}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: jamaDeduction,
+                    paymentMethod: 'JAMA_CREDIT',
+                    notes: `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`
+                }, { transaction: t });
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    type: 'ADJUSTMENT',
+                    amount: jamaDeduction,
+                    previousBalance: prevCredit,
+                    newBalance: newCredit,
+                    note: `Jama Balance used on Order #${order.orderId || order.id}: -₹${jamaDeduction.toFixed(2)} deducted from Jama Balance`,
+                    createdByName: 'Delivery Boy Settlement'
+                }, { transaction: t });
+            }
+
             // Try Cash
             if (remainingCash > 0 && due > 0) {
                 const deduction = Math.min(remainingCash, due);
@@ -1434,6 +1532,24 @@ export const settleSingleOrderPayment = async (req, res) => {
         }
 
         if (user) {
+            const excessCollected = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
+            if (excessCollected > 0) {
+                const prevCredit = parseFloat(user.creditline || 0);
+                user.creditline = prevCredit + excessCollected;
+                const newCredit = user.creditline;
+                logger.info(`[Settle Single Overpayment]: Added excess ${excessCollected} to user ${user.id} creditline. New creditline: ${user.creditline}`);
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: orders[0]?.id || null,
+                    type: 'JAMA',
+                    amount: excessCollected,
+                    previousBalance: prevCredit,
+                    newBalance: newCredit,
+                    note: `Overpayment on Order #${orders[0]?.orderId || orders[0]?.id}: +₹${excessCollected.toFixed(2)} added to Jama Balance`,
+                    createdByName: 'Delivery Boy Settlement'
+                }, { transaction: t });
+            }
             await user.save({ transaction: t });
         }
 
