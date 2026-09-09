@@ -185,18 +185,11 @@ export const createSalesReturn = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sales return request submitted successfully and credited to customer.", {
             salesReturns: salesReturnEntries,
-            totalReturnAmount,
-            billAmount: order.totalAmount,
-            originalBillAmount: order.totalAmount,
-            salesReturnAmount: totalReturnAmount,
-            netPayableAmount: netPayable,
             salesReturnCalculation: {
                 billAmount: originalBill,
                 returnAmount: totalReturnAmount,
                 netToCollect: netPayable
-            },
-            newOrderTotal: order.totalAmount,
-            newOrderDueAmount: Math.max(0, parseFloat(order.dueAmount || 0) - totalReturnAmount)
+            }
         });
 
     } catch (error) {

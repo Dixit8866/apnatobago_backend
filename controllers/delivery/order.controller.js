@@ -576,41 +576,21 @@ export const getAssignmentDetails = async (req, res) => {
         const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
         const netPayableVal = Math.max(0, totalDueAmt);
 
-        const formulaStr = `${fullTotal.toFixed(0)} - ${totalReturnDeduction.toFixed(0)} = ${netOrderCollectible.toFixed(0)}`;
-        const displayFormulaStr = totalReturnDeduction > 0 
-            ? `₹${fullTotal.toFixed(0)} - ₹${totalReturnDeduction.toFixed(0)} = ₹${netOrderCollectible.toFixed(0)}` 
-            : `₹${fullTotal.toFixed(0)}`;
-
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.originalBillAmount = fullTotal.toFixed(2);
-        data.billAmount = fullTotal.toFixed(2);
-        data.salesReturnAmount = totalReturnDeduction.toFixed(2);
-        data.returnAdjustedAmount = totalReturnDeduction.toFixed(2);
-        data.currentOrderAmount = netOrderCollectible.toFixed(2);
-        data.grandTotalAmount = fullTotal.toFixed(2);
-        data.jamaAmount = jamaAmountVal.toFixed(2);
-        data.advanceBalance = jamaAmountVal.toFixed(2);
-        data.userCreditline = userCreditVal.toFixed(2);
         data.netPayableAmount = netPayableVal.toFixed(2);
-        data.formula = formulaStr;
-        data.displayFormula = displayFormulaStr;
+        data.jamaAmount = jamaAmountVal.toFixed(2);
+        data.userCreditline = userCreditVal.toFixed(2);
         data.salesReturnCalculation = {
             billAmount: fullTotal,
             returnAmount: totalReturnDeduction,
-            netToCollect: netOrderCollectible,
-            formula: formulaStr
+            netToCollect: netOrderCollectible
         };
 
         if (data.order) {
-            data.order.originalBillAmount = fullTotal.toFixed(2);
-            data.order.salesReturnAmount = totalReturnDeduction.toFixed(2);
-            data.order.returnAdjustedAmount = totalReturnDeduction.toFixed(2);
             data.order.netPayableAmount = netOrderCollectible.toFixed(2);
             data.order.payableAmount = netOrderCollectible.toFixed(2);
             data.order.dueAmount = netOrderCollectible.toFixed(2);
-            data.order.formula = formulaStr;
-            data.order.displayFormula = displayFormulaStr;
             data.order.salesReturnCalculation = data.salesReturnCalculation;
         }
 
