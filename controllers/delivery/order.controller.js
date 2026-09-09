@@ -555,24 +555,14 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.payments = payments;
         }
 
-        // Calculate Sales Return deductions & display breakdown
-        const orderReturns = assignment.order?.returns || [];
+        // Calculate Sales Return deductions & display breakdown (strictly for this order only)
+        const orderReturns = (assignment.order?.returns || []).filter(r => r.status !== 'Rejected' && r.status !== 'Cancelled');
         const directReturnAmount = orderReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-
-        let pendingReturnsForUser = 0;
-        if (userId) {
-            const userPendingReturns = await SalesReturn.findAll({
-                where: { userId, status: 'Pending' }
-            });
-            pendingReturnsForUser = userPendingReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-        }
 
         const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
         const jamaAmountVal = userCreditVal > 0 ? userCreditVal : 0;
 
-        // Effective return deduction for this order (from returns or advance balance)
-        const totalReturnDeduction = Math.max(directReturnAmount, pendingReturnsForUser, jamaAmountVal);
-        const netOrderCollectible = Math.max(0, calculatedDueAmt - totalReturnDeduction);
+        const netOrderCollectible = Math.max(0, calculatedDueAmt - directReturnAmount);
         const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
         const netPayableVal = Math.max(0, totalDueAmt);
 
@@ -583,7 +573,7 @@ export const getAssignmentDetails = async (req, res) => {
         data.userCreditline = userCreditVal.toFixed(2);
         data.salesReturnCalculation = {
             billAmount: fullTotal,
-            returnAmount: totalReturnDeduction,
+            returnAmount: directReturnAmount,
             netToCollect: netOrderCollectible
         };
 
