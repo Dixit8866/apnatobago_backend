@@ -1040,6 +1040,36 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         let remainingCash = parseFloat(cashAmount) || 0;
         let remainingOnline = parseFloat(onlineAmount) || 0;
         let remainingCredit = parseFloat(creditAmount) || 0;
+        let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+
+        if (remainingSalesReturn === 0 && user) {
+            const unadjustedReturns = await SalesReturn.findAll({
+                where: {
+                    userId: user.id,
+                    creditProcessed: false,
+                    status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                },
+                transaction: t
+            });
+            remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+        }
+
+        if (remainingSalesReturn === 0 && user) {
+            const returnCreditLogs = await PartyBalanceLog.findAll({
+                where: {
+                    userId: user.id,
+                    type: 'JAMA',
+                    note: { [Op.like]: '%Sales Return%' }
+                },
+                transaction: t
+            });
+            const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
+            if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
+                remainingSalesReturn = errReturnCredit;
+                user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
+                await user.save({ transaction: t });
+            }
+        }
 
         // ─── FIX: PREVENT DOUBLE COUNTING OF ONLINE PAYMENTS ────────────────────────
         let onlineAppliedToCurrent = false;
@@ -1115,37 +1145,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let rzpId = order.razorpayPaymentId;
 
-            // Handle direct Sales Return deduction if provided in settlement body OR unadjusted sales returns for this user
-            let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
-            if (remainingSalesReturn === 0 && user) {
-                const unadjustedReturns = await SalesReturn.findAll({
-                    where: {
-                        userId: user.id,
-                        creditProcessed: false,
-                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                    },
-                    transaction: t
-                });
-                remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-            }
-
-            // Also check if user has old erroneous Sales Return credit in creditline to absorb
-            if (remainingSalesReturn === 0 && user) {
-                const returnCreditLogs = await PartyBalanceLog.findAll({
-                    where: {
-                        userId: user.id,
-                        type: 'JAMA',
-                        note: { [Op.like]: '%Sales Return%' }
-                    },
-                    transaction: t
-                });
-                const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
-                if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
-                    remainingSalesReturn = errReturnCredit;
-                    user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
-                    await user.save({ transaction: t });
-                }
-            }
+            // Handle direct Sales Return deduction if available
 
             if (remainingSalesReturn > 0 && due > 0) {
                 const returnDeduction = Math.min(remainingSalesReturn, due);
@@ -1595,6 +1595,36 @@ export const settleSingleOrderPayment = async (req, res) => {
         let remainingCash = parseFloat(cashAmount) || 0;
         let remainingOnline = parseFloat(onlineAmount) || 0;
         let remainingCredit = parseFloat(creditAmount) || 0;
+        let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+
+        if (remainingSalesReturn === 0 && user) {
+            const unadjustedReturns = await SalesReturn.findAll({
+                where: {
+                    userId: user.id,
+                    creditProcessed: false,
+                    status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                },
+                transaction: t
+            });
+            remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+        }
+
+        if (remainingSalesReturn === 0 && user) {
+            const returnCreditLogs = await PartyBalanceLog.findAll({
+                where: {
+                    userId: user.id,
+                    type: 'JAMA',
+                    note: { [Op.like]: '%Sales Return%' }
+                },
+                transaction: t
+            });
+            const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
+            if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
+                remainingSalesReturn = errReturnCredit;
+                user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
+                await user.save({ transaction: t });
+            }
+        }
 
         for (const order of orders) {
             let due = parseFloat(order.dueAmount);
@@ -1603,38 +1633,7 @@ export const settleSingleOrderPayment = async (req, res) => {
             let orderNotes = [];
             let paymentMethodsUsed = [];
 
-            // Handle direct Sales Return deduction if provided
-            // Handle direct Sales Return deduction if provided in settlement body OR unadjusted sales returns for this user
-            let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
-            if (remainingSalesReturn === 0 && user) {
-                const unadjustedReturns = await SalesReturn.findAll({
-                    where: {
-                        userId: user.id,
-                        creditProcessed: false,
-                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                    },
-                    transaction: t
-                });
-                remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-            }
-
-            // Also check if user has old erroneous Sales Return credit in creditline to absorb
-            if (remainingSalesReturn === 0 && user) {
-                const returnCreditLogs = await PartyBalanceLog.findAll({
-                    where: {
-                        userId: user.id,
-                        type: 'JAMA',
-                        note: { [Op.like]: '%Sales Return%' }
-                    },
-                    transaction: t
-                });
-                const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
-                if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
-                    remainingSalesReturn = errReturnCredit;
-                    user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
-                    await user.save({ transaction: t });
-                }
-            }
+            // Handle direct Sales Return deduction if available
 
             if (remainingSalesReturn > 0 && due > 0) {
                 const returnDeduction = Math.min(remainingSalesReturn, due);
