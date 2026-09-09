@@ -137,7 +137,7 @@ export const getMyAssignedOrders = async (req, res) => {
                         {
                             model: User,
                             as: 'user',
-                            attributes: ['fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'],
+                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit'],
                             include: [
                                 {
                                     model: BusinessProfile,
@@ -389,7 +389,7 @@ export const getAssignmentDetails = async (req, res) => {
                         {
                             model: User,
                             as: 'user',
-                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude'],
+                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit'],
                             include: [
                                 {
                                     model: BusinessProfile,
