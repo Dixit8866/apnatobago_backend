@@ -576,6 +576,10 @@ const runManualMigrations = async () => {
             await RouteSection.sync();
         } catch (e) { console.log('[Migration Warning] RouteSection sync failed:', e.message); }
 
+        try {
+            await PartyBalanceLog.sync();
+        } catch (e) { console.log('[Migration Warning] PartyBalanceLog sync failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
 
     } catch (error) {

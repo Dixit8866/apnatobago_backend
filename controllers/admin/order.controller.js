@@ -375,7 +375,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'routeCategoryId'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'blockcredit', 'routeCategoryId'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -623,6 +623,8 @@ export const getAllOrders = async (req, res) => {
                     return sum;
                 }, 0);
 
+                const userCreditline = parseFloat(order.user?.creditline || 0);
+                order.setDataValue('userCreditline', userCreditline);
                 order.setDataValue('previousUnpaidDue', prevUnpaidDue);
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
@@ -631,7 +633,11 @@ export const getAllOrders = async (req, res) => {
                 const adjusted = adjustOrderPayments(order);
                 if (adjusted) {
                     adjusted.previousUnpaidDue = prevUnpaidDue;
-                    if (adjusted.user) adjusted.user.previousUnpaidDue = prevUnpaidDue;
+                    adjusted.userCreditline = userCreditline;
+                    if (adjusted.user) {
+                        adjusted.user.previousUnpaidDue = prevUnpaidDue;
+                        adjusted.user.creditline = userCreditline;
+                    }
                 }
                 return adjusted;
             });
@@ -643,7 +649,7 @@ export const getAllOrders = async (req, res) => {
                 model: User,
                 as: 'user',
                 required: false,
-                attributes: ['id', 'fullname', 'number', 'city'],
+                attributes: ['id', 'fullname', 'number', 'city', 'creditline', 'blockcredit'],
                 include: [
                     {
                         model: BusinessProfile,
@@ -1696,6 +1702,34 @@ export const verifyAndSettleOrder = async (req, res) => {
             }
         }
 
+        // Calculate Net Collection Required & Overpayment (Jama Credit)
+        const netRequiredBill = Math.max(0, parseFloat(order.totalAmount || 0) - totalReturnDeduction - parsedPrevReturn);
+        const totalPaidCashOnline = parsedCash + parsedOnline;
+        const parsedJama = Math.max(0, totalPaidCashOnline - netRequiredBill);
+        const parsedBaki = parsedCredit;
+
+        // If excess payment was collected, credit it to user's Jama balance (creditline)
+        if (parsedJama > 0 && order.userId) {
+            const user = await User.findByPk(order.userId, { transaction });
+            if (user) {
+                const prevCredit = parseFloat(user.creditline || 0);
+                user.creditline = prevCredit + parsedJama;
+                const newCredit = user.creditline;
+                await user.save({ transaction });
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    type: 'JAMA',
+                    amount: parsedJama,
+                    previousBalance: prevCredit,
+                    newBalance: newCredit,
+                    note: `Overpayment on Order #${order.orderId || order.id}: +₹${parsedJama.toFixed(2)} added to Jama Balance (Admin Settlement)`,
+                    createdByName: req.admin?.name || req.user?.name || 'Admin Settlement'
+                }, { transaction });
+            }
+        }
+
         const timestamp = new Date().toLocaleString();
         let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}${parsedCoupon > 0 ? `, Coupon: ₹${parsedCoupon}` : ''}, Credit: ₹${parsedCredit}`;
         if (totalReturnDeduction > 0) {
@@ -1919,7 +1953,7 @@ export const getOrderDetails = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel', 'walletBalance'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel', 'walletBalance', 'creditline', 'blockcredit'],
                     include: [
                         {
                             model: BusinessProfile,

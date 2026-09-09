@@ -1218,6 +1218,50 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     note: `Overpayment on Order #${assignment.order?.orderId || assignment.orderId}: +₹${excessCollected.toFixed(2)} added to Jama Balance`,
                     createdByName: 'Delivery Boy Settlement'
                 }, { transaction: t });
+
+                // Also update or create the OrderPayment record for this assignment order to reflect full collected amount!
+                if (remainingCash > 0) {
+                    const existingCashPay = await OrderPayment.findOne({
+                        where: { orderId: assignment.orderId, paymentMethod: 'CASH' },
+                        transaction: t
+                    });
+                    if (existingCashPay) {
+                        const newAmt = parseFloat(existingCashPay.amount) + remainingCash;
+                        await existingCashPay.update({
+                            amount: newAmt,
+                            notes: `Cash collected ₹${newAmt.toFixed(2)} (Bill: ₹${assignment.order?.totalAmount || '0'} + Advance Jama: +₹${remainingCash.toFixed(2)})`
+                        }, { transaction: t });
+                    } else {
+                        await OrderPayment.create({
+                            orderId: assignment.orderId,
+                            deliveryBoyId,
+                            amount: remainingCash,
+                            paymentMethod: 'CASH',
+                            notes: `Advance Jama Credit Cash (+₹${remainingCash.toFixed(2)})`
+                        }, { transaction: t });
+                    }
+                }
+                if (remainingOnline > 0) {
+                    const existingOnlinePay = await OrderPayment.findOne({
+                        where: { orderId: assignment.orderId, paymentMethod: 'ONLINE' },
+                        transaction: t
+                    });
+                    if (existingOnlinePay) {
+                        const newAmt = parseFloat(existingOnlinePay.amount) + remainingOnline;
+                        await existingOnlinePay.update({
+                            amount: newAmt,
+                            notes: `Online collected ₹${newAmt.toFixed(2)} (Bill: ₹${assignment.order?.totalAmount || '0'} + Advance Jama: +₹${remainingOnline.toFixed(2)})`
+                        }, { transaction: t });
+                    } else {
+                        await OrderPayment.create({
+                            orderId: assignment.orderId,
+                            deliveryBoyId,
+                            amount: remainingOnline,
+                            paymentMethod: 'ONLINE',
+                            notes: `Advance Jama Credit Online (+₹${remainingOnline.toFixed(2)})`
+                        }, { transaction: t });
+                    }
+                }
             }
             await user.save({ transaction: t });
         }
@@ -1539,16 +1583,63 @@ export const settleSingleOrderPayment = async (req, res) => {
                 const newCredit = user.creditline;
                 logger.info(`[Settle Single Overpayment]: Added excess ${excessCollected} to user ${user.id} creditline. New creditline: ${user.creditline}`);
 
+                const targetOrderId = orders[0]?.id || null;
                 await PartyBalanceLog.create({
                     userId: user.id,
-                    orderId: orders[0]?.id || null,
+                    orderId: targetOrderId,
                     type: 'JAMA',
                     amount: excessCollected,
                     previousBalance: prevCredit,
                     newBalance: newCredit,
-                    note: `Overpayment on Order #${orders[0]?.orderId || orders[0]?.id}: +₹${excessCollected.toFixed(2)} added to Jama Balance`,
+                    note: `Overpayment on Order #${orders[0]?.orderId || targetOrderId}: +₹${excessCollected.toFixed(2)} added to Jama Balance`,
                     createdByName: 'Delivery Boy Settlement'
                 }, { transaction: t });
+
+                // Also update or create the OrderPayment record for this order to reflect full collected amount!
+                if (targetOrderId) {
+                    if (remainingCash > 0) {
+                        const existingCashPay = await OrderPayment.findOne({
+                            where: { orderId: targetOrderId, paymentMethod: 'CASH' },
+                            transaction: t
+                        });
+                        if (existingCashPay) {
+                            const newAmt = parseFloat(existingCashPay.amount) + remainingCash;
+                            await existingCashPay.update({
+                                amount: newAmt,
+                                notes: `Cash collected ₹${newAmt.toFixed(2)} (Bill: ₹${orders[0]?.totalAmount || '0'} + Advance Jama: +₹${remainingCash.toFixed(2)})`
+                            }, { transaction: t });
+                        } else {
+                            await OrderPayment.create({
+                                orderId: targetOrderId,
+                                deliveryBoyId,
+                                amount: remainingCash,
+                                paymentMethod: 'CASH',
+                                notes: `Advance Jama Credit Cash (+₹${remainingCash.toFixed(2)})`
+                            }, { transaction: t });
+                        }
+                    }
+                    if (remainingOnline > 0) {
+                        const existingOnlinePay = await OrderPayment.findOne({
+                            where: { orderId: targetOrderId, paymentMethod: 'ONLINE' },
+                            transaction: t
+                        });
+                        if (existingOnlinePay) {
+                            const newAmt = parseFloat(existingOnlinePay.amount) + remainingOnline;
+                            await existingOnlinePay.update({
+                                amount: newAmt,
+                                notes: `Online collected ₹${newAmt.toFixed(2)} (Bill: ₹${orders[0]?.totalAmount || '0'} + Advance Jama: +₹${remainingOnline.toFixed(2)})`
+                            }, { transaction: t });
+                        } else {
+                            await OrderPayment.create({
+                                orderId: targetOrderId,
+                                deliveryBoyId,
+                                amount: remainingOnline,
+                                paymentMethod: 'ONLINE',
+                                notes: `Advance Jama Credit Online (+₹${remainingOnline.toFixed(2)})`
+                            }, { transaction: t });
+                        }
+                    }
+                }
             }
             await user.save({ transaction: t });
         }
