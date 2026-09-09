@@ -12,7 +12,8 @@ import {
     Godown,
     Product,
     DeliveryBoy,
-    OrderPayment
+    OrderPayment,
+    PartyBalanceLog
 } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -152,75 +153,50 @@ export const createSalesReturn = async (req, res) => {
             }, { transaction: t });
 
             salesReturnEntries.push(salesReturnEntry);
+        }
 
-            // E. Adjust Order Item IMMEDIATELY (so quantities decrease on customer invoice/order detail screen)
-            const remainingQty = orderedQty - returnQty;
-            if (remainingQty <= 0) {
-                // Remove the item completely from the order items
-                await orderItem.destroy({ transaction: t });
-            } else {
-                // Update quantity of order item
-                await orderItem.update({ quantity: remainingQty }, { transaction: t });
+        // Note: Do NOT destroy OrderItems and do NOT alter order.totalAmount!
+        // The original bill amount (e.g. ₹2000) must remain intact for billing/accounting/GST.
+        // Instead, credit the totalReturnAmount to customer's advance Jama Balance so delivery app & settlement can adjust it.
+        if (order.userId && totalReturnAmount > 0) {
+            const user = await User.findByPk(order.userId, { transaction: t });
+            if (user) {
+                const prevCredit = parseFloat(user.creditline || 0);
+                user.creditline = prevCredit + totalReturnAmount;
+                await user.save({ transaction: t });
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    type: 'JAMA',
+                    amount: totalReturnAmount,
+                    previousBalance: prevCredit,
+                    newBalance: user.creditline,
+                    note: `Sales Return on Order #${order.orderId || order.id}: +₹${totalReturnAmount.toFixed(2)} added to Customer Jama Credit Balance`,
+                    createdByName: `Delivery Boy (${req.user?.fullname || req.user?.name || 'Delivery'})`
+                }, { transaction: t });
             }
         }
-
-        // 5. Recalculate order total amount using remaining items IMMEDIATELY
-        const remainingItems = await OrderItem.findAll({
-            where: { orderId: order.id },
-            transaction: t
-        });
-
-        let newSubtotal = 0;
-        for (const item of remainingItems) {
-            newSubtotal += parseFloat(item.price) * parseFloat(item.quantity);
-        }
-
-        const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
-        const newTotalAmount = roundTotal(newSubtotal + deliveryCharge);
-
-        // Update Order total and outstanding dues IMMEDIATELY
-        order.totalAmount = newTotalAmount;
-        order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
-        if (parseFloat(order.paidAmount || 0) > newTotalAmount) {
-            order.paidAmount = newTotalAmount;
-        }
-
-        // Adjust existing OrderPayment records if total cash/online collected exceeds new total
-        const existingPayments = await OrderPayment.findAll({
-            where: { orderId: order.id },
-            transaction: t
-        });
-        let runningPaySum = 0;
-        for (const p of existingPayments) {
-            const pAmt = parseFloat(p.amount || 0);
-            if (runningPaySum + pAmt > newTotalAmount) {
-                const allowedAmt = Math.max(0, newTotalAmount - runningPaySum);
-                if (allowedAmt === 0) {
-                    await p.destroy({ transaction: t });
-                } else {
-                    await p.update({ amount: allowedAmt }, { transaction: t });
-                    runningPaySum += allowedAmt;
-                }
-            } else {
-                runningPaySum += pAmt;
-            }
-        }
-
-        // If total outstanding becomes 0 and they paid rest, set paid status appropriately
-        if (parseFloat(order.dueAmount) <= 0) {
-            order.paymentStatus = 'Paid';
-        } else if (parseFloat(order.dueAmount) < newTotalAmount) {
-            order.paymentStatus = 'Partial';
-        }
-
-        await order.save({ transaction: t });
 
         await t.commit();
 
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sales return request submitted successfully and customer order updated.", {
+        const originalBill = parseFloat(order.totalAmount || 0);
+        const netPayable = Math.max(0, originalBill - totalReturnAmount);
+
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sales return request submitted successfully and credited to customer.", {
             salesReturns: salesReturnEntries,
+            totalReturnAmount,
+            billAmount: order.totalAmount,
+            originalBillAmount: order.totalAmount,
+            salesReturnAmount: totalReturnAmount,
+            netPayableAmount: netPayable,
+            salesReturnCalculation: {
+                billAmount: originalBill,
+                returnAmount: totalReturnAmount,
+                netToCollect: netPayable
+            },
             newOrderTotal: order.totalAmount,
-            newOrderDueAmount: order.dueAmount
+            newOrderDueAmount: Math.max(0, parseFloat(order.dueAmount || 0) - totalReturnAmount)
         });
 
     } catch (error) {

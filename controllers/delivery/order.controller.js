@@ -228,6 +228,17 @@ export const getMyAssignedOrders = async (req, res) => {
                 if (data.order && data.order.user) {
                     data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
                     data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
+
+                    const uCredit = parseFloat(data.order.user.creditline || 0);
+                    if (uCredit > 0 && parseFloat(data.order.dueAmount || 0) > 0) {
+                        const billAmt = parseFloat(data.order.totalAmount || 0);
+                        const netPay = Math.max(0, parseFloat(data.order.dueAmount || 0) - uCredit);
+                        data.order.originalBillAmount = billAmt.toFixed(2);
+                        data.order.salesReturnAmount = uCredit.toFixed(2);
+                        data.order.netPayableAmount = netPay.toFixed(2);
+                        data.order.displayFormula = `₹${billAmt.toFixed(0)} - ₹${uCredit.toFixed(0)} = ₹${netPay.toFixed(0)}`;
+                        data.order.formula = `${billAmt.toFixed(0)} - ${uCredit.toFixed(0)} = ${netPay.toFixed(0)}`;
+                    }
                 }
                 return data;
             });
@@ -414,6 +425,11 @@ export const getAssignmentDetails = async (req, res) => {
                                     ]
                                 }
                             ]
+                        },
+                        {
+                            model: SalesReturn,
+                            as: 'returns',
+                            required: false
                         }
                     ]
                 }
@@ -539,19 +555,64 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.payments = payments;
         }
 
+        // Calculate Sales Return deductions & display breakdown
+        const orderReturns = assignment.order?.returns || [];
+        const directReturnAmount = orderReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+
+        let pendingReturnsForUser = 0;
+        if (userId) {
+            const userPendingReturns = await SalesReturn.findAll({
+                where: { userId, status: 'Pending' }
+            });
+            pendingReturnsForUser = userPendingReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+        }
+
         const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
         const jamaAmountVal = userCreditVal > 0 ? userCreditVal : 0;
-        const totalDueAmt = parseFloat(totalPastDueAmount) + calculatedDueAmt;
-        const netPayableVal = Math.max(0, totalDueAmt - jamaAmountVal);
+
+        // Effective return deduction for this order (from returns or advance balance)
+        const totalReturnDeduction = Math.max(directReturnAmount, pendingReturnsForUser, jamaAmountVal);
+        const netOrderCollectible = Math.max(0, calculatedDueAmt - totalReturnDeduction);
+        const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
+        const netPayableVal = Math.max(0, totalDueAmt);
+
+        const formulaStr = `${fullTotal.toFixed(0)} - ${totalReturnDeduction.toFixed(0)} = ${netOrderCollectible.toFixed(0)}`;
+        const displayFormulaStr = totalReturnDeduction > 0 
+            ? `₹${fullTotal.toFixed(0)} - ₹${totalReturnDeduction.toFixed(0)} = ₹${netOrderCollectible.toFixed(0)}` 
+            : `₹${fullTotal.toFixed(0)}`;
 
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.currentOrderAmount = calculatedDueAmt.toFixed(2);
-        data.grandTotalAmount = totalDueAmt.toFixed(2);
+        data.originalBillAmount = fullTotal.toFixed(2);
+        data.billAmount = fullTotal.toFixed(2);
+        data.salesReturnAmount = totalReturnDeduction.toFixed(2);
+        data.returnAdjustedAmount = totalReturnDeduction.toFixed(2);
+        data.currentOrderAmount = netOrderCollectible.toFixed(2);
+        data.grandTotalAmount = fullTotal.toFixed(2);
         data.jamaAmount = jamaAmountVal.toFixed(2);
         data.advanceBalance = jamaAmountVal.toFixed(2);
         data.userCreditline = userCreditVal.toFixed(2);
         data.netPayableAmount = netPayableVal.toFixed(2);
+        data.formula = formulaStr;
+        data.displayFormula = displayFormulaStr;
+        data.salesReturnCalculation = {
+            billAmount: fullTotal,
+            returnAmount: totalReturnDeduction,
+            netToCollect: netOrderCollectible,
+            formula: formulaStr
+        };
+
+        if (data.order) {
+            data.order.originalBillAmount = fullTotal.toFixed(2);
+            data.order.salesReturnAmount = totalReturnDeduction.toFixed(2);
+            data.order.returnAdjustedAmount = totalReturnDeduction.toFixed(2);
+            data.order.netPayableAmount = netOrderCollectible.toFixed(2);
+            data.order.payableAmount = netOrderCollectible.toFixed(2);
+            data.order.dueAmount = netOrderCollectible.toFixed(2);
+            data.order.formula = formulaStr;
+            data.order.displayFormula = displayFormulaStr;
+            data.order.salesReturnCalculation = data.salesReturnCalculation;
+        }
 
         if (data.order && data.order.user) {
             data.order.user.creditline = userCreditVal.toFixed(2);
@@ -837,6 +898,10 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             cashAmount = 0,
             onlineAmount = 0,
             creditAmount = 0,
+            salesReturnAmount = 0,
+            returnAmount = 0,
+            salesReturnItems,
+            returnItems,
             onlineTransactionId,
             notes,
             totalCouponPoints,
@@ -1044,7 +1109,52 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let rzpId = order.razorpayPaymentId;
 
-            // Try Jama Credit (Advance Credit balance of customer)
+            // Handle direct Sales Return deduction if provided in settlement body
+            let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+            if (remainingSalesReturn > 0 && due > 0) {
+                const returnDeduction = Math.min(remainingSalesReturn, due);
+                remainingSalesReturn -= returnDeduction;
+                due -= returnDeduction;
+                order.paidAmount = parseFloat(order.paidAmount) + returnDeduction;
+                orderNotes.push(`Paid ₹${returnDeduction.toFixed(2)} via Sales Return`);
+                paymentMethodsUsed.push('SALES_RETURN');
+
+                logger.info(`[Complete Order Settle]: Creating SALES_RETURN payment for order ${order.id}, amount ${returnDeduction}, delivery boy ${deliveryBoyId}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: returnDeduction,
+                    paymentMethod: 'SALES_RETURN',
+                    notes: `Adjusted ₹${returnDeduction.toFixed(2)} from Sales Return (Bill: ₹${order.totalAmount})`
+                }, { transaction: t });
+
+                // Create SalesReturn items if provided in payload
+                const returnItemsList = salesReturnItems || returnItems;
+                if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
+                    for (const rItem of returnItemsList) {
+                        if (rItem.productId && Number(rItem.quantity) > 0) {
+                            const rPrice = parseFloat(rItem.price || 0);
+                            const rQty = Number(rItem.quantity);
+                            const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
+                            await SalesReturn.create({
+                                orderId: order.id,
+                                userId: order.userId,
+                                deliveryBoyId,
+                                productId: rItem.productId,
+                                variantId: rItem.variantId || null,
+                                volumeId: rItem.volumeId || null,
+                                quantity: rQty,
+                                price: rPrice,
+                                returnAmount: rAmt,
+                                reason: rItem.reason || 'Customer Return at Delivery',
+                                status: 'Pending'
+                            }, { transaction: t });
+                        }
+                    }
+                }
+            }
+
+            // Try Jama Credit (Advance Credit balance of customer, e.g. from Sales Returns)
             const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
             if (currentJama > 0 && due > 0) {
                 const jamaDeduction = Math.min(currentJama, due);
@@ -1053,16 +1163,28 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 const newCredit = user.creditline;
                 due -= jamaDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
-                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via Jama Credit`);
-                paymentMethodsUsed.push('JAMA_CREDIT');
 
-                logger.info(`[Complete Order Settle]: Deducted Jama Credit ${jamaDeduction} for order ${order.id}`);
+                // Check if user's Jama balance came from a Sales Return
+                const recentReturnLog = await PartyBalanceLog.findOne({
+                    where: { userId: user.id, type: 'JAMA', note: { [Op.like]: '%Sales Return%' } },
+                    order: [['createdAt', 'DESC']],
+                    transaction: t
+                });
+                const payMethod = recentReturnLog ? 'SALES_RETURN' : 'JAMA_CREDIT';
+                const payNote = recentReturnLog 
+                    ? `Adjusted ₹${jamaDeduction.toFixed(2)} from Sales Return / Customer Balance` 
+                    : `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
+
+                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
+                paymentMethodsUsed.push(payMethod);
+
+                logger.info(`[Complete Order Settle]: Deducted ${payMethod} ${jamaDeduction} for order ${order.id}`);
                 await OrderPayment.create({
                     orderId: order.id,
                     deliveryBoyId,
                     amount: jamaDeduction,
-                    paymentMethod: 'JAMA_CREDIT',
-                    notes: `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`
+                    paymentMethod: payMethod,
+                    notes: payNote
                 }, { transaction: t });
 
                 await PartyBalanceLog.create({
@@ -1342,6 +1464,10 @@ export const settleSingleOrderPayment = async (req, res) => {
             cashAmount = 0,
             onlineAmount = 0,
             creditAmount = 0,
+            salesReturnAmount = 0,
+            returnAmount = 0,
+            salesReturnItems,
+            returnItems,
             onlineTransactionId,
             notes
         } = req.body;
@@ -1426,7 +1552,52 @@ export const settleSingleOrderPayment = async (req, res) => {
             let orderNotes = [];
             let paymentMethodsUsed = [];
 
-            // Try Jama Credit (Advance Credit balance of customer)
+            // Handle direct Sales Return deduction if provided
+            let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+            if (remainingSalesReturn > 0 && due > 0) {
+                const returnDeduction = Math.min(remainingSalesReturn, due);
+                remainingSalesReturn -= returnDeduction;
+                due -= returnDeduction;
+                order.paidAmount = parseFloat(order.paidAmount) + returnDeduction;
+                orderNotes.push(`Paid ₹${returnDeduction.toFixed(2)} via Sales Return`);
+                paymentMethodsUsed.push('SALES_RETURN');
+
+                logger.info(`[Settle Single]: Creating SALES_RETURN payment for order ${order.id}, amount ${returnDeduction}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: returnDeduction,
+                    paymentMethod: 'SALES_RETURN',
+                    notes: `Adjusted ₹${returnDeduction.toFixed(2)} from Sales Return (Bill: ₹${order.totalAmount})`
+                }, { transaction: t });
+
+                // Create SalesReturn items if provided
+                const returnItemsList = salesReturnItems || returnItems;
+                if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
+                    for (const rItem of returnItemsList) {
+                        if (rItem.productId && Number(rItem.quantity) > 0) {
+                            const rPrice = parseFloat(rItem.price || 0);
+                            const rQty = Number(rItem.quantity);
+                            const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
+                            await SalesReturn.create({
+                                orderId: order.id,
+                                userId: order.userId,
+                                deliveryBoyId,
+                                productId: rItem.productId,
+                                variantId: rItem.variantId || null,
+                                volumeId: rItem.volumeId || null,
+                                quantity: rQty,
+                                price: rPrice,
+                                returnAmount: rAmt,
+                                reason: rItem.reason || 'Customer Return at Delivery',
+                                status: 'Pending'
+                            }, { transaction: t });
+                        }
+                    }
+                }
+            }
+
+            // Try Jama Credit (Advance Credit balance of customer, e.g. from Sales Returns)
             const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
             if (currentJama > 0 && due > 0) {
                 const jamaDeduction = Math.min(currentJama, due);
@@ -1435,16 +1606,28 @@ export const settleSingleOrderPayment = async (req, res) => {
                 const newCredit = user.creditline;
                 due -= jamaDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
-                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via Jama Credit`);
-                paymentMethodsUsed.push('JAMA_CREDIT');
 
-                logger.info(`[Settle Single]: Deducted Jama Credit ${jamaDeduction} for order ${order.id}`);
+                // Check if user's Jama balance came from a Sales Return
+                const recentReturnLog = await PartyBalanceLog.findOne({
+                    where: { userId: user.id, type: 'JAMA', note: { [Op.like]: '%Sales Return%' } },
+                    order: [['createdAt', 'DESC']],
+                    transaction: t
+                });
+                const payMethod = recentReturnLog ? 'SALES_RETURN' : 'JAMA_CREDIT';
+                const payNote = recentReturnLog 
+                    ? `Adjusted ₹${jamaDeduction.toFixed(2)} from Sales Return / Customer Balance` 
+                    : `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
+
+                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
+                paymentMethodsUsed.push(payMethod);
+
+                logger.info(`[Settle Single]: Deducted ${payMethod} ${jamaDeduction} for order ${order.id}`);
                 await OrderPayment.create({
                     orderId: order.id,
                     deliveryBoyId,
                     amount: jamaDeduction,
-                    paymentMethod: 'JAMA_CREDIT',
-                    notes: `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`
+                    paymentMethod: payMethod,
+                    notes: payNote
                 }, { transaction: t });
 
                 await PartyBalanceLog.create({

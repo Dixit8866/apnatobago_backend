@@ -1992,7 +1992,7 @@ export const getOrderDetails = async (req, res) => {
                 {
                     model: OrderPayment,
                     as: 'payments',
-                    attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'bankSettingId'],
+                    attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'bankSettingId', 'notes', 'createdAt', 'deliveryBoyId'],
                     include: [
                         {
                             model: BankSetting,
