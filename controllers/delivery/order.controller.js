@@ -574,28 +574,10 @@ export const getAssignmentDetails = async (req, res) => {
             unsettledPastReturnAmount = unsettledReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
         }
 
-        let totalSalesReturnDeduction = directReturnAmount + unsettledPastReturnAmount;
+        const totalSalesReturnDeduction = directReturnAmount + unsettledPastReturnAmount;
 
-        // C. Clean up any artificial sales return credit from user.creditline so jamaAmount only reflects true cash/online overpayment
-        let userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
-        if (userCreditVal > 0 && userId) {
-            const returnCreditLogs = await PartyBalanceLog.findAll({
-                where: {
-                    userId,
-                    type: 'JAMA',
-                    note: { [Op.like]: '%Sales Return%' }
-                }
-            });
-            const erroneousSalesReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
-            if (erroneousSalesReturnCredit > 0) {
-                if (totalSalesReturnDeduction === 0) {
-                    totalSalesReturnDeduction = Math.min(userCreditVal, erroneousSalesReturnCredit);
-                }
-                userCreditVal = Math.max(0, userCreditVal - erroneousSalesReturnCredit);
-            }
-        }
-
-        // Jama Amount strictly represents customer advance overpayment (CASH/ONLINE excess)
+        // Jama Amount strictly represents customer advance balance (user.creditline)
+        const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
         const jamaAmountVal = userCreditVal > 0 ? userCreditVal : 0;
 
         const netOrderCollectible = Math.max(0, calculatedDueAmt - totalSalesReturnDeduction);
@@ -1052,23 +1034,6 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 transaction: t
             });
             remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-        }
-
-        if (remainingSalesReturn === 0 && user) {
-            const returnCreditLogs = await PartyBalanceLog.findAll({
-                where: {
-                    userId: user.id,
-                    type: 'JAMA',
-                    note: { [Op.like]: '%Sales Return%' }
-                },
-                transaction: t
-            });
-            const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
-            if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
-                remainingSalesReturn = errReturnCredit;
-                user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
-                await user.save({ transaction: t });
-            }
         }
 
         // ─── FIX: PREVENT DOUBLE COUNTING OF ONLINE PAYMENTS ────────────────────────
@@ -1607,23 +1572,6 @@ export const settleSingleOrderPayment = async (req, res) => {
                 transaction: t
             });
             remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-        }
-
-        if (remainingSalesReturn === 0 && user) {
-            const returnCreditLogs = await PartyBalanceLog.findAll({
-                where: {
-                    userId: user.id,
-                    type: 'JAMA',
-                    note: { [Op.like]: '%Sales Return%' }
-                },
-                transaction: t
-            });
-            const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
-            if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
-                remainingSalesReturn = errReturnCredit;
-                user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
-                await user.save({ transaction: t });
-            }
         }
 
         for (const order of orders) {
