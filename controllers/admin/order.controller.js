@@ -3364,15 +3364,17 @@ export const adjustPartyBalance = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Amount must be greater than 0 for DUE or JAMA.");
         }
 
-        // 1. Resolve User
+        const isUUID = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+
+        // 1. Resolve User & Context Order
         let user = null;
         let contextOrder = null;
 
         if (orderId) {
+            const rawOrderId = String(orderId).trim();
+            const orderWhere = isUUID(rawOrderId) ? { id: rawOrderId } : { orderId: rawOrderId };
             contextOrder = await Order.findOne({
-                where: {
-                    [Op.or]: [{ id: orderId }, { orderId: orderId }]
-                },
+                where: orderWhere,
                 transaction: t
             });
             if (contextOrder && contextOrder.userId) {
@@ -3381,7 +3383,17 @@ export const adjustPartyBalance = async (req, res) => {
         }
 
         if (!user && userId) {
-            user = await User.findByPk(userId, { transaction: t });
+            const rawUserId = String(userId).trim();
+            if (isUUID(rawUserId)) {
+                user = await User.findByPk(rawUserId, { transaction: t });
+            } else {
+                user = await User.findOne({
+                    where: {
+                        [Op.or]: [{ number: rawUserId }, { fullname: rawUserId }]
+                    },
+                    transaction: t
+                });
+            }
         }
 
         if (!user) {
@@ -3404,11 +3416,16 @@ export const adjustPartyBalance = async (req, res) => {
         // Find if an Opening Khata / Balance Order already exists for this party
         let existingKhataOrder = userOrders.find(o => 
             String(o.orderId || '').startsWith('KHATA-') || 
-            (o.notes && o.notes.includes('Opening Due / Khata Balance'))
+            (o.notes && String(o.notes).includes('Opening Due / Khata Balance'))
         );
 
         let finalCreditline = 0;
         let finalDue = 0;
+
+        // Loggable order UUID
+        const logOrderId = (contextOrder && isUUID(String(contextOrder.id)))
+            ? contextOrder.id
+            : (existingKhataOrder && isUUID(String(existingKhataOrder.id)) ? existingKhataOrder.id : null);
 
         if (type === 'CLEAR') {
             // ── CLEAR BALANCE: 0 credit, 0 due ──────────────────────────────────
@@ -3416,7 +3433,7 @@ export const adjustPartyBalance = async (req, res) => {
             finalDue = 0;
             await user.update({ creditline: 0 }, { transaction: t });
 
-            // Clear dues on all delivered orders
+            // Clear dues on all orders of this customer
             for (const ord of userOrders) {
                 if (parseFloat(ord.dueAmount || 0) > 0 || ord.paymentStatus !== 'Paid') {
                     await ord.update({
@@ -3429,7 +3446,7 @@ export const adjustPartyBalance = async (req, res) => {
 
             await PartyBalanceLog.create({
                 userId: user.id,
-                orderId: contextOrder?.id || null,
+                orderId: logOrderId,
                 type: 'CLEAR',
                 amount: 0,
                 previousBalance: previousCreditline,
@@ -3458,7 +3475,7 @@ export const adjustPartyBalance = async (req, res) => {
 
             await PartyBalanceLog.create({
                 userId: user.id,
-                orderId: contextOrder?.id || null,
+                orderId: logOrderId,
                 type: 'JAMA',
                 amount: parsedAmount,
                 previousBalance: previousCreditline,
@@ -3474,9 +3491,19 @@ export const adjustPartyBalance = async (req, res) => {
             finalDue = parsedAmount;
             await user.update({ creditline: 0 }, { transaction: t });
 
-            // Determine reference time (before the context order or current time)
-            const contextTime = contextOrder?.createdAt ? new Date(contextOrder.createdAt).getTime() : Date.now();
-            const khataOrderTime = new Date(contextTime - 60000); // 1 minute before context order
+            // Determine reference timestamp: must be earlier than the customer's earliest order or context order
+            // so invoices and getAllOrders recognise it as a "PREVIOUS UNPAID BILL"
+            let earliestOrderTime = contextOrder?.createdAt ? new Date(contextOrder.createdAt).getTime() : Date.now();
+            if (userOrders.length > 0) {
+                const oldest = userOrders[userOrders.length - 1];
+                if (oldest?.createdAt) {
+                    const tOldest = new Date(oldest.createdAt).getTime();
+                    if (!isNaN(tOldest) && tOldest < earliestOrderTime) {
+                        earliestOrderTime = tOldest;
+                    }
+                }
+            }
+            const khataOrderTime = new Date(earliestOrderTime - 60000); // 1 minute before oldest order
 
             if (existingKhataOrder) {
                 // Update existing khata order
@@ -3491,9 +3518,10 @@ export const adjustPartyBalance = async (req, res) => {
                     createdAt: khataOrderTime
                 }, { transaction: t });
             } else {
-                // Generate a clean KHATA Order ID
+                // Generate a clean KHATA Order ID with random suffix to ensure uniqueness
                 const phoneSuffix = user.number ? String(user.number).replace(/\D/g, '').slice(-6) : Math.floor(100000 + Math.random() * 900000);
-                const khataOrderId = `KHATA-${phoneSuffix}`;
+                const randomSalt = Math.floor(100 + Math.random() * 900);
+                const khataOrderId = `KHATA-${phoneSuffix}-${randomSalt}`;
 
                 existingKhataOrder = await Order.create({
                     orderId: khataOrderId,
@@ -3518,7 +3546,7 @@ export const adjustPartyBalance = async (req, res) => {
 
             await PartyBalanceLog.create({
                 userId: user.id,
-                orderId: contextOrder?.id || existingKhataOrder?.id || null,
+                orderId: logOrderId || (existingKhataOrder && isUUID(String(existingKhataOrder.id)) ? existingKhataOrder.id : null),
                 type: 'BAKI',
                 amount: parsedAmount,
                 previousBalance: previousCreditline,
