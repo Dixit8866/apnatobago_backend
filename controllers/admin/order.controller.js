@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing, OutletOrder, OutletOrderItem } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing, OutletOrder, OutletOrderItem, PartyBalanceLog } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -3335,4 +3335,217 @@ export const getCustomerPaymentsReport = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
+
+/**
+ * @desc    Adjust Party Balance (Due or Jama / Credit) and synchronize all records
+ * @route   POST /api/admin/orders/adjust-party-balance
+ * @access  Private (Admin)
+ */
+export const adjustPartyBalance = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { userId, orderId, balanceType, amount, note } = req.body;
+
+        if (!userId && !orderId) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Either userId or orderId is required.");
+        }
+
+        const validTypes = ['DUE', 'JAMA', 'CLEAR'];
+        const type = String(balanceType || '').toUpperCase();
+        if (!validTypes.includes(type)) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Invalid balanceType. Must be one of: ${validTypes.join(', ')}`);
+        }
+
+        const parsedAmount = Math.max(0, parseFloat(amount || 0));
+        if (type !== 'CLEAR' && parsedAmount <= 0) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Amount must be greater than 0 for DUE or JAMA.");
+        }
+
+        // 1. Resolve User
+        let user = null;
+        let contextOrder = null;
+
+        if (orderId) {
+            contextOrder = await Order.findOne({
+                where: {
+                    [Op.or]: [{ id: orderId }, { orderId: orderId }]
+                },
+                transaction: t
+            });
+            if (contextOrder && contextOrder.userId) {
+                user = await User.findByPk(contextOrder.userId, { transaction: t });
+            }
+        }
+
+        if (!user && userId) {
+            user = await User.findByPk(userId, { transaction: t });
+        }
+
+        if (!user) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Party / Customer not found.");
+        }
+
+        const previousCreditline = parseFloat(user.creditline || 0);
+
+        // Fetch all non-cancelled orders of this user
+        const userOrders = await Order.findAll({
+            where: {
+                userId: user.id,
+                orderStatus: { [Op.ne]: 'Cancelled' }
+            },
+            order: [['createdAt', 'DESC']],
+            transaction: t
+        });
+
+        // Find if an Opening Khata / Balance Order already exists for this party
+        let existingKhataOrder = userOrders.find(o => 
+            String(o.orderId || '').startsWith('KHATA-') || 
+            (o.notes && o.notes.includes('Opening Due / Khata Balance'))
+        );
+
+        let finalCreditline = 0;
+        let finalDue = 0;
+
+        if (type === 'CLEAR') {
+            // ── CLEAR BALANCE: 0 credit, 0 due ──────────────────────────────────
+            finalCreditline = 0;
+            finalDue = 0;
+            await user.update({ creditline: 0 }, { transaction: t });
+
+            // Clear dues on all delivered orders
+            for (const ord of userOrders) {
+                if (parseFloat(ord.dueAmount || 0) > 0 || ord.paymentStatus !== 'Paid') {
+                    await ord.update({
+                        dueAmount: 0,
+                        paidAmount: ord.totalAmount,
+                        paymentStatus: 'Paid'
+                    }, { transaction: t });
+                }
+            }
+
+            await PartyBalanceLog.create({
+                userId: user.id,
+                orderId: contextOrder?.id || null,
+                type: 'CLEAR',
+                amount: 0,
+                previousBalance: previousCreditline,
+                newBalance: 0,
+                note: note || 'Party balance cleared to ₹0.00 by Admin',
+                createdById: req.user?.id || null,
+                createdByName: req.user?.fullname || req.user?.name || 'Admin'
+            }, { transaction: t });
+
+        } else if (type === 'JAMA') {
+            // ── ADVANCE JAMA: Add credit, clear all past dues ────────────────────
+            finalCreditline = parsedAmount;
+            finalDue = 0;
+            await user.update({ creditline: parsedAmount }, { transaction: t });
+
+            // Clear dues on all orders
+            for (const ord of userOrders) {
+                if (parseFloat(ord.dueAmount || 0) > 0 || ord.paymentStatus !== 'Paid') {
+                    await ord.update({
+                        dueAmount: 0,
+                        paidAmount: ord.totalAmount,
+                        paymentStatus: 'Paid'
+                    }, { transaction: t });
+                }
+            }
+
+            await PartyBalanceLog.create({
+                userId: user.id,
+                orderId: contextOrder?.id || null,
+                type: 'JAMA',
+                amount: parsedAmount,
+                previousBalance: previousCreditline,
+                newBalance: parsedAmount,
+                note: note || `Advance credit set to +₹${parsedAmount} by Admin`,
+                createdById: req.user?.id || null,
+                createdByName: req.user?.fullname || req.user?.name || 'Admin'
+            }, { transaction: t });
+
+        } else if (type === 'DUE') {
+            // ── CUSTOMER DUE: Set credit to 0, ensure past orders have due = parsedAmount ──
+            finalCreditline = 0;
+            finalDue = parsedAmount;
+            await user.update({ creditline: 0 }, { transaction: t });
+
+            // Determine reference time (before the context order or current time)
+            const contextTime = contextOrder?.createdAt ? new Date(contextOrder.createdAt).getTime() : Date.now();
+            const khataOrderTime = new Date(contextTime - 60000); // 1 minute before context order
+
+            if (existingKhataOrder) {
+                // Update existing khata order
+                await existingKhataOrder.update({
+                    totalAmount: parsedAmount,
+                    dueAmount: parsedAmount,
+                    paidAmount: 0,
+                    paymentStatus: 'Pending',
+                    orderStatus: 'Delivered',
+                    paymentMethod: 'CREDIT',
+                    notes: note ? `Opening Due / Khata Balance: ${note}` : 'Opening Due / Khata Balance (જૂની ખાતાવહી બાકી)',
+                    createdAt: khataOrderTime
+                }, { transaction: t });
+            } else {
+                // Generate a clean KHATA Order ID
+                const phoneSuffix = user.number ? String(user.number).replace(/\D/g, '').slice(-6) : Math.floor(100000 + Math.random() * 900000);
+                const khataOrderId = `KHATA-${phoneSuffix}`;
+
+                existingKhataOrder = await Order.create({
+                    orderId: khataOrderId,
+                    userId: user.id,
+                    saleType: 'Direct',
+                    customerName: user.fullname,
+                    customerNumber: user.number,
+                    totalAmount: parsedAmount,
+                    dueAmount: parsedAmount,
+                    paidAmount: 0,
+                    paymentStatus: 'Pending',
+                    paymentCollectStatus: 'N/A',
+                    orderStatus: 'Delivered',
+                    paymentMethod: 'CREDIT',
+                    deliveryMode: 'Round',
+                    notes: note ? `Opening Due / Khata Balance: ${note}` : 'Opening Due / Khata Balance (જૂની ખાતાવહી બાકી)',
+                    createdAt: khataOrderTime,
+                    godownId: user.godownId || null,
+                    createdByAdminId: req.user?.id || null
+                }, { transaction: t });
+            }
+
+            await PartyBalanceLog.create({
+                userId: user.id,
+                orderId: contextOrder?.id || existingKhataOrder?.id || null,
+                type: 'BAKI',
+                amount: parsedAmount,
+                previousBalance: previousCreditline,
+                newBalance: parsedAmount,
+                note: note || `Party due set to ₹${parsedAmount} (Opening Khata Balance) by Admin`,
+                createdById: req.user?.id || null,
+                createdByName: req.user?.fullname || req.user?.name || 'Admin'
+            }, { transaction: t });
+        }
+
+        await t.commit();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `Party balance updated successfully to ${type === 'CLEAR' ? '₹0.00 (Clear)' : (type === 'JAMA' ? `+₹${finalCreditline} (Jama)` : `₹${finalDue} (Due)`)}`, {
+            userId: user.id,
+            partyName: user.fullname,
+            balanceType: type,
+            userCreditline: finalCreditline,
+            previousUnpaidDue: finalDue
+        });
+
+    } catch (error) {
+        if (t && !t.finished) {
+            await t.rollback();
+        }
+        logger.error(`[Adjust Party Balance Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
 
