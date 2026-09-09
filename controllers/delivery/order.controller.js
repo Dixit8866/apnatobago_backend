@@ -555,14 +555,50 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.payments = payments;
         }
 
-        // Calculate Sales Return deductions & display breakdown (strictly for this order only)
+        // Calculate Sales Return deductions:
+        // A. Direct sales returns on this current order:
         const orderReturns = (assignment.order?.returns || []).filter(r => r.status !== 'Rejected' && r.status !== 'Cancelled');
         const directReturnAmount = orderReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
 
-        const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
+        // B. Unsettled sales returns for this user from past bills (e.g. submitted in previous_bills_screen during delivery):
+        let unsettledPastReturnAmount = 0;
+        if (userId) {
+            const unsettledReturns = await SalesReturn.findAll({
+                where: {
+                    userId,
+                    creditProcessed: false,
+                    orderId: { [Op.ne]: assignment.order.id },
+                    status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                }
+            });
+            unsettledPastReturnAmount = unsettledReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+        }
+
+        let totalSalesReturnDeduction = directReturnAmount + unsettledPastReturnAmount;
+
+        // C. Clean up any artificial sales return credit from user.creditline so jamaAmount only reflects true cash/online overpayment
+        let userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
+        if (userCreditVal > 0 && userId) {
+            const returnCreditLogs = await PartyBalanceLog.findAll({
+                where: {
+                    userId,
+                    type: 'JAMA',
+                    note: { [Op.like]: '%Sales Return%' }
+                }
+            });
+            const erroneousSalesReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
+            if (erroneousSalesReturnCredit > 0) {
+                if (totalSalesReturnDeduction === 0) {
+                    totalSalesReturnDeduction = Math.min(userCreditVal, erroneousSalesReturnCredit);
+                }
+                userCreditVal = Math.max(0, userCreditVal - erroneousSalesReturnCredit);
+            }
+        }
+
+        // Jama Amount strictly represents customer advance overpayment (CASH/ONLINE excess)
         const jamaAmountVal = userCreditVal > 0 ? userCreditVal : 0;
 
-        const netOrderCollectible = Math.max(0, calculatedDueAmt - directReturnAmount);
+        const netOrderCollectible = Math.max(0, calculatedDueAmt - totalSalesReturnDeduction);
         const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
         const netPayableVal = Math.max(0, totalDueAmt);
 
@@ -573,7 +609,7 @@ export const getAssignmentDetails = async (req, res) => {
         data.userCreditline = userCreditVal.toFixed(2);
         data.salesReturnCalculation = {
             billAmount: fullTotal,
-            returnAmount: directReturnAmount,
+            returnAmount: totalSalesReturnDeduction,
             netToCollect: netOrderCollectible
         };
 
@@ -1079,8 +1115,38 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let rzpId = order.razorpayPaymentId;
 
-            // Handle direct Sales Return deduction if provided in settlement body
+            // Handle direct Sales Return deduction if provided in settlement body OR unadjusted sales returns for this user
             let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+            if (remainingSalesReturn === 0 && user) {
+                const unadjustedReturns = await SalesReturn.findAll({
+                    where: {
+                        userId: user.id,
+                        creditProcessed: false,
+                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                    },
+                    transaction: t
+                });
+                remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+            }
+
+            // Also check if user has old erroneous Sales Return credit in creditline to absorb
+            if (remainingSalesReturn === 0 && user) {
+                const returnCreditLogs = await PartyBalanceLog.findAll({
+                    where: {
+                        userId: user.id,
+                        type: 'JAMA',
+                        note: { [Op.like]: '%Sales Return%' }
+                    },
+                    transaction: t
+                });
+                const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
+                if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
+                    remainingSalesReturn = errReturnCredit;
+                    user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
+                    await user.save({ transaction: t });
+                }
+            }
+
             if (remainingSalesReturn > 0 && due > 0) {
                 const returnDeduction = Math.min(remainingSalesReturn, due);
                 remainingSalesReturn -= returnDeduction;
@@ -1097,6 +1163,21 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     paymentMethod: 'SALES_RETURN',
                     notes: `Adjusted ₹${returnDeduction.toFixed(2)} from Sales Return (Bill: ₹${order.totalAmount})`
                 }, { transaction: t });
+
+                // Mark any unadjusted returns for this user as creditProcessed = true
+                if (user) {
+                    await SalesReturn.update(
+                        { creditProcessed: true },
+                        {
+                            where: {
+                                userId: user.id,
+                                creditProcessed: false,
+                                status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                            },
+                            transaction: t
+                        }
+                    );
+                }
 
                 // Create SalesReturn items if provided in payload
                 const returnItemsList = salesReturnItems || returnItems;
@@ -1117,14 +1198,15 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                                 price: rPrice,
                                 returnAmount: rAmt,
                                 reason: rItem.reason || 'Customer Return at Delivery',
-                                status: 'Pending'
+                                status: 'Pending',
+                                creditProcessed: true
                             }, { transaction: t });
                         }
                     }
                 }
             }
 
-            // Try Jama Credit (Advance Credit balance of customer, e.g. from Sales Returns)
+            // Try Jama Credit (Customer's actual cash/online advance overpayment)
             const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
             if (currentJama > 0 && due > 0) {
                 const jamaDeduction = Math.min(currentJama, due);
@@ -1134,16 +1216,8 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 due -= jamaDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
 
-                // Check if user's Jama balance came from a Sales Return
-                const recentReturnLog = await PartyBalanceLog.findOne({
-                    where: { userId: user.id, type: 'JAMA', note: { [Op.like]: '%Sales Return%' } },
-                    order: [['createdAt', 'DESC']],
-                    transaction: t
-                });
-                const payMethod = recentReturnLog ? 'SALES_RETURN' : 'JAMA_CREDIT';
-                const payNote = recentReturnLog 
-                    ? `Adjusted ₹${jamaDeduction.toFixed(2)} from Sales Return / Customer Balance` 
-                    : `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
+                const payMethod = 'JAMA_CREDIT';
+                const payNote = `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
 
                 orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
                 paymentMethodsUsed.push(payMethod);
@@ -1293,13 +1367,20 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         }
 
         if (user) {
-            const excessCollected = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
+            const excessCashOnline = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
+            const excessReturn = remainingSalesReturn > 0 ? remainingSalesReturn : 0;
+            const excessCollected = excessCashOnline + excessReturn;
+
             if (excessCollected > 0) {
                 const prevCredit = parseFloat(user.creditline || 0);
                 user.creditline = prevCredit + excessCollected;
                 const newCredit = user.creditline;
-                logger.info(`[Complete Order Settle Overpayment]: Added excess ${excessCollected} to user ${user.id} creditline. New creditline: ${user.creditline}`);
+                logger.info(`[Complete Order Settle Overpayment]: Added excess ${excessCollected} (Cash/Online: ${excessCashOnline}, Return: ${excessReturn}) to user ${user.id} creditline. New creditline: ${user.creditline}`);
                 
+                const noteParts = [];
+                if (excessCashOnline > 0) noteParts.push(`Cash/Online Overpayment: +₹${excessCashOnline.toFixed(2)}`);
+                if (excessReturn > 0) noteParts.push(`Excess Sales Return: +₹${excessReturn.toFixed(2)}`);
+
                 await PartyBalanceLog.create({
                     userId: user.id,
                     orderId: assignment.orderId,
@@ -1307,7 +1388,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     amount: excessCollected,
                     previousBalance: prevCredit,
                     newBalance: newCredit,
-                    note: `Overpayment on Order #${assignment.order?.orderId || assignment.orderId}: +₹${excessCollected.toFixed(2)} added to Jama Balance`,
+                    note: `Credit Jama on Order #${assignment.order?.orderId || assignment.orderId}: +₹${excessCollected.toFixed(2)} (${noteParts.join(', ')})`,
                     createdByName: 'Delivery Boy Settlement'
                 }, { transaction: t });
 
@@ -1523,7 +1604,38 @@ export const settleSingleOrderPayment = async (req, res) => {
             let paymentMethodsUsed = [];
 
             // Handle direct Sales Return deduction if provided
+            // Handle direct Sales Return deduction if provided in settlement body OR unadjusted sales returns for this user
             let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+            if (remainingSalesReturn === 0 && user) {
+                const unadjustedReturns = await SalesReturn.findAll({
+                    where: {
+                        userId: user.id,
+                        creditProcessed: false,
+                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                    },
+                    transaction: t
+                });
+                remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+            }
+
+            // Also check if user has old erroneous Sales Return credit in creditline to absorb
+            if (remainingSalesReturn === 0 && user) {
+                const returnCreditLogs = await PartyBalanceLog.findAll({
+                    where: {
+                        userId: user.id,
+                        type: 'JAMA',
+                        note: { [Op.like]: '%Sales Return%' }
+                    },
+                    transaction: t
+                });
+                const errReturnCredit = returnCreditLogs.reduce((sum, l) => sum + parseFloat(l.amount || 0), 0);
+                if (errReturnCredit > 0 && parseFloat(user.creditline || 0) >= errReturnCredit) {
+                    remainingSalesReturn = errReturnCredit;
+                    user.creditline = Math.max(0, parseFloat(user.creditline) - errReturnCredit);
+                    await user.save({ transaction: t });
+                }
+            }
+
             if (remainingSalesReturn > 0 && due > 0) {
                 const returnDeduction = Math.min(remainingSalesReturn, due);
                 remainingSalesReturn -= returnDeduction;
@@ -1540,6 +1652,21 @@ export const settleSingleOrderPayment = async (req, res) => {
                     paymentMethod: 'SALES_RETURN',
                     notes: `Adjusted ₹${returnDeduction.toFixed(2)} from Sales Return (Bill: ₹${order.totalAmount})`
                 }, { transaction: t });
+
+                // Mark any unadjusted returns for this user as creditProcessed = true
+                if (user) {
+                    await SalesReturn.update(
+                        { creditProcessed: true },
+                        {
+                            where: {
+                                userId: user.id,
+                                creditProcessed: false,
+                                status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                            },
+                            transaction: t
+                        }
+                    );
+                }
 
                 // Create SalesReturn items if provided
                 const returnItemsList = salesReturnItems || returnItems;
@@ -1560,14 +1687,15 @@ export const settleSingleOrderPayment = async (req, res) => {
                                 price: rPrice,
                                 returnAmount: rAmt,
                                 reason: rItem.reason || 'Customer Return at Delivery',
-                                status: 'Pending'
+                                status: 'Pending',
+                                creditProcessed: true
                             }, { transaction: t });
                         }
                     }
                 }
             }
 
-            // Try Jama Credit (Advance Credit balance of customer, e.g. from Sales Returns)
+            // Try Jama Credit (Customer's actual cash/online advance overpayment)
             const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
             if (currentJama > 0 && due > 0) {
                 const jamaDeduction = Math.min(currentJama, due);
@@ -1577,16 +1705,8 @@ export const settleSingleOrderPayment = async (req, res) => {
                 due -= jamaDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
 
-                // Check if user's Jama balance came from a Sales Return
-                const recentReturnLog = await PartyBalanceLog.findOne({
-                    where: { userId: user.id, type: 'JAMA', note: { [Op.like]: '%Sales Return%' } },
-                    order: [['createdAt', 'DESC']],
-                    transaction: t
-                });
-                const payMethod = recentReturnLog ? 'SALES_RETURN' : 'JAMA_CREDIT';
-                const payNote = recentReturnLog 
-                    ? `Adjusted ₹${jamaDeduction.toFixed(2)} from Sales Return / Customer Balance` 
-                    : `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
+                const payMethod = 'JAMA_CREDIT';
+                const payNote = `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
 
                 orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
                 paymentMethodsUsed.push(payMethod);
@@ -1729,12 +1849,19 @@ export const settleSingleOrderPayment = async (req, res) => {
         }
 
         if (user) {
-            const excessCollected = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
+            const excessCashOnline = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
+            const excessReturn = remainingSalesReturn > 0 ? remainingSalesReturn : 0;
+            const excessCollected = excessCashOnline + excessReturn;
+
             if (excessCollected > 0) {
                 const prevCredit = parseFloat(user.creditline || 0);
                 user.creditline = prevCredit + excessCollected;
                 const newCredit = user.creditline;
-                logger.info(`[Settle Single Overpayment]: Added excess ${excessCollected} to user ${user.id} creditline. New creditline: ${user.creditline}`);
+                logger.info(`[Settle Single Overpayment]: Added excess ${excessCollected} (Cash/Online: ${excessCashOnline}, Return: ${excessReturn}) to user ${user.id} creditline. New creditline: ${user.creditline}`);
+
+                const noteParts = [];
+                if (excessCashOnline > 0) noteParts.push(`Cash/Online Overpayment: +₹${excessCashOnline.toFixed(2)}`);
+                if (excessReturn > 0) noteParts.push(`Excess Sales Return: +₹${excessReturn.toFixed(2)}`);
 
                 const targetOrderId = orders[0]?.id || null;
                 await PartyBalanceLog.create({
@@ -1744,7 +1871,7 @@ export const settleSingleOrderPayment = async (req, res) => {
                     amount: excessCollected,
                     previousBalance: prevCredit,
                     newBalance: newCredit,
-                    note: `Overpayment on Order #${orders[0]?.orderId || targetOrderId}: +₹${excessCollected.toFixed(2)} added to Jama Balance`,
+                    note: `Credit Jama on Order #${orders[0]?.orderId || targetOrderId}: +₹${excessCollected.toFixed(2)} (${noteParts.join(', ')})`,
                     createdByName: 'Delivery Boy Settlement'
                 }, { transaction: t });
 

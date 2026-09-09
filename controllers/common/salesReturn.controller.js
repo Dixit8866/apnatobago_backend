@@ -149,33 +149,11 @@ export const createSalesReturn = async (req, res) => {
                 price: itemPrice,
                 returnAmount,
                 reason: `${sellUnitPrefix} ${rootReason || itemReason || "Customer Return"}`,
-                status: "Pending" // Explicitly start in Pending status!
+                status: "Pending",
+                creditProcessed: false
             }, { transaction: t });
 
             salesReturnEntries.push(salesReturnEntry);
-        }
-
-        // Note: Do NOT destroy OrderItems and do NOT alter order.totalAmount!
-        // The original bill amount (e.g. ₹2000) must remain intact for billing/accounting/GST.
-        // Instead, credit the totalReturnAmount to customer's advance Jama Balance so delivery app & settlement can adjust it.
-        if (order.userId && totalReturnAmount > 0) {
-            const user = await User.findByPk(order.userId, { transaction: t });
-            if (user) {
-                const prevCredit = parseFloat(user.creditline || 0);
-                user.creditline = prevCredit + totalReturnAmount;
-                await user.save({ transaction: t });
-
-                await PartyBalanceLog.create({
-                    userId: user.id,
-                    orderId: order.id,
-                    type: 'JAMA',
-                    amount: totalReturnAmount,
-                    previousBalance: prevCredit,
-                    newBalance: user.creditline,
-                    note: `Sales Return on Order #${order.orderId || order.id}: +₹${totalReturnAmount.toFixed(2)} added to Customer Jama Credit Balance`,
-                    createdByName: `Delivery Boy (${req.user?.fullname || req.user?.name || 'Delivery'})`
-                }, { transaction: t });
-            }
         }
 
         await t.commit();
