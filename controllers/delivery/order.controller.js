@@ -576,9 +576,9 @@ export const getAssignmentDetails = async (req, res) => {
 
         const totalSalesReturnDeduction = directReturnAmount + unsettledPastReturnAmount;
 
-        // Creditline represents customer's credit limit / capability
+        // Customer Advance Jama Balance
         const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
-        const jamaAmountVal = 0; // Credit limit is not an advance cash deposit
+        const jamaAmountVal = userCreditVal > 0 ? userCreditVal : 0;
 
         const netOrderCollectible = Math.max(0, calculatedDueAmt - totalSalesReturnDeduction);
         const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
@@ -587,7 +587,7 @@ export const getAssignmentDetails = async (req, res) => {
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
         data.netPayableAmount = netPayableVal.toFixed(2);
-        data.jamaAmount = '0.00';
+        data.jamaAmount = jamaAmountVal.toFixed(2);
         data.userCreditline = userCreditVal.toFixed(2);
         data.salesReturnCalculation = {
             billAmount: fullTotal,
@@ -604,7 +604,7 @@ export const getAssignmentDetails = async (req, res) => {
 
         if (data.order && data.order.user) {
             data.order.user.creditline = userCreditVal.toFixed(2);
-            data.order.user.jamaAmount = '0.00';
+            data.order.user.jamaAmount = jamaAmountVal.toFixed(2);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", data);
@@ -1249,6 +1249,43 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 }
             }
 
+            // Try Advance Jama Balance (only if remaining due exists and it was NOT explicitly kept on credit)
+            const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
+            if (currentJama > 0 && due > 0 && (!creditAmount || parseFloat(creditAmount) <= 0) && remainingCredit === 0) {
+                const jamaDeduction = Math.min(currentJama, due);
+                const prevCredit = currentJama;
+                user.creditline = currentJama - jamaDeduction;
+                const newCredit = user.creditline;
+                due -= jamaDeduction;
+                order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
+
+                const payMethod = 'JAMA_CREDIT';
+                const payNote = `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
+
+                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
+                paymentMethodsUsed.push(payMethod);
+
+                logger.info(`[Complete Order Settle]: Deducted ${payMethod} ${jamaDeduction} for order ${order.id}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: jamaDeduction,
+                    paymentMethod: payMethod,
+                    notes: payNote
+                }, { transaction: t });
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    type: 'ADJUSTMENT',
+                    amount: jamaDeduction,
+                    previousBalance: prevCredit,
+                    newBalance: newCredit,
+                    note: `Jama Balance used on Order #${order.orderId || order.id}: -₹${jamaDeduction.toFixed(2)} deducted from Jama Balance`,
+                    createdByName: 'Delivery Boy Settlement'
+                }, { transaction: t });
+            }
+
             // Update order record
             order.dueAmount = due;
 
@@ -1679,6 +1716,43 @@ export const settleSingleOrderPayment = async (req, res) => {
                         user.blockcredit = true;
                     }
                 }
+            }
+
+            // Try Advance Jama Balance (only if remaining due exists and it was NOT explicitly kept on credit)
+            const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
+            if (currentJama > 0 && due > 0 && (!creditAmount || parseFloat(creditAmount) <= 0) && remainingCredit === 0) {
+                const jamaDeduction = Math.min(currentJama, due);
+                const prevCredit = currentJama;
+                user.creditline = currentJama - jamaDeduction;
+                const newCredit = user.creditline;
+                due -= jamaDeduction;
+                order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
+
+                const payMethod = 'JAMA_CREDIT';
+                const payNote = `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
+
+                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
+                paymentMethodsUsed.push(payMethod);
+
+                logger.info(`[Settle Single]: Deducted ${payMethod} ${jamaDeduction} for order ${order.id}`);
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: jamaDeduction,
+                    paymentMethod: payMethod,
+                    notes: payNote
+                }, { transaction: t });
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    type: 'ADJUSTMENT',
+                    amount: jamaDeduction,
+                    previousBalance: prevCredit,
+                    newBalance: newCredit,
+                    note: `Jama Balance used on Order #${order.orderId || order.id}: -₹${jamaDeduction.toFixed(2)} deducted from Jama Balance`,
+                    createdByName: 'Delivery Boy Settlement'
+                }, { transaction: t });
             }
 
             // Update order status/payment
