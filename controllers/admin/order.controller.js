@@ -34,7 +34,7 @@ const adjustOrderPayments = (order) => {
     const rowData = order.toJSON ? order.toJSON() : order;
     const creditAmt = parseFloat(rowData.creditAmount || 0);
     const dueAmt = parseFloat(rowData.dueAmount || 0);
-    const effectiveCredit = creditAmt > 0 ? creditAmt : dueAmt;
+    let effectiveCredit = creditAmt > 0 ? creditAmt : dueAmt;
 
     const fullTotal = parseFloat(rowData.totalAmount || 0);
     const couponDisc = parseFloat(rowData.couponDiscount || 0);
@@ -42,13 +42,33 @@ const adjustOrderPayments = (order) => {
     const actualPaid = parseFloat(rowData.paidAmount || 0);
     const payableAmt = Math.max(0, fullTotal - couponDisc);
 
+    // Also inspect payments array for any CREDIT payment entry or non-credit payment collections
+    let creditPaymentSum = 0;
+    let nonCreditPaid = 0;
+    if (Array.isArray(rowData.payments) && rowData.payments.length > 0) {
+        rowData.payments.forEach(p => {
+            const m = String(p.paymentMethod || '').toUpperCase();
+            const amt = parseFloat(p.amount || 0);
+            if (m === 'CREDIT') {
+                creditPaymentSum += amt;
+            } else {
+                nonCreditPaid += amt;
+            }
+        });
+    }
+
+    if (creditPaymentSum > 0 && effectiveCredit <= 0) {
+        effectiveCredit = creditPaymentSum;
+    }
+
     if (effectiveCredit > 0) {
         rowData.payableAmount = payableAmt.toFixed(2);
         rowData.dueAmount = effectiveCredit.toFixed(2);
         rowData.creditAmount = effectiveCredit.toFixed(2);
         rowData.paymentStatus = 'Partial';
     } else {
-        const currentDue = Math.max(0, payableAmt - actualPaid);
+        const effectivePaid = (nonCreditPaid > 0 && rowData.payments.length > 0) ? nonCreditPaid : actualPaid;
+        const currentDue = Math.max(0, payableAmt - effectivePaid);
         rowData.payableAmount = payableAmt.toFixed(2);
         rowData.dueAmount = currentDue.toFixed(2);
         if (currentDue <= 1e-7) {
