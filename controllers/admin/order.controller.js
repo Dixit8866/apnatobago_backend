@@ -579,15 +579,13 @@ export const getAllOrders = async (req, res) => {
                         }
 
                         if (realPaid < tot - 0.99) {
-                            if (dueCol > 0) {
-                                due = Math.min(tot, dueCol);
-                            } else {
-                                due = Math.max(0, tot - realPaid);
-                            }
+                            due = Math.max(dueCol, tot - realPaid);
+                        } else if (dueCol > 0) {
+                            due = dueCol;
                         }
                     }
 
-                    const uPhone = String(uo.user?.number || uo.customerNumber || '').replace(/\D/g, '').slice(-10);
+                    const uPhone = String(uo.user?.number || uo.customerNumber || uo.customerPhone || '').replace(/\D/g, '').slice(-10);
                     const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
                     const uName = String(uo.user?.fullname || uo.customerName || '').toLowerCase().trim();
 
@@ -618,21 +616,30 @@ export const getAllOrders = async (req, res) => {
                 }
 
                 const uId = order.userId || order.user?.id;
-                const oPhone = String(order.user?.number || order.customerNumber || '').replace(/\D/g, '').slice(-10);
-                const oShop = String(order.user?.businessProfile?.shopName || '').toLowerCase().trim();
+                const oPhone = String(order.user?.number || order.customerNumber || order.customerPhone || '').replace(/\D/g, '').slice(-10);
+                const oShop = String(order.user?.businessProfile?.shopName || order.shopName || '').toLowerCase().trim();
                 const oName = String(order.user?.fullname || order.customerName || '').toLowerCase().trim();
                 const orderTime = new Date(order.createdAt).getTime();
+                const currOrderNum = parseInt(String(order.orderId || '').replace(/\D/g, ''), 10) || 0;
 
                 // Calculate sum of dues from other credit/delivered orders of the SAME customer created BEFORE this order
-                // Must match strictly by userId (Party ID). If userId is absent, match by 10-digit phone number.
                 const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
                     if (String(uo.id) !== String(order.id) && String(uo.orderId || '') !== String(order.orderId || '')) {
-                        if (uo.createdAt < orderTime) {
+                        const uoOrderNum = parseInt(String(uo.orderId || '').replace(/\D/g, ''), 10) || 0;
+                        const isEarlier = (uoOrderNum > 0 && currOrderNum > 0)
+                            ? (uoOrderNum < currOrderNum)
+                            : (uo.createdAt < orderTime || (uo.createdAt <= orderTime && String(uo.orderId || '') < String(order.orderId || '')));
+
+                        if (isEarlier) {
                             let isSameCustomer = false;
-                            if (uId && uo.userId) {
-                                isSameCustomer = (String(uId) === String(uo.userId));
-                            } else if (oPhone && uo.phone && oPhone.length === 10 && uo.phone.length === 10) {
-                                isSameCustomer = (oPhone === uo.phone);
+                            if (uId && uo.userId && String(uId) === String(uo.userId)) {
+                                isSameCustomer = true;
+                            } else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) {
+                                isSameCustomer = true;
+                            } else if (oShop && uo.shopName && oShop.length >= 3 && oShop === uo.shopName) {
+                                isSameCustomer = true;
+                            } else if (oName && uo.name && oName.length >= 3 && oName === uo.name) {
+                                isSameCustomer = true;
                             }
 
                             if (isSameCustomer) {
