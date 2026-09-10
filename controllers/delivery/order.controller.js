@@ -400,7 +400,7 @@ export const getAssignmentDetails = async (req, res) => {
                         {
                             model: User,
                             as: 'user',
-                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit'],
+                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit', 'advanceJama', 'balanceType'],
                             include: [
                                 {
                                     model: BusinessProfile,
@@ -576,9 +576,11 @@ export const getAssignmentDetails = async (req, res) => {
 
         const totalSalesReturnDeduction = directReturnAmount + unsettledPastReturnAmount;
 
-        // Customer Advance Jama Balance
-        const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
-        const jamaAmountVal = userCreditVal > 0 ? userCreditVal : 0;
+        // Customer Advance Jama Balance (Only true JAMA advance money, NEVER customer udhari/creditline)
+        const userBalanceType = assignment.order?.user?.balanceType || 'DUE';
+        const userAdvanceJama = parseFloat(assignment.order?.user?.advanceJama || 0);
+        const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
+        const userCreditVal = (userBalanceType === 'DUE') ? parseFloat(assignment.order?.user?.creditline || 0) : 0;
 
         const netOrderCollectible = Math.max(0, calculatedDueAmt - totalSalesReturnDeduction);
         const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
@@ -589,6 +591,8 @@ export const getAssignmentDetails = async (req, res) => {
         data.netPayableAmount = netPayableVal.toFixed(2);
         data.jamaAmount = jamaAmountVal.toFixed(2);
         data.userCreditline = userCreditVal.toFixed(2);
+        data.advanceJama = userAdvanceJama.toFixed(2);
+        data.balanceType = userBalanceType;
         data.salesReturnCalculation = {
             billAmount: fullTotal,
             returnAmount: totalSalesReturnDeduction,
@@ -604,6 +608,8 @@ export const getAssignmentDetails = async (req, res) => {
 
         if (data.order && data.order.user) {
             data.order.user.creditline = userCreditVal.toFixed(2);
+            data.order.user.advanceJama = userAdvanceJama.toFixed(2);
+            data.order.user.balanceType = userBalanceType;
             data.order.user.jamaAmount = jamaAmountVal.toFixed(2);
         }
 
@@ -1250,12 +1256,13 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             }
 
             // Try Advance Jama Balance (only if remaining due exists and it was NOT explicitly kept on credit)
-            const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
+            const currentJama = (user && user.balanceType === 'JAMA') ? Math.max(0, parseFloat(user.advanceJama || 0)) : 0;
             if (currentJama > 0 && due > 0 && (!creditAmount || parseFloat(creditAmount) <= 0) && remainingCredit === 0) {
                 const jamaDeduction = Math.min(currentJama, due);
-                const prevCredit = currentJama;
-                user.creditline = currentJama - jamaDeduction;
-                const newCredit = user.creditline;
+                user.advanceJama = Math.max(0, currentJama - jamaDeduction);
+                if (user.advanceJama <= 0) {
+                    user.balanceType = 'CLEAR';
+                }
                 due -= jamaDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
 
@@ -1719,12 +1726,13 @@ export const settleSingleOrderPayment = async (req, res) => {
             }
 
             // Try Advance Jama Balance (only if remaining due exists and it was NOT explicitly kept on credit)
-            const currentJama = user ? Math.max(0, parseFloat(user.creditline || 0)) : 0;
+            const currentJama = (user && user.balanceType === 'JAMA') ? Math.max(0, parseFloat(user.advanceJama || 0)) : 0;
             if (currentJama > 0 && due > 0 && (!creditAmount || parseFloat(creditAmount) <= 0) && remainingCredit === 0) {
                 const jamaDeduction = Math.min(currentJama, due);
-                const prevCredit = currentJama;
-                user.creditline = currentJama - jamaDeduction;
-                const newCredit = user.creditline;
+                user.advanceJama = Math.max(0, currentJama - jamaDeduction);
+                if (user.advanceJama <= 0) {
+                    user.balanceType = 'CLEAR';
+                }
                 due -= jamaDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
 
