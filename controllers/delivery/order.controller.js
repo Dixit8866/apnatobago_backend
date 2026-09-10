@@ -137,7 +137,7 @@ export const getMyAssignedOrders = async (req, res) => {
                         {
                             model: User,
                             as: 'user',
-                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit'],
+                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
                             include: [
                                 {
                                     model: BusinessProfile,

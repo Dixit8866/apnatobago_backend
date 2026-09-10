@@ -45,6 +45,14 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(10, 2),
         defaultValue: 0,
     },
+    advanceJama: {
+        type: DataTypes.DECIMAL(12, 2),
+        defaultValue: 0.00,
+    },
+    balanceType: {
+        type: DataTypes.STRING, // 'DUE' | 'JAMA' | 'CLEAR'
+        defaultValue: 'DUE',
+    },
     blockcredit: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,

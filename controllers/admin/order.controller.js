@@ -395,7 +395,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'blockcredit', 'routeCategoryId'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'routeCategoryId'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -644,7 +644,12 @@ export const getAllOrders = async (req, res) => {
                 }, 0);
 
                 const userCreditline = parseFloat(order.user?.creditline || 0);
+                const userAdvanceJama = parseFloat(order.user?.advanceJama || 0);
+                const userBalanceType = order.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditline > 0 ? 'DUE' : 'CLEAR'));
+
                 order.setDataValue('userCreditline', userCreditline);
+                order.setDataValue('userAdvanceJama', userAdvanceJama);
+                order.setDataValue('userBalanceType', userBalanceType);
                 order.setDataValue('previousUnpaidDue', prevUnpaidDue);
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
@@ -654,9 +659,13 @@ export const getAllOrders = async (req, res) => {
                 if (adjusted) {
                     adjusted.previousUnpaidDue = prevUnpaidDue;
                     adjusted.userCreditline = userCreditline;
+                    adjusted.userAdvanceJama = userAdvanceJama;
+                    adjusted.userBalanceType = userBalanceType;
                     if (adjusted.user) {
                         adjusted.user.previousUnpaidDue = prevUnpaidDue;
                         adjusted.user.creditline = userCreditline;
+                        adjusted.user.advanceJama = userAdvanceJama;
+                        adjusted.user.balanceType = userBalanceType;
                     }
                 }
                 return adjusted;
@@ -3451,7 +3460,7 @@ export const adjustPartyBalance = async (req, res) => {
             // ── CLEAR BALANCE: 0 credit, 0 due ──────────────────────────────────
             finalCreditline = 0;
             finalDue = 0;
-            await user.update({ creditline: 0 }, { transaction: t });
+            await user.update({ creditline: 0, advanceJama: 0, balanceType: 'CLEAR' }, { transaction: t });
 
             // Clear dues on all orders of this customer
             for (const ord of userOrders) {
@@ -3477,10 +3486,10 @@ export const adjustPartyBalance = async (req, res) => {
             }, { transaction: t });
 
         } else if (type === 'JAMA') {
-            // ── ADVANCE JAMA: Add credit, clear all past dues ────────────────────
-            finalCreditline = parsedAmount;
+            // ── ADVANCE JAMA: Add advance credit, clear all past dues ────────────
+            finalCreditline = 0;
             finalDue = 0;
-            await user.update({ creditline: parsedAmount }, { transaction: t });
+            await user.update({ creditline: 0, advanceJama: parsedAmount, balanceType: 'JAMA' }, { transaction: t });
 
             // Clear dues on all orders
             for (const ord of userOrders) {
@@ -3506,10 +3515,10 @@ export const adjustPartyBalance = async (req, res) => {
             }, { transaction: t });
 
         } else if (type === 'DUE') {
-            // ── CUSTOMER DUE: Set credit to 0, ensure past orders have due = parsedAmount ──
-            finalCreditline = 0;
+            // ── CUSTOMER DUE: Set udhari/due balance, clear advance jama ─────────
+            finalCreditline = parsedAmount;
             finalDue = parsedAmount;
-            await user.update({ creditline: 0 }, { transaction: t });
+            await user.update({ creditline: parsedAmount, advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
 
             // Determine reference timestamp: must be earlier than the customer's earliest order or context order
             // so invoices and getAllOrders recognise it as a "PREVIOUS UNPAID BILL"

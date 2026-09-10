@@ -580,6 +580,11 @@ const runManualMigrations = async () => {
             await PartyBalanceLog.sync();
         } catch (e) { console.log('[Migration Warning] PartyBalanceLog sync failed:', e.message); }
 
+        try {
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(20) DEFAULT \'DUE\'');
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
+        } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama migration failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
 
     } catch (error) {
