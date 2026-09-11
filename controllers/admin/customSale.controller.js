@@ -85,11 +85,15 @@ export const createCustomSale = async (req, res) => {
         // Pre-fetch user's applevel and routeCategoryId if userId is provided
         let userAppLevel = null;
         let resolvedRouteCategoryId = null;
+        let resolvedCustomerName = customerName || null;
+        let resolvedCustomerNumber = customerNumber || null;
         if (userId) {
             const userObj = await User.findByPk(userId, { transaction: t });
             if (userObj) {
                 userAppLevel = userObj.applevel || null;
                 resolvedRouteCategoryId = userObj.routeCategoryId || null;
+                if (!resolvedCustomerName) resolvedCustomerName = userObj.fullname;
+                if (!resolvedCustomerNumber) resolvedCustomerNumber = userObj.number;
             }
         }
 
@@ -297,8 +301,8 @@ export const createCustomSale = async (req, res) => {
         const newSale = await Order.create({
             orderId: await generateUniqueDirectSaleId(),
             userId: userId || null,
-            customerName: userId ? null : customerName,
-            customerNumber: userId ? null : customerNumber,
+            customerName: resolvedCustomerName,
+            customerNumber: resolvedCustomerNumber,
             totalAmount: grandTotalAmount,
             paidAmount,
             dueAmount,
