@@ -3437,7 +3437,7 @@ export const adjustPartyBalance = async (req, res) => {
         }
 
         // Clean 10-digit phone number resolution
-        const cleanPhone = String(phoneNumber || user?.number || contextOrder?.customerNumber || contextOrder?.customerPhone || '').replace(/\D/g, '').slice(-10);
+        const cleanPhone = String(phoneNumber || user?.number || contextOrder?.customerNumber || '').replace(/\D/g, '').slice(-10);
 
         if (!user && cleanPhone && cleanPhone.length >= 7) {
             user = await User.findOne({
@@ -3464,7 +3464,6 @@ export const adjustPartyBalance = async (req, res) => {
         }
         if (cleanPhone && cleanPhone.length >= 7) {
             orderWhereOr.push({ customerNumber: { [Op.like]: `%${cleanPhone}` } });
-            orderWhereOr.push({ customerPhone: { [Op.like]: `%${cleanPhone}` } });
         }
         if (contextOrder && orderWhereOr.length === 0) {
             orderWhereOr.push({ id: contextOrder.id });
