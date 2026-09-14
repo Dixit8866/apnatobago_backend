@@ -185,7 +185,7 @@ export const createSalesReturn = async (req, res) => {
                 const singleUnitPrice = orderItemPrice / ordPackUnits;
                 itemPrice = parseFloat((singleUnitPrice * retPackUnits).toFixed(2));
             }
-            const returnAmount = parseFloat((returnQty * itemPrice).toFixed(2));
+            const returnAmount = Math.round(returnQty * itemPrice);
             totalReturnAmount += returnAmount;
 
             // E. Create SalesReturn Record with PENDING status
@@ -210,14 +210,15 @@ export const createSalesReturn = async (req, res) => {
 
         await t.commit();
 
-        const originalBill = parseFloat(order.totalAmount || 0);
-        const netPayable = Math.max(0, originalBill - totalReturnAmount);
+        const originalBill = Math.round(parseFloat(order.totalAmount || 0));
+        const roundedReturnAmount = Math.round(totalReturnAmount);
+        const netPayable = Math.max(0, originalBill - roundedReturnAmount);
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Sales return request submitted successfully and credited to customer.", {
             salesReturns: salesReturnEntries,
             salesReturnCalculation: {
                 billAmount: originalBill,
-                returnAmount: totalReturnAmount,
+                returnAmount: roundedReturnAmount,
                 netToCollect: netPayable
             }
         });
