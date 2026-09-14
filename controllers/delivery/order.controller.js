@@ -574,7 +574,7 @@ export const getAssignmentDetails = async (req, res) => {
             unsettledPastReturnAmount = unsettledReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
         }
 
-        const totalSalesReturnDeduction = directReturnAmount + unsettledPastReturnAmount;
+        const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
 
         // Customer Advance Jama Balance (Only true JAMA advance money, NEVER customer udhari/creditline)
         const userBalanceType = assignment.order?.user?.balanceType || 'DUE';
@@ -582,7 +582,8 @@ export const getAssignmentDetails = async (req, res) => {
         const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
         const userCreditVal = (userBalanceType === 'DUE') ? parseFloat(assignment.order?.user?.creditline || 0) : 0;
 
-        const netOrderCollectible = Math.max(0, calculatedDueAmt - totalSalesReturnDeduction);
+        const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
+        const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
         const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
         const netPayableVal = Math.max(0, totalDueAmt);
 
@@ -594,7 +595,7 @@ export const getAssignmentDetails = async (req, res) => {
         data.advanceJama = userAdvanceJama.toFixed(2);
         data.balanceType = userBalanceType;
         data.salesReturnCalculation = {
-            billAmount: fullTotal,
+            billAmount: roundedFullTotal,
             returnAmount: totalSalesReturnDeduction,
             netToCollect: netOrderCollectible
         };
