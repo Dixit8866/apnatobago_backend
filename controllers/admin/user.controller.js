@@ -174,7 +174,8 @@ export const getAllUsers = async (req, res, next) => {
                     WHERE o."userId" = "User".id
                       AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
                       AND o."deletedAt" IS NULL
-                    HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 2
+                      AND COALESCE(o."orderDate", o."createdAt") >= CURRENT_DATE - INTERVAL '2 days'
+                    HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 3
                 )`)
             ];
         } else if (status && status !== 'All') {
@@ -262,7 +263,8 @@ export const getAllUsers = async (req, res, next) => {
                             WHERE o."userId" = "User".id
                               AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
                               AND o."deletedAt" IS NULL
-                            HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 2
+                              AND COALESCE(o."orderDate", o."createdAt") >= CURRENT_DATE - INTERVAL '2 days'
+                            HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 3
                         )`)
                     ]
                 },
