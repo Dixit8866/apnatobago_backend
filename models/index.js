@@ -585,6 +585,11 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
         } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama migration failed:', e.message); }
 
+        try {
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "pastDueCollected" DECIMAL(10, 2) DEFAULT 0.00');
+            await sequelize.query('UPDATE orders SET "pastDueCollected" = 200.00 WHERE "orderId" = \'100079\' AND ("pastDueCollected" IS NULL OR "pastDueCollected" = 0)');
+        } catch (e) { console.log('[Migration Warning] Orders pastDueCollected migration failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
 
     } catch (error) {

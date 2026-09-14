@@ -1126,6 +1126,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             }
         }
 
+        let totalPastDuePaid = 0;
         for (const order of ordersToSettle) {
             let due = parseFloat(order.dueAmount);
             if (due <= 0) continue;
@@ -1157,6 +1158,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 const returnDeduction = Math.round(Math.min(remainingSalesReturn, due));
                 remainingSalesReturn -= returnDeduction;
                 due -= returnDeduction;
+                totalPastDuePaid += returnDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + returnDeduction;
                 orderNotes.push(`Paid ₹${returnDeduction} via Sales Return`);
                 paymentMethodsUsed.push('SALES_RETURN');
@@ -1167,7 +1169,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     deliveryBoyId,
                     amount: returnDeduction,
                     paymentMethod: 'SALES_RETURN',
-                    notes: `Adjusted ₹${returnDeduction} from Sales Return (Bill: ₹${order.totalAmount})`
+                    notes: `Adjusted ₹${returnDeduction} from Sales Return during delivery of Order #${assignment.order?.orderId || assignment.orderId}`
                 }, { transaction: t });
             }
 
@@ -1202,6 +1204,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 const deduction = Math.min(remainingCash, due);
                 remainingCash -= deduction;
                 due -= deduction;
+                if (order.id !== assignment.order.id) {
+                    totalPastDuePaid += deduction;
+                }
                 order.paidAmount = parseFloat(order.paidAmount) + deduction;
                 orderNotes.push(`Paid ${deduction} via Cash`);
                 paymentMethodsUsed.push('CASH');
@@ -1212,7 +1217,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     deliveryBoyId,
                     amount: deduction,
                     paymentMethod: 'CASH',
-                    notes: 'Auto-adjusted during delivery settlement'
+                    notes: order.id !== assignment.order.id
+                        ? `Auto-adjusted ₹${deduction} past due during delivery of Order #${assignment.order?.orderId || assignment.orderId}`
+                        : 'Auto-adjusted during delivery settlement'
                 }, { transaction: t });
 
                 // Restore user's credit from this cash payment
@@ -1224,6 +1231,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 const deduction = Math.min(remainingOnline, due);
                 remainingOnline -= deduction;
                 due -= deduction;
+                if (order.id !== assignment.order.id) {
+                    totalPastDuePaid += deduction;
+                }
                 order.paidAmount = parseFloat(order.paidAmount) + deduction;
                 if (onlineTransactionId) {
                     rzpId = onlineTransactionId;
@@ -1240,7 +1250,9 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     amount: deduction,
                     paymentMethod: 'ONLINE',
                     transactionId: onlineTransactionId,
-                    notes: 'Auto-adjusted during delivery settlement'
+                    notes: order.id !== assignment.order.id
+                        ? `Auto-adjusted ₹${deduction} past due during delivery of Order #${assignment.order?.orderId || assignment.orderId}`
+                        : 'Auto-adjusted during delivery settlement'
                 }, { transaction: t });
 
                 // Restore user's credit from this online payment
@@ -1343,6 +1355,11 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 finalMethod = 'SPLIT';
             }
 
+            if (order.id === assignment.order.id && totalPastDuePaid > 0) {
+                orderNotes.push(`Past Due Cleared: ₹${totalPastDuePaid}`);
+                order.pastDueCollected = totalPastDuePaid;
+            }
+
             let newNotes = order.notes ? order.notes + '\n' : '';
             if (orderNotes.length > 0) {
                 newNotes += `[${new Date().toLocaleString()}] Adjustments: ${orderNotes.join(', ')}`;
@@ -1353,6 +1370,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             await order.update({
                 paidAmount: order.paidAmount,
                 dueAmount: order.dueAmount,
+                pastDueCollected: order.pastDueCollected || 0,
                 paymentStatus: order.paymentStatus,
                 razorpayPaymentId: rzpId,
                 paymentMethod: finalMethod,

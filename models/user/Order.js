@@ -174,6 +174,10 @@ const Order = sequelize.define(
             type: DataTypes.UUID,
             allowNull: true,
         },
+        pastDueCollected: {
+            type: DataTypes.DECIMAL(10, 2),
+            defaultValue: 0,
+        },
     },
     {
         timestamps: true,
