@@ -42,9 +42,13 @@ export const createSalesReturn = async (req, res) => {
             inputItems = req.body.items;
         } else if (req.body.productId && req.body.quantity !== undefined) {
             inputItems = [{
+                id: req.body.id,
+                orderItemId: req.body.orderItemId || req.body.id,
                 productId: req.body.productId,
+                variantId: req.body.variantId,
                 volumeId: req.body.volumeId,
                 quantity: req.body.quantity,
+                price: req.body.price,
                 reason: req.body.reason
             }];
         }
@@ -82,23 +86,30 @@ export const createSalesReturn = async (req, res) => {
 
         // 4. Process each item inside the input list
         for (const item of inputItems) {
-            const { productId, volumeId, quantity, reason: itemReason } = item;
+            const {
+                productId,
+                volumeId,
+                variantId: inputVariantId,
+                orderItemId,
+                id: itemId,
+                quantity,
+                reason: itemReason
+            } = item;
 
             if (!productId || quantity === undefined || parseFloat(quantity) <= 0) {
                 await t.rollback();
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Each item must have a valid productId and quantity (> 0).");
             }
 
-            // A. Find Product Variant
-            const variantWhere = { productId };
-            if (volumeId) {
-                variantWhere.volumeId = volumeId;
-            } else {
-                variantWhere.volumeId = null;
+            // A. Find Product Variant (the variant being returned)
+            let variant = null;
+            if (inputVariantId) {
+                variant = await ProductVariant.findByPk(inputVariantId, { transaction: t });
             }
-            let variant = await ProductVariant.findOne({ where: variantWhere, transaction: t });
+            if (!variant && volumeId) {
+                variant = await ProductVariant.findOne({ where: { productId, volumeId }, transaction: t });
+            }
             if (!variant) {
-                // Fallback: try to find any variant for this product
                 variant = await ProductVariant.findOne({ where: { productId }, transaction: t });
             }
 
@@ -107,36 +118,77 @@ export const createSalesReturn = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product variant not found for Product ID ${productId}.`);
             }
 
-            // B. Find OrderItem
-            const orderItem = await OrderItem.findOne({
-                where: {
-                    orderId: order.id,
-                    productId,
-                    variantId: variant.id
-                },
-                transaction: t
-            });
+            // B. Find OrderItem in this order
+            // 1) First try finding by orderItemId/id if provided
+            let orderItem = null;
+            const targetItemId = orderItemId || itemId;
+            if (targetItemId) {
+                orderItem = await OrderItem.findOne({
+                    where: { id: targetItemId, orderId: order.id },
+                    transaction: t
+                });
+            }
+            // 2) Next try finding by matching variantId directly
+            if (!orderItem) {
+                orderItem = await OrderItem.findOne({
+                    where: {
+                        orderId: order.id,
+                        productId,
+                        variantId: variant.id
+                    },
+                    transaction: t
+                });
+            }
+            // 3) Fallback: If customer ordered Cartoon (or another variant) and is returning Unit,
+            // find the OrderItem by productId in this order
+            if (!orderItem) {
+                orderItem = await OrderItem.findOne({
+                    where: {
+                        orderId: order.id,
+                        productId
+                    },
+                    transaction: t
+                });
+            }
 
             if (!orderItem) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product/Variant ${productId} not found in this order.`);
+                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `Product ${productId} not found in this order.`);
             }
 
-            const orderedQty = parseFloat(orderItem.quantity);
+            // C. Compare ordered quantity vs returned quantity by converting both to base units
+            const orderedVariant = (orderItem.variantId === variant.id)
+                ? variant
+                : ((await ProductVariant.findByPk(orderItem.variantId, { transaction: t })) || variant);
+
+            const ordBaseUnits = Number(orderedVariant.baseUnitsPerPack || 1);
+            const ordSellingVol = Number(orderedVariant.sellingVolume || 1);
+            const ordPackUnits = (ordBaseUnits * ordSellingVol) > 0 ? (ordBaseUnits * ordSellingVol) : 1;
+            const totalOrderedUnits = parseFloat(orderItem.quantity) * ordPackUnits;
+
+            const retBaseUnits = Number(variant.baseUnitsPerPack || 1);
+            const retSellingVol = Number(variant.sellingVolume || 1);
+            const retPackUnits = (retBaseUnits * retSellingVol) > 0 ? (retBaseUnits * retSellingVol) : 1;
             const returnQty = parseFloat(quantity);
+            const totalReturnUnits = returnQty * retPackUnits;
 
-            if (returnQty > orderedQty) {
+            if (totalReturnUnits > (totalOrderedUnits + 0.001)) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Returned quantity (${returnQty}) cannot exceed ordered quantity (${orderedQty}) for Product ID ${productId}.`);
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Returned quantity (${returnQty}) exceeds ordered quantity (${orderItem.quantity}) for Product ID ${productId}.`);
             }
 
-            // C. Calculate Return Amount for this item
-            const itemPrice = parseFloat(orderItem.price);
-            const returnAmount = returnQty * itemPrice;
+            // D. Calculate Return Amount for this item
+            // If item.price was sent and > 0, use that; otherwise calculate proportional price per unit
+            let itemPrice = parseFloat(item.price || 0);
+            if (!itemPrice || itemPrice <= 0) {
+                const orderItemPrice = parseFloat(orderItem.price || 0);
+                const singleUnitPrice = orderItemPrice / ordPackUnits;
+                itemPrice = parseFloat((singleUnitPrice * retPackUnits).toFixed(2));
+            }
+            const returnAmount = parseFloat((returnQty * itemPrice).toFixed(2));
             totalReturnAmount += returnAmount;
 
-            // D. Create SalesReturn Record with PENDING status
-            // Use a prefix in reason to record whether it was sold as 'Inner' or 'Base' (avoids schema migrations)
+            // E. Create SalesReturn Record with PENDING status
             const sellUnitPrefix = orderItem.sellUnit === 'Inner' ? '[Inner]' : '[Base]';
             const salesReturnEntry = await SalesReturn.create({
                 orderId: order.id,
