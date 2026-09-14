@@ -1029,7 +1029,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         let remainingCash = parseFloat(cashAmount) || 0;
         let remainingOnline = parseFloat(onlineAmount) || 0;
         let remainingCredit = parseFloat(creditAmount) || 0;
-        let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+        let remainingSalesReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
 
         if (remainingSalesReturn === 0 && user) {
             const unadjustedReturns = await SalesReturn.findAll({
@@ -1040,7 +1040,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 },
                 transaction: t
             });
-            remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+            remainingSalesReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
         }
 
         // ─── FIX: PREVENT DOUBLE COUNTING OF ONLINE PAYMENTS ────────────────────────
@@ -1570,7 +1570,7 @@ export const settleSingleOrderPayment = async (req, res) => {
         let remainingCash = parseFloat(cashAmount) || 0;
         let remainingOnline = parseFloat(onlineAmount) || 0;
         let remainingCredit = parseFloat(creditAmount) || 0;
-        let remainingSalesReturn = parseFloat(salesReturnAmount || returnAmount || 0);
+        let remainingSalesReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
 
         if (remainingSalesReturn === 0 && user) {
             const unadjustedReturns = await SalesReturn.findAll({
@@ -1581,7 +1581,7 @@ export const settleSingleOrderPayment = async (req, res) => {
                 },
                 transaction: t
             });
-            remainingSalesReturn = unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+            remainingSalesReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
         }
 
         for (const order of orders) {
