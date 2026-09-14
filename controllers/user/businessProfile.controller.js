@@ -18,12 +18,14 @@ export const getBusinessProfile = async (req, res) => {
             return sendSuccessResponse(res, HTTP_STATUS.OK, "No business profile found.", {
                 id: null,
                 userId,
+                area: null,
                 latitude: req.user.latitude ? parseFloat(req.user.latitude) : null,
                 longitude: req.user.longitude ? parseFloat(req.user.longitude) : null
             });
         }
 
         const profileData = profile.toJSON();
+        profileData.area = profile.area || null;
         profileData.latitude = req.user.latitude ? parseFloat(req.user.latitude) : null;
         profileData.longitude = req.user.longitude ? parseFloat(req.user.longitude) : null;
 
@@ -53,8 +55,10 @@ export const upsertBusinessProfile = async (req, res) => {
         };
 
         const shopName = body.shopName;
+        const shopNameAlt = body.shopNameAlt;
         const gstNumber = body.gstNumber;
         const shopAddress = ensureString(body.shopAddress);
+        const area = body.area !== undefined ? (typeof body.area === 'object' ? JSON.stringify(body.area) : String(body.area || '').trim()) : undefined;
         const city = body.city;
         const postcode = body.postcode;
         const selectedmapad = ensureString(body.selectedmapad);
@@ -98,6 +102,8 @@ export const upsertBusinessProfile = async (req, res) => {
             postcode,
             selectedmapad
         };
+        if (shopNameAlt !== undefined) profileData.shopNameAlt = shopNameAlt;
+        if (area !== undefined) profileData.area = area;
 
         // Only update images if provided (either as URL in body or as file)
         if (bannerImage !== undefined) profileData.bannerImage = bannerImage;

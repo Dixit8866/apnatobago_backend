@@ -1013,25 +1013,12 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             });
         }
 
-        // ─── PRIORITIZE PAST DUE ORDERS ──────────────────────────────────────────────
-        // We now put past due orders and the current order in the settlement queue,
-        // and explicitly sort them chronologically (oldest first, down to milliseconds)
-        // so that payments are always applied to older bills before newer ones.
-        const ordersToSettle = [];
-        ordersToSettle.push(...pastDueOrders);
-        if (parseFloat(assignment.order.dueAmount) > 0) {
-            ordersToSettle.push(assignment.order);
-        }
+        const inputCash = parseFloat(cashAmount) || 0;
+        const inputOnline = parseFloat(onlineAmount) || 0;
+        const inputCredit = parseFloat(creditAmount) || 0;
+        let inputReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
 
-        ordersToSettle.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        // ─────────────────────────────────────────────────────────────────────────────
-
-        let remainingCash = parseFloat(cashAmount) || 0;
-        let remainingOnline = parseFloat(onlineAmount) || 0;
-        let remainingCredit = parseFloat(creditAmount) || 0;
-        let remainingSalesReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
-
-        if (remainingSalesReturn === 0 && user) {
+        if (inputReturn === 0 && user) {
             const unadjustedReturns = await SalesReturn.findAll({
                 where: {
                     userId: user.id,
@@ -1040,343 +1027,204 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                 },
                 transaction: t
             });
-            remainingSalesReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
+            inputReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
         }
 
-        // ─── FIX: PREVENT DOUBLE COUNTING OF ONLINE PAYMENTS ────────────────────────
-        let onlineAppliedToCurrent = false;
-        if (remainingOnline > 0 && onlineTransactionId && assignment.order.razorpayPaymentId === onlineTransactionId) {
-            logger.info(`[Complete Order Settle]: Online payment ${onlineTransactionId} already reflected. Checking for existing payment entry...`);
+        const totalPastDue = pastDueOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+        const currentBillTotal = parseFloat(assignment.order.totalAmount || 0);
+        const netBill = Math.max(0, currentBillTotal - finalCouponDisc);
 
-            // Check if the payment entry was already recorded by verifyRazorpayPayment
-            const existingPayment = await OrderPayment.findOne({
-                where: {
-                    transactionId: onlineTransactionId,
-                    paymentMethod: 'ONLINE'
-                },
+        // Calculate how much past due is settled:
+        // Money used for current bill = Math.max(0, netBill - inputCredit)
+        // Remainder of cash/online goes to settle past due:
+        const currentBillCashOnlineNeeded = Math.max(0, netBill - inputReturn - inputCredit);
+        const totalCashOnlineCollected = inputCash + inputOnline;
+        const pastDueSettled = Math.min(totalPastDue, Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded));
+
+        // 1. Settle past due orders:
+        let remainingToClearPast = pastDueSettled;
+        for (const pOrder of pastDueOrders) {
+            if (remainingToClearPast <= 0) break;
+            const pDue = parseFloat(pOrder.dueAmount);
+            if (pDue <= 0) continue;
+            const clearAmt = Math.min(pDue, remainingToClearPast);
+            remainingToClearPast -= clearAmt;
+            pOrder.dueAmount = Math.max(0, pDue - clearAmt);
+            pOrder.paidAmount = parseFloat(pOrder.paidAmount || 0) + clearAmt;
+            pOrder.paymentStatus = pOrder.dueAmount <= 1e-7 ? 'Paid' : 'Partial';
+            await pOrder.save({ transaction: t });
+
+            await OrderPayment.create({
+                orderId: pOrder.id,
+                deliveryBoyId,
+                amount: clearAmt,
+                paymentMethod: 'CASH',
+                notes: `Auto-adjusted ₹${clearAmt} past due during delivery of Order #${assignment.order.orderId || assignment.orderId}`
+            }, { transaction: t });
+
+            await restoreUserCreditFromPayment(pOrder.id, clearAmt, user, t);
+        }
+
+        // 2. Create SalesReturn records if provided:
+        const returnItemsList = salesReturnItems || returnItems;
+        if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
+            for (const rItem of returnItemsList) {
+                if (rItem.productId && Number(rItem.quantity) > 0) {
+                    const rPrice = parseFloat(rItem.price || 0);
+                    const rQty = Number(rItem.quantity);
+                    const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
+                    await SalesReturn.create({
+                        orderId: assignment.order.id,
+                        userId: assignment.order.userId,
+                        deliveryBoyId,
+                        productId: rItem.productId,
+                        variantId: rItem.variantId || null,
+                        volumeId: rItem.volumeId || null,
+                        quantity: rQty,
+                        price: rPrice,
+                        returnAmount: rAmt,
+                        reason: rItem.reason || 'Customer Return at Delivery',
+                        status: 'Pending',
+                        creditProcessed: true
+                    }, { transaction: t });
+                }
+            }
+        }
+        if (user && inputReturn > 0) {
+            await SalesReturn.update(
+                { creditProcessed: true },
+                {
+                    where: {
+                        userId: user.id,
+                        creditProcessed: false,
+                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                    },
+                    transaction: t
+                }
+            );
+        }
+
+        // 3. Record true payments ON CURRENT ASSIGNMENT ORDER:
+        // Cash payment record
+        if (inputCash > 0) {
+            const existingCash = await OrderPayment.findOne({
+                where: { orderId: assignment.order.id, paymentMethod: 'CASH' },
                 transaction: t
             });
-
-            if (!existingPayment) {
-                logger.info(`[Complete Order Settle]: Recording missing payment entry for online txn ${onlineTransactionId}`);
+            if (existingCash) {
+                await existingCash.update({ amount: inputCash }, { transaction: t });
+            } else {
                 await OrderPayment.create({
                     orderId: assignment.order.id,
                     deliveryBoyId,
-                    amount: remainingOnline,
-                    paymentMethod: 'ONLINE',
-                    transactionId: onlineTransactionId,
-                    notes: 'Recorded during delivery settlement (already verified)'
-                }, { transaction: t });
-
-                // Restore user's credit from this online payment only if we recorded it now
-                await restoreUserCreditFromPayment(assignment.order.id, remainingOnline, user, t);
-            } else {
-                logger.info(`[Complete Order Settle]: Payment entry for online txn ${onlineTransactionId} already exists. Skipping duplicate creation and credit restoration.`);
-            }
-
-            // Mark that online was applied so we can include it in paymentMethodsUsed later
-            onlineAppliedToCurrent = true;
-            // Reset to 0 so the loop below doesn't subtract it again from the dueAmount
-            remainingOnline = 0;
-        }
-        // ─── DIRECT BANK TRANSFER DOUBLE-COUNTING PREVENTION ──────────────────────
-        // Check if there is an existing, pending Direct Bank Transfer payment for this order
-        const existingBankPayment = await OrderPayment.findOne({
-            where: {
-                orderId: assignment.order.id,
-                paymentMethod: 'ONLINE',
-                onlineType: 'Bank Account'
-            },
-            transaction: t
-        });
-        // ─────────────────────────────────────────────────────────────────────────────
-
-        // ─── 1. APPLY SALES RETURN TO CURRENT ASSIGNMENT ORDER FIRST ─────────────────
-        // The return goods were handed over during this delivery visit, so the return
-        // deduction belongs to this order first. This ensures the admin sees the full return
-        // amount (e.g. ₹217) directly on this bill without fragmentation into past orders.
-        if (remainingSalesReturn > 0 && parseFloat(assignment.order.dueAmount) > 0) {
-            const curDue = parseFloat(assignment.order.dueAmount);
-            const returnDeduction = Math.round(Math.min(remainingSalesReturn, curDue));
-            remainingSalesReturn -= returnDeduction;
-            assignment.order.dueAmount = Math.max(0, curDue - returnDeduction);
-            assignment.order.paidAmount = parseFloat(assignment.order.paidAmount || 0) + returnDeduction;
-
-            logger.info(`[Complete Order Settle]: Creating SALES_RETURN payment for current order ${assignment.order.id}, amount ${returnDeduction}, delivery boy ${deliveryBoyId}`);
-            await OrderPayment.create({
-                orderId: assignment.order.id,
-                deliveryBoyId,
-                amount: returnDeduction,
-                paymentMethod: 'SALES_RETURN',
-                notes: `Adjusted ₹${returnDeduction} from Sales Return (Bill: ₹${assignment.order.totalAmount})`
-            }, { transaction: t });
-
-            if (user) {
-                await SalesReturn.update(
-                    { creditProcessed: true },
-                    {
-                        where: {
-                            userId: user.id,
-                            creditProcessed: false,
-                            status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                        },
-                        transaction: t
-                    }
-                );
-            }
-        }
-
-        let totalPastDuePaid = 0;
-        for (const order of ordersToSettle) {
-            let due = parseFloat(order.dueAmount);
-            if (due <= 0) continue;
-
-            let orderNotes = [];
-            let paymentMethodsUsed = [];
-
-            // Apply existing bank transfer payment first to reduce due amount without creating a duplicate payment entry
-            if (order.id === assignment.order.id && existingBankPayment) {
-                const appliedAmt = Math.min(parseFloat(existingBankPayment.amount), due);
-                due -= appliedAmt;
-                order.paidAmount = parseFloat(order.paidAmount) + appliedAmt;
-                orderNotes.push(`Paid ${appliedAmt} via Direct Bank Transfer (Awaiting Verification)`);
-                paymentMethodsUsed.push('ONLINE');
-                remainingOnline = Math.max(0, remainingOnline - appliedAmt);
-                logger.info(`[Complete Order Settle]: Applied existing bank transfer payment of ${appliedAmt} to order ${order.id}.`);
-            }
-
-            // If this is the current order and online was already applied, include it in methods and notes
-            if (order.id === assignment.orderId && onlineAppliedToCurrent) {
-                paymentMethodsUsed.push('ONLINE');
-                orderNotes.push(`Paid ${onlineAmount} via Online (Already Verified)`);
-            }
-
-            let rzpId = order.razorpayPaymentId;
-
-            // Handle direct Sales Return deduction if any excess return remains (e.g. return > current bill)
-            if (remainingSalesReturn > 0 && due > 0 && order.id !== assignment.order.id) {
-                const returnDeduction = Math.round(Math.min(remainingSalesReturn, due));
-                remainingSalesReturn -= returnDeduction;
-                due -= returnDeduction;
-                totalPastDuePaid += returnDeduction;
-                order.paidAmount = parseFloat(order.paidAmount) + returnDeduction;
-                orderNotes.push(`Paid ₹${returnDeduction} via Sales Return`);
-                paymentMethodsUsed.push('SALES_RETURN');
-
-                logger.info(`[Complete Order Settle]: Creating SALES_RETURN payment for past order ${order.id}, amount ${returnDeduction}, delivery boy ${deliveryBoyId}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: returnDeduction,
-                    paymentMethod: 'SALES_RETURN',
-                    notes: `Adjusted ₹${returnDeduction} from Sales Return during delivery of Order #${assignment.order?.orderId || assignment.orderId}`
-                }, { transaction: t });
-            }
-
-                // Create SalesReturn items if provided in payload
-                const returnItemsList = salesReturnItems || returnItems;
-                if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
-                    for (const rItem of returnItemsList) {
-                        if (rItem.productId && Number(rItem.quantity) > 0) {
-                            const rPrice = parseFloat(rItem.price || 0);
-                            const rQty = Number(rItem.quantity);
-                            const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
-                            await SalesReturn.create({
-                                orderId: order.id,
-                                userId: order.userId,
-                                deliveryBoyId,
-                                productId: rItem.productId,
-                                variantId: rItem.variantId || null,
-                                volumeId: rItem.volumeId || null,
-                                quantity: rQty,
-                                price: rPrice,
-                                returnAmount: rAmt,
-                                reason: rItem.reason || 'Customer Return at Delivery',
-                                status: 'Pending',
-                                creditProcessed: true
-                            }, { transaction: t });
-                        }
-                    }
-                }
-
-            // Try Cash
-            if (remainingCash > 0 && due > 0) {
-                const deduction = Math.min(remainingCash, due);
-                remainingCash -= deduction;
-                due -= deduction;
-                if (order.id !== assignment.order.id) {
-                    totalPastDuePaid += deduction;
-                }
-                order.paidAmount = parseFloat(order.paidAmount) + deduction;
-                orderNotes.push(`Paid ${deduction} via Cash`);
-                paymentMethodsUsed.push('CASH');
-
-                logger.info(`[Complete Order Settle]: Creating CASH payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: deduction,
+                    amount: inputCash,
                     paymentMethod: 'CASH',
-                    notes: order.id !== assignment.order.id
-                        ? `Auto-adjusted ₹${deduction} past due during delivery of Order #${assignment.order?.orderId || assignment.orderId}`
-                        : 'Auto-adjusted during delivery settlement'
+                    notes: 'Cash collected during delivery'
                 }, { transaction: t });
-
-                // Restore user's credit from this cash payment
-                await restoreUserCreditFromPayment(order.id, deduction, user, t);
             }
+        }
 
-            // Try Online
-            if (remainingOnline > 0 && due > 0) {
-                const deduction = Math.min(remainingOnline, due);
-                remainingOnline -= deduction;
-                due -= deduction;
-                if (order.id !== assignment.order.id) {
-                    totalPastDuePaid += deduction;
-                }
-                order.paidAmount = parseFloat(order.paidAmount) + deduction;
-                if (onlineTransactionId) {
-                    rzpId = onlineTransactionId;
-                    orderNotes.push(`Paid ${deduction} via Online (Txn: ${onlineTransactionId})`);
-                } else {
-                    orderNotes.push(`Paid ${deduction} via Online`);
-                }
-                paymentMethodsUsed.push('ONLINE');
-
-                logger.info(`[Complete Order Settle]: Creating ONLINE payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
+        // Online payment record
+        if (inputOnline > 0) {
+            const existingOnline = await OrderPayment.findOne({
+                where: { orderId: assignment.order.id, paymentMethod: 'ONLINE' },
+                transaction: t
+            });
+            if (existingOnline) {
+                await existingOnline.update({ amount: inputOnline, transactionId: onlineTransactionId || existingOnline.transactionId }, { transaction: t });
+            } else {
                 await OrderPayment.create({
-                    orderId: order.id,
+                    orderId: assignment.order.id,
                     deliveryBoyId,
-                    amount: deduction,
+                    amount: inputOnline,
                     paymentMethod: 'ONLINE',
                     transactionId: onlineTransactionId,
-                    notes: order.id !== assignment.order.id
-                        ? `Auto-adjusted ₹${deduction} past due during delivery of Order #${assignment.order?.orderId || assignment.orderId}`
-                        : 'Auto-adjusted during delivery settlement'
+                    notes: 'Online payment during delivery'
                 }, { transaction: t });
-
-                // Restore user's credit from this online payment
-                await restoreUserCreditFromPayment(order.id, deduction, user, t);
             }
+        }
 
-            // Try Credit (ONLY for the current order of this assignment!)
-            if (remainingCredit > 0 && due > 0 && order.id === assignment.order.id) {
-                const deduction = Math.min(remainingCredit, due);
-                remainingCredit -= deduction;
-                // Note: Credit payment represents giving goods on credit (baki), 
-                // so the order's dueAmount remains unchanged for the credit portion 
-                // and is still considered a pending due.
-                orderNotes.push(`Paid ${deduction} via Credit (Baki)`);
-                paymentMethodsUsed.push('CREDIT');
-
-                logger.info(`[Complete Order Settle]: Creating CREDIT payment for order ${order.id}, amount ${deduction}, delivery boy ${deliveryBoyId}`);
+        // Sales return payment record
+        if (inputReturn > 0) {
+            const existingReturn = await OrderPayment.findOne({
+                where: { orderId: assignment.order.id, paymentMethod: 'SALES_RETURN' },
+                transaction: t
+            });
+            if (existingReturn) {
+                await existingReturn.update({ amount: inputReturn }, { transaction: t });
+            } else {
                 await OrderPayment.create({
-                    orderId: order.id,
+                    orderId: assignment.order.id,
                     deliveryBoyId,
-                    amount: deduction,
+                    amount: inputReturn,
+                    paymentMethod: 'SALES_RETURN',
+                    notes: `Adjusted ₹${inputReturn} from Sales Return (Bill: ₹${assignment.order.totalAmount})`
+                }, { transaction: t });
+            }
+        }
+
+        // Credit payment record
+        if (inputCredit > 0) {
+            const existingCredit = await OrderPayment.findOne({
+                where: { orderId: assignment.order.id, paymentMethod: 'CREDIT' },
+                transaction: t
+            });
+            if (existingCredit) {
+                await existingCredit.update({ amount: inputCredit }, { transaction: t });
+            } else {
+                await OrderPayment.create({
+                    orderId: assignment.order.id,
+                    deliveryBoyId,
+                    amount: inputCredit,
                     paymentMethod: 'CREDIT',
                     notes: 'Goods given on credit (baki)'
                 }, { transaction: t });
+            }
 
-                // Deduct from User's creditline and block their credit if credit limit fully utilized
-                if (user) {
-                    user.creditline = Math.max(0, parseFloat(user.creditline || 0) - deduction);
-                    if (user.creditline <= 0) {
-                        user.blockcredit = true;
-                    }
+            if (user) {
+                user.creditline = Math.max(0, parseFloat(user.creditline || 0) - inputCredit);
+                if (user.creditline <= 0) {
+                    user.blockcredit = true;
                 }
             }
-
-            // Try Advance Jama Balance (only if remaining due exists and it was NOT explicitly kept on credit)
-            const currentJama = (user && user.balanceType === 'JAMA') ? Math.max(0, parseFloat(user.advanceJama || 0)) : 0;
-            if (currentJama > 0 && due > 0 && (!creditAmount || parseFloat(creditAmount) <= 0) && remainingCredit === 0) {
-                const jamaDeduction = Math.min(currentJama, due);
-                user.advanceJama = Math.max(0, currentJama - jamaDeduction);
-                if (user.advanceJama <= 0) {
-                    user.balanceType = 'CLEAR';
-                }
-                due -= jamaDeduction;
-                order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
-
-                const payMethod = 'JAMA_CREDIT';
-                const payNote = `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
-
-                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
-                paymentMethodsUsed.push(payMethod);
-
-                logger.info(`[Complete Order Settle]: Deducted ${payMethod} ${jamaDeduction} for order ${order.id}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: jamaDeduction,
-                    paymentMethod: payMethod,
-                    notes: payNote
-                }, { transaction: t });
-
-                await PartyBalanceLog.create({
-                    userId: user.id,
-                    orderId: order.id,
-                    type: 'ADJUSTMENT',
-                    amount: jamaDeduction,
-                    previousBalance: prevCredit,
-                    newBalance: newCredit,
-                    note: `Jama Balance used on Order #${order.orderId || order.id}: -₹${jamaDeduction.toFixed(2)} deducted from Jama Balance`,
-                    createdByName: 'Delivery Boy Settlement'
-                }, { transaction: t });
-            }
-
-            // Update order record
-            order.dueAmount = due;
-
-            // Synchronize existing CREDIT payment entry in OrderPayment table to match exact remaining due balance
-            const existingCreditPayment = await OrderPayment.findOne({
-                where: { orderId: order.id, paymentMethod: 'CREDIT' },
-                transaction: t
-            });
-            if (existingCreditPayment) {
-                if (due <= 1e-7) {
-                    await existingCreditPayment.destroy({ transaction: t });
-                } else {
-                    await existingCreditPayment.update({ amount: due.toFixed(2) }, { transaction: t });
-                }
-            }
-
-            let newPaymentStatus = 'Pending';
-            if (due <= 1e-7) {
-                newPaymentStatus = 'Paid';
-            }
-            order.paymentStatus = newPaymentStatus;
-
-            // Combine methods if multiple, else keep primary
-            let finalMethod = order.paymentMethod;
-            if (paymentMethodsUsed.length === 1) {
-                finalMethod = paymentMethodsUsed[0];
-            } else if (paymentMethodsUsed.length > 1) {
-                finalMethod = 'SPLIT';
-            }
-
-            if (order.id === assignment.order.id && totalPastDuePaid > 0) {
-                orderNotes.push(`Past Due Cleared: ₹${totalPastDuePaid}`);
-                order.pastDueCollected = totalPastDuePaid;
-            }
-
-            let newNotes = order.notes ? order.notes + '\n' : '';
-            if (orderNotes.length > 0) {
-                newNotes += `[${new Date().toLocaleString()}] Adjustments: ${orderNotes.join(', ')}`;
-            } else {
-                newNotes = order.notes;
-            }
-
-            await order.update({
-                paidAmount: order.paidAmount,
-                dueAmount: order.dueAmount,
-                pastDueCollected: order.pastDueCollected || 0,
-                paymentStatus: order.paymentStatus,
-                razorpayPaymentId: rzpId,
-                paymentMethod: finalMethod,
-                notes: newNotes
-            }, { transaction: t });
         }
+
+        // Update current order balances:
+        assignment.order.dueAmount = inputCredit.toFixed(2);
+        const actualPaidOnThisBill = Math.max(0, netBill - inputCredit);
+        assignment.order.paidAmount = actualPaidOnThisBill.toFixed(2);
+        assignment.order.pastDueCollected = pastDueSettled.toFixed(2);
+        assignment.order.paymentStatus = inputCredit <= 1e-7 ? 'Paid' : 'Partial';
+
+        const paymentMethodsUsed = [];
+        if (inputCash > 0) paymentMethodsUsed.push('CASH');
+        if (inputOnline > 0) paymentMethodsUsed.push('ONLINE');
+        if (inputCredit > 0) paymentMethodsUsed.push('CREDIT');
+        if (inputReturn > 0) paymentMethodsUsed.push('SALES_RETURN');
+
+        if (paymentMethodsUsed.length === 1) {
+            assignment.order.paymentMethod = paymentMethodsUsed[0];
+        } else if (paymentMethodsUsed.length > 1) {
+            assignment.order.paymentMethod = 'SPLIT';
+        }
+
+        const orderNotes = [];
+        if (inputCash > 0) orderNotes.push(`Paid ${inputCash} via Cash`);
+        if (inputOnline > 0) orderNotes.push(`Paid ${inputOnline} via Online`);
+        if (inputReturn > 0) orderNotes.push(`Paid ₹${inputReturn} via Sales Return`);
+        if (inputCredit > 0) orderNotes.push(`Paid ${inputCredit} via Credit (Baki)`);
+        if (pastDueSettled > 0) orderNotes.push(`Past Due Cleared: ₹${pastDueSettled}`);
+
+        let newNotes = assignment.order.notes ? assignment.order.notes + '\n' : '';
+        if (orderNotes.length > 0) {
+            newNotes += `[${new Date().toLocaleString()}] Adjustments: ${orderNotes.join(', ')}`;
+        }
+        assignment.order.notes = newNotes;
+        await assignment.order.save({ transaction: t });
+
+        let remainingCash = Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded - pastDueSettled);
+        let remainingOnline = 0;
+        let remainingSalesReturn = Math.max(0, inputReturn - netBill);
 
         if (user) {
             const excessCashOnline = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);

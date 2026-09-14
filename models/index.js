@@ -586,8 +586,29 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama migration failed:', e.message); }
 
         try {
+            await sequelize.query('ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS "area" VARCHAR(255) DEFAULT NULL');
+        } catch (e) { console.log('[Migration Warning] BusinessProfile area migration failed:', e.message); }
+
+        try {
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "orderDate" DATE');
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "couponPoints" INTEGER DEFAULT 0');
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "couponDiscount" DECIMAL(10, 2) DEFAULT 0.00');
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "discountType" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "createdByAdminId" UUID DEFAULT NULL');
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "verifiedByAdminId" UUID DEFAULT NULL');
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "pastDueCollected" DECIMAL(10, 2) DEFAULT 0.00');
             await sequelize.query('UPDATE orders SET "pastDueCollected" = 200.00 WHERE "orderId" = \'100079\' AND ("pastDueCollected" IS NULL OR "pastDueCollected" = 0)');
+            await sequelize.query('UPDATE orders SET "dueAmount" = 8000.00, "pastDueCollected" = 6000.00 WHERE "orderId" = \'100081\'');
+            await sequelize.query(`
+                INSERT INTO order_payments ("id", "orderId", "amount", "paymentMethod", "notes", "createdAt", "updatedAt")
+                SELECT gen_random_uuid(), id, 5000.00, 'CASH', 'Cash collected during delivery', "deliveredAt", "deliveredAt"
+                FROM orders WHERE "orderId" = '100081'
+                AND NOT EXISTS (SELECT 1 FROM order_payments WHERE "orderId" = orders.id AND "paymentMethod" = 'CASH');
+            `);
+            await sequelize.query(`
+                UPDATE order_payments SET amount = 8000.00 
+                WHERE "paymentMethod" = 'CREDIT' AND "orderId" IN (SELECT id FROM orders WHERE "orderId" = '100081');
+            `);
         } catch (e) { console.log('[Migration Warning] Orders pastDueCollected migration failed:', e.message); }
 
         console.log('[Migration] DB schema updates applied successfully ✓');

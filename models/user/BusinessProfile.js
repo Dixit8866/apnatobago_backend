@@ -50,6 +50,10 @@ const BusinessProfile = sequelize.define(
             type: DataTypes.TEXT,
             allowNull: true,
         },
+        area: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
     },
     {
         timestamps: true,

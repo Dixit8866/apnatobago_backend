@@ -76,7 +76,7 @@ export const createUser = async (req, res, next) => {
         });
 
         // Handle Business Profile if provided
-        const { shopName, shopNameAlt, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
+        const { shopName, shopNameAlt, gstNumber, shopAddress, businessCity, businessPostcode, area, businessArea } = req.body;
         if (shopName || shopAddress) {
             await BusinessProfile.create({
                 userId: user.id,
@@ -84,6 +84,7 @@ export const createUser = async (req, res, next) => {
                 shopNameAlt: shopNameAlt || '',
                 gstNumber,
                 shopAddress: shopAddress || city || '',
+                area: area || businessArea || null,
                 city: businessCity || city || '',
                 postcode: businessPostcode || postcode || '',
             });
@@ -353,8 +354,9 @@ export const updateUser = async (req, res, next) => {
         await user.update(updateData);
 
         // Handle Business Profile update
-        const { shopName, shopNameAlt, gstNumber, shopAddress, businessCity, businessPostcode } = req.body;
-        if (shopName || shopNameAlt || shopAddress || gstNumber || businessCity || businessPostcode) {
+        const { shopName, shopNameAlt, gstNumber, shopAddress, businessCity, businessPostcode, area, businessArea } = req.body;
+        const targetArea = area !== undefined ? area : (businessArea !== undefined ? businessArea : undefined);
+        if (shopName || shopNameAlt || shopAddress || gstNumber || businessCity || businessPostcode || targetArea !== undefined) {
             const [profile, created] = await BusinessProfile.findOrCreate({
                 where: { userId: user.id },
                 defaults: {
@@ -362,20 +364,23 @@ export const updateUser = async (req, res, next) => {
                     shopNameAlt: shopNameAlt || '',
                     gstNumber,
                     shopAddress: shopAddress || user.city || '',
+                    area: targetArea || null,
                     city: businessCity || user.city || '',
                     postcode: businessPostcode || user.postcode || '',
                 }
             });
 
             if (!created) {
-                await profile.update({
+                const profileUpdates = {
                     shopName: shopName ?? profile.shopName,
                     shopNameAlt: shopNameAlt ?? profile.shopNameAlt,
                     gstNumber: gstNumber ?? profile.gstNumber,
                     shopAddress: shopAddress ?? profile.shopAddress,
                     city: businessCity ?? profile.city,
                     postcode: businessPostcode ?? profile.postcode,
-                });
+                };
+                if (targetArea !== undefined) profileUpdates.area = targetArea;
+                await profile.update(profileUpdates);
             }
         }
 
