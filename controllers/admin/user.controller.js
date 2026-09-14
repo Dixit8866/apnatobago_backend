@@ -1,4 +1,5 @@
 import { Op } from 'sequelize';
+import sequelize from '../../config/db.js';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
 import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown } from '../../models/index.js';
@@ -131,14 +132,60 @@ export const getAllUsers = async (req, res, next) => {
         if (deliveryRoundTiming) searchWhere.deliveryRoundTiming = deliveryRoundTiming;
         if (godownId) searchWhere.godownId = godownId;
 
+        const CANCELLED_STATUSES = "'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'";
         const where = { ...searchWhere };
-        if (status) where.status = status;
+
+        if (status === 'Kyc Pending') {
+            where[Op.and] = [
+                ...(where[Op.and] || []),
+                {
+                    [Op.or]: [
+                        { kycverification: { [Op.ne]: 'verified' } },
+                        { kycverification: null }
+                    ]
+                }
+            ];
+        } else if (status === 'Non Order') {
+            where[Op.and] = [
+                ...(where[Op.and] || []),
+                { kycverification: 'verified' },
+                sequelize.literal(`NOT EXISTS (
+                    SELECT 1 FROM orders o
+                    WHERE o."userId" = "User".id
+                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                      AND o."deletedAt" IS NULL
+                )`)
+            ];
+        } else if (status === 'Start Order') {
+            where[Op.and] = [
+                ...(where[Op.and] || []),
+                sequelize.literal(`EXISTS (
+                    SELECT 1 FROM orders o
+                    WHERE o."userId" = "User".id
+                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                      AND o."deletedAt" IS NULL
+                )`)
+            ];
+        } else if (status === 'Daily Order') {
+            where[Op.and] = [
+                ...(where[Op.and] || []),
+                sequelize.literal(`EXISTS (
+                    SELECT 1 FROM orders o
+                    WHERE o."userId" = "User".id
+                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                      AND o."deletedAt" IS NULL
+                    HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 2
+                )`)
+            ];
+        } else if (status && status !== 'All') {
+            where.status = status;
+        }
 
         const include = [
             {
                 model: BusinessProfile,
                 as: 'businessProfile',
-                attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
+                attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'area', 'postcode']
             },
             {
                 model: RouteCategory,
@@ -152,14 +199,92 @@ export const getAllUsers = async (req, res, next) => {
             }
         ];
 
-        // Parallel status counts (search and KYC aware, not status-filtered)
-        const [totalCount, activeCount, inactiveCount, deletedCount] = await Promise.all([
+        // Parallel status counts (All, Kyc Pending, Non Order, Start Order, Daily Order)
+        const [
+            totalCount,
+            kycPendingCount,
+            nonOrderCount,
+            startOrderCount,
+            dailyOrderCount,
+            activeCount,
+            inactiveCount,
+            deletedCount
+        ] = await Promise.all([
             User.count({ where: searchWhere, include, distinct: true }),
+            User.count({
+                where: {
+                    ...searchWhere,
+                    [Op.or]: [
+                        { kycverification: { [Op.ne]: 'verified' } },
+                        { kycverification: null }
+                    ]
+                },
+                include,
+                distinct: true
+            }),
+            User.count({
+                where: {
+                    ...searchWhere,
+                    kycverification: 'verified',
+                    [Op.and]: [
+                        sequelize.literal(`NOT EXISTS (
+                            SELECT 1 FROM orders o
+                            WHERE o."userId" = "User".id
+                              AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                              AND o."deletedAt" IS NULL
+                        )`)
+                    ]
+                },
+                include,
+                distinct: true
+            }),
+            User.count({
+                where: {
+                    ...searchWhere,
+                    [Op.and]: [
+                        sequelize.literal(`EXISTS (
+                            SELECT 1 FROM orders o
+                            WHERE o."userId" = "User".id
+                              AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                              AND o."deletedAt" IS NULL
+                        )`)
+                    ]
+                },
+                include,
+                distinct: true
+            }),
+            User.count({
+                where: {
+                    ...searchWhere,
+                    [Op.and]: [
+                        sequelize.literal(`EXISTS (
+                            SELECT 1 FROM orders o
+                            WHERE o."userId" = "User".id
+                              AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                              AND o."deletedAt" IS NULL
+                            HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 2
+                        )`)
+                    ]
+                },
+                include,
+                distinct: true
+            }),
             User.count({ where: { ...searchWhere, status: 'Active' }, include, distinct: true }),
             User.count({ where: { ...searchWhere, status: 'Inactive' }, include, distinct: true }),
             User.count({ where: { ...searchWhere, status: 'Deleted' }, include, distinct: true }),
         ]);
-        const statusCounts = { '': totalCount, Active: activeCount, Inactive: inactiveCount, Deleted: deletedCount };
+
+        const statusCounts = {
+            '': totalCount,
+            'All': totalCount,
+            'Kyc Pending': kycPendingCount,
+            'Non Order': nonOrderCount,
+            'Start Order': startOrderCount,
+            'Daily Order': dailyOrderCount,
+            Active: activeCount,
+            Inactive: inactiveCount,
+            Deleted: deletedCount
+        };
 
         // Calculate user counts by routeCategory for the currently active tab status, search and KYC status filters
         const routeCountWhere = { ...where };
@@ -227,10 +352,26 @@ export const getAllUsers = async (req, res, next) => {
             });
         }
 
+        const queryAttributes = {
+            exclude: ['password', 'logintoken', 'fcmtoken'],
+            include: [
+                [
+                    sequelize.literal(`(
+                        SELECT COUNT(o.id)
+                        FROM orders o
+                        WHERE o."userId" = "User".id
+                          AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                          AND o."deletedAt" IS NULL
+                    )`),
+                    'orderCount'
+                ]
+            ]
+        };
+
         if (req.query.paginate === 'false') {
             const users = await User.findAll({ 
                 where, 
-                attributes: SAFE_ATTRIBUTES, 
+                attributes: queryAttributes, 
                 include,
                 order: [['createdAt', 'DESC']]
             });
@@ -239,7 +380,7 @@ export const getAllUsers = async (req, res, next) => {
 
         const { count, rows } = await User.findAndCountAll({
             where,
-            attributes: SAFE_ATTRIBUTES,
+            attributes: queryAttributes,
             include,
             limit: limitOptions,
             offset,
