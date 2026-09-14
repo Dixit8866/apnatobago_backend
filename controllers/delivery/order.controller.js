@@ -1091,6 +1091,41 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         });
         // ─────────────────────────────────────────────────────────────────────────────
 
+        // ─── 1. APPLY SALES RETURN TO CURRENT ASSIGNMENT ORDER FIRST ─────────────────
+        // The return goods were handed over during this delivery visit, so the return
+        // deduction belongs to this order first. This ensures the admin sees the full return
+        // amount (e.g. ₹217) directly on this bill without fragmentation into past orders.
+        if (remainingSalesReturn > 0 && parseFloat(assignment.order.dueAmount) > 0) {
+            const curDue = parseFloat(assignment.order.dueAmount);
+            const returnDeduction = Math.round(Math.min(remainingSalesReturn, curDue));
+            remainingSalesReturn -= returnDeduction;
+            assignment.order.dueAmount = Math.max(0, curDue - returnDeduction);
+            assignment.order.paidAmount = parseFloat(assignment.order.paidAmount || 0) + returnDeduction;
+
+            logger.info(`[Complete Order Settle]: Creating SALES_RETURN payment for current order ${assignment.order.id}, amount ${returnDeduction}, delivery boy ${deliveryBoyId}`);
+            await OrderPayment.create({
+                orderId: assignment.order.id,
+                deliveryBoyId,
+                amount: returnDeduction,
+                paymentMethod: 'SALES_RETURN',
+                notes: `Adjusted ₹${returnDeduction} from Sales Return (Bill: ₹${assignment.order.totalAmount})`
+            }, { transaction: t });
+
+            if (user) {
+                await SalesReturn.update(
+                    { creditProcessed: true },
+                    {
+                        where: {
+                            userId: user.id,
+                            creditProcessed: false,
+                            status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                        },
+                        transaction: t
+                    }
+                );
+            }
+        }
+
         for (const order of ordersToSettle) {
             let due = parseFloat(order.dueAmount);
             if (due <= 0) continue;
@@ -1117,39 +1152,24 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
             let rzpId = order.razorpayPaymentId;
 
-            // Handle direct Sales Return deduction if available
-
-            if (remainingSalesReturn > 0 && due > 0) {
-                const returnDeduction = Math.min(remainingSalesReturn, due);
+            // Handle direct Sales Return deduction if any excess return remains (e.g. return > current bill)
+            if (remainingSalesReturn > 0 && due > 0 && order.id !== assignment.order.id) {
+                const returnDeduction = Math.round(Math.min(remainingSalesReturn, due));
                 remainingSalesReturn -= returnDeduction;
                 due -= returnDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + returnDeduction;
-                orderNotes.push(`Paid ₹${returnDeduction.toFixed(2)} via Sales Return`);
+                orderNotes.push(`Paid ₹${returnDeduction} via Sales Return`);
                 paymentMethodsUsed.push('SALES_RETURN');
 
-                logger.info(`[Complete Order Settle]: Creating SALES_RETURN payment for order ${order.id}, amount ${returnDeduction}, delivery boy ${deliveryBoyId}`);
+                logger.info(`[Complete Order Settle]: Creating SALES_RETURN payment for past order ${order.id}, amount ${returnDeduction}, delivery boy ${deliveryBoyId}`);
                 await OrderPayment.create({
                     orderId: order.id,
                     deliveryBoyId,
                     amount: returnDeduction,
                     paymentMethod: 'SALES_RETURN',
-                    notes: `Adjusted ₹${returnDeduction.toFixed(2)} from Sales Return (Bill: ₹${order.totalAmount})`
+                    notes: `Adjusted ₹${returnDeduction} from Sales Return (Bill: ₹${order.totalAmount})`
                 }, { transaction: t });
-
-                // Mark any unadjusted returns for this user as creditProcessed = true
-                if (user) {
-                    await SalesReturn.update(
-                        { creditProcessed: true },
-                        {
-                            where: {
-                                userId: user.id,
-                                creditProcessed: false,
-                                status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                            },
-                            transaction: t
-                        }
-                    );
-                }
+            }
 
                 // Create SalesReturn items if provided in payload
                 const returnItemsList = salesReturnItems || returnItems;
@@ -1176,7 +1196,6 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                         }
                     }
                 }
-            }
 
             // Try Cash
             if (remainingCash > 0 && due > 0) {
