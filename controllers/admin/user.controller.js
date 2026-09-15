@@ -12,7 +12,7 @@ const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
 export const createUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
 
         if (!fullname || !number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Fullname, number, and password are required.');
@@ -87,6 +87,8 @@ export const createUser = async (req, res, next) => {
             latitude: (latitude === '' || latitude === undefined || latitude === null) ? null : parseFloat(latitude),
             longitude: (longitude === '' || longitude === undefined || longitude === null) ? null : parseFloat(longitude),
             godownId: targetGodownId,
+            billPrintTime: (billPrintTime === '' || billPrintTime === 'none') ? null : billPrintTime,
+            minimumOrderValue: minimumOrderValue ? parseFloat(minimumOrderValue) : 0,
         });
 
         // Handle Business Profile if provided
@@ -447,7 +449,7 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
@@ -514,6 +516,8 @@ export const updateUser = async (req, res, next) => {
             latitude: (latitude === '' || latitude === undefined) ? (latitude === '' ? null : user.latitude) : (latitude === null ? null : parseFloat(latitude)),
             longitude: (longitude === '' || longitude === undefined) ? (longitude === '' ? null : user.longitude) : (longitude === null ? null : parseFloat(longitude)),
             godownId: (godownId === '' || godownId === undefined) ? (godownId === '' ? null : user.godownId) : godownId,
+            billPrintTime: billPrintTime !== undefined ? ((billPrintTime === '' || billPrintTime === 'none') ? null : billPrintTime) : user.billPrintTime,
+            minimumOrderValue: minimumOrderValue !== undefined ? (minimumOrderValue === '' ? 0 : parseFloat(minimumOrderValue)) : user.minimumOrderValue,
         };
         if (password) updateData.password = password;
 

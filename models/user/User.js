@@ -129,6 +129,15 @@ const User = sequelize.define('User', {
         type: DataTypes.STRING,
         allowNull: true,
     },
+    billPrintTime: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    minimumOrderValue: {
+        type: DataTypes.DECIMAL(10, 2),
+        defaultValue: 0.00,
+        allowNull: true,
+    },
     credit: {
         type: DataTypes.VIRTUAL,
         get() {

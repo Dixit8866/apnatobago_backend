@@ -583,7 +583,9 @@ const runManualMigrations = async () => {
         try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(20) DEFAULT \'DUE\'');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
-        } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama migration failed:', e.message); }
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "billPrintTime" VARCHAR(50) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "minimumOrderValue" DECIMAL(10, 2) DEFAULT 0.00');
+        } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama/billPrintTime/minimumOrderValue migration failed:', e.message); }
 
         try {
             await sequelize.query('ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS "area" VARCHAR(255) DEFAULT NULL');
