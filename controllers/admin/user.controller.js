@@ -366,6 +366,16 @@ export const getAllUsers = async (req, res, next) => {
                           AND o."deletedAt" IS NULL
                     )`),
                     'orderCount'
+                ],
+                [
+                    sequelize.literal(`(
+                        SELECT MAX(COALESCE(o."orderDate", o."createdAt"))
+                        FROM orders o
+                        WHERE o."userId" = "User".id
+                          AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                          AND o."deletedAt" IS NULL
+                    )`),
+                    'lastOrderDate'
                 ]
             ]
         };
