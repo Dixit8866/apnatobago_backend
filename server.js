@@ -20,6 +20,7 @@ initReminderCron();
 import Admin from './models/superadmin-models/Admin.js';
 import Godown from './models/superadmin-models/Godown.js';
 import GodownStaff from './models/superadmin-models/GodownStaff.js';
+import User from './models/user/User.js';
 
 // ─── Seed Admin Function ──────────────────────────────────────────────────────
 const seedAdmin = async () => {
@@ -78,6 +79,19 @@ const seedGodownAdmin = async () => {
                 existing.password = 'godownadmin@gmail.com';
                 await existing.save();
             }
+        }
+
+        // 3. Auto-assign Master Godown to any existing users who have no godown assigned
+        try {
+            const [updatedCount] = await User.update(
+                { godownId: masterGodown.id },
+                { where: { godownId: null } }
+            );
+            if (updatedCount > 0) {
+                console.log(`[Seed] Auto-assigned Master Godown to ${updatedCount} existing users with no godown.`);
+            }
+        } catch (userGodownErr) {
+            console.error('[Seed Error] Failed to auto-assign Master Godown to users:', userGodownErr.message);
         }
     } catch (error) {
         console.error('[Seed Error] Failed to seed godown admin:', error.message);

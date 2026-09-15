@@ -147,6 +147,26 @@ const User = sequelize.define('User', {
                 const salt = await bcrypt.genSalt(10);
                 user.password = await bcrypt.hash(user.password, salt);
             }
+            if (!user.godownId) {
+                try {
+                    const Godown = sequelize.models.Godown;
+                    if (Godown) {
+                        const masterGodown = await Godown.findOne({
+                            where: { type: 'main' }
+                        }) || await Godown.findOne({
+                            where: { name: 'Master Godown' }
+                        }) || await Godown.findOne({
+                            where: { status: 'Active' },
+                            order: [['createdAt', 'ASC']]
+                        });
+                        if (masterGodown) {
+                            user.godownId = masterGodown.id;
+                        }
+                    }
+                } catch (e) {
+                    console.error('[User beforeCreate Godown Error]:', e.message);
+                }
+            }
         },
         beforeUpdate: async (user) => {
             if (user.changed('password')) {

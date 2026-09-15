@@ -58,6 +58,19 @@ export const createUser = async (req, res, next) => {
             }
         }
 
+        let targetGodownId = godownId || null;
+        if (!targetGodownId) {
+            const masterGodown = await Godown.findOne({
+                where: { type: 'main', status: { [Op.ne]: 'Deleted' } }
+            }) || await Godown.findOne({
+                where: { name: 'Master Godown' }
+            }) || await Godown.findOne({
+                where: { status: 'Active' },
+                order: [['createdAt', 'ASC']]
+            });
+            if (masterGodown) targetGodownId = masterGodown.id;
+        }
+
         const user = await User.create({
             fullname, email, dialcode: dialcode || '+91', number, city, postcode, password,
             showtabacco: showtabacco ?? false,
@@ -73,7 +86,7 @@ export const createUser = async (req, res, next) => {
             reminderTime: '09:00 PM',
             latitude: (latitude === '' || latitude === undefined || latitude === null) ? null : parseFloat(latitude),
             longitude: (longitude === '' || longitude === undefined || longitude === null) ? null : parseFloat(longitude),
-            godownId: godownId || null,
+            godownId: targetGodownId,
         });
 
         // Handle Business Profile if provided

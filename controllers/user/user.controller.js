@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { User, OTP, CustomLevel, Order } from '../../models/index.js';
+import { User, OTP, CustomLevel, Order, Godown } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import { addFcmToken, removeFcmToken } from '../../utils/fcmHelper.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -9,6 +9,26 @@ import axios from 'axios';
 import { Op } from 'sequelize';
 import dotenv from 'dotenv';
 dotenv.config();
+
+/**
+ * Helper to fetch Master Godown ID
+ */
+const getMasterGodownId = async () => {
+    try {
+        const masterGodown = await Godown.findOne({
+            where: { type: 'main', status: { [Op.ne]: 'Deleted' } }
+        }) || await Godown.findOne({
+            where: { name: 'Master Godown' }
+        }) || await Godown.findOne({
+            where: { status: 'Active' },
+            order: [['createdAt', 'ASC']]
+        });
+        return masterGodown ? masterGodown.id : null;
+    } catch (e) {
+        logger.error(`[Get Master Godown Error]: ${e.message}`);
+        return null;
+    }
+};
 
 // Token Generation
 const generateToken = (id, fcmtoken = null) => {
@@ -194,6 +214,14 @@ export const verifyOtp = async (req, res) => {
 
         user.status = 'Active';
 
+        // Auto-assign Master Godown if not assigned
+        if (!user.godownId) {
+            const masterGodownId = await getMasterGodownId();
+            if (masterGodownId) {
+                user.godownId = masterGodownId;
+            }
+        }
+
         if (fcmtoken) {
             user.fcmtoken = addFcmToken(user.fcmtoken, fcmtoken);
         }
@@ -260,6 +288,7 @@ export const registerUser = async (req, res) => {
 
         // Auto-assign Premium level to new users
         const defaultAppLevel = '6b0722c6-ee28-4058-b4de-a961d1b16da0';
+        const masterGodownId = await getMasterGodownId();
 
         const user = await User.create({
             fullname,
@@ -267,6 +296,7 @@ export const registerUser = async (req, res) => {
             number,
             fcmtoken: fcmtoken ? JSON.stringify([fcmtoken.trim()]) : null,
             applevel: defaultAppLevel,
+            godownId: masterGodownId || null,
             showtabacco: false,
             creditline: 0,
             orderReminder: true,
@@ -343,6 +373,15 @@ export const loginUser = async (req, res) => {
 
         if (!isTest) {
             await sendSMS(fullNumber, otp);
+        }
+
+        // Auto-assign Master Godown if not assigned
+        if (!user.godownId) {
+            const masterGodownId = await getMasterGodownId();
+            if (masterGodownId) {
+                user.godownId = masterGodownId;
+                await user.save();
+            }
         }
 
         if (fcmtoken) {
