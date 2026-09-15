@@ -121,8 +121,59 @@ export const createUser = async (req, res, next) => {
     }
 };
 
+/**
+ * Auto-sync: Any party with >= 30 days of no orders gets their kycverification set to 'pending'
+ */
+export const syncInactivePartiesReKYC = async () => {
+    try {
+        const CANCELLED_STATUSES = "'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'";
+        const [results, metadata] = await sequelize.query(`
+            UPDATE users
+            SET kycverification = 'pending'
+            WHERE kycverification = 'verified'
+              AND status != 'Deleted'
+              AND (
+                  -- Has non-cancelled orders, but latest order is >= 30 days old
+                  (
+                      EXISTS (
+                          SELECT 1 FROM orders o
+                          WHERE o."userId" = users.id
+                            AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                            AND o."deletedAt" IS NULL
+                      )
+                      AND (
+                          SELECT MAX(COALESCE(o."orderDate", o."createdAt"))
+                          FROM orders o
+                          WHERE o."userId" = users.id
+                            AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                            AND o."deletedAt" IS NULL
+                      ) < CURRENT_DATE - INTERVAL '30 days'
+                  )
+                  OR
+                  -- Has NO orders and registered >= 30 days ago
+                  (
+                      NOT EXISTS (
+                          SELECT 1 FROM orders o
+                          WHERE o."userId" = users.id
+                            AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                            AND o."deletedAt" IS NULL
+                      )
+                      AND users."createdAt" < CURRENT_DATE - INTERVAL '30 days'
+                  )
+              )
+        `);
+        return metadata?.rowCount || 0;
+    } catch (error) {
+        console.error('[Re-KYC Sync Error]:', error.message);
+        return 0;
+    }
+};
+
 export const getAllUsers = async (req, res, next) => {
     try {
+        // Auto-demote parties with >= 30 days without orders to KYC pending
+        await syncInactivePartiesReKYC();
+
         const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId, deliveryRoundTiming, godownId } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
@@ -150,7 +201,35 @@ export const getAllUsers = async (req, res, next) => {
         const CANCELLED_STATUSES = "'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'";
         const where = { ...searchWhere };
 
-        if (status === 'Kyc Pending') {
+        const IS_RKYC_SQL = `(
+            (
+                EXISTS (
+                    SELECT 1 FROM orders o
+                    WHERE o."userId" = "User".id
+                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                      AND o."deletedAt" IS NULL
+                )
+                AND (
+                    SELECT MAX(COALESCE(o."orderDate", o."createdAt"))
+                    FROM orders o
+                    WHERE o."userId" = "User".id
+                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                      AND o."deletedAt" IS NULL
+                ) < CURRENT_DATE - INTERVAL '30 days'
+            )
+            OR
+            (
+                NOT EXISTS (
+                    SELECT 1 FROM orders o
+                    WHERE o."userId" = "User".id
+                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                      AND o."deletedAt" IS NULL
+                )
+                AND "User"."createdAt" < CURRENT_DATE - INTERVAL '30 days'
+            )
+        )`;
+
+        if (status === 'R-KYC Pending' || status === 'Rkyc Pending') {
             where[Op.and] = [
                 ...(where[Op.and] || []),
                 {
@@ -158,7 +237,19 @@ export const getAllUsers = async (req, res, next) => {
                         { kycverification: { [Op.ne]: 'verified' } },
                         { kycverification: null }
                     ]
-                }
+                },
+                sequelize.literal(IS_RKYC_SQL)
+            ];
+        } else if (status === 'Kyc Pending') {
+            where[Op.and] = [
+                ...(where[Op.and] || []),
+                {
+                    [Op.or]: [
+                        { kycverification: { [Op.ne]: 'verified' } },
+                        { kycverification: null }
+                    ]
+                },
+                sequelize.literal(`NOT ${IS_RKYC_SQL}`)
             ];
         } else if (status === 'Non Order') {
             where[Op.and] = [
@@ -215,10 +306,11 @@ export const getAllUsers = async (req, res, next) => {
             }
         ];
 
-        // Parallel status counts (All, Kyc Pending, Non Order, Start Order, Daily Order)
+        // Parallel status counts (All, Kyc Pending, R-KYC Pending, Non Order, Start Order, Daily Order)
         const [
             totalCount,
             kycPendingCount,
+            rkycPendingCount,
             nonOrderCount,
             startOrderCount,
             dailyOrderCount,
@@ -233,6 +325,19 @@ export const getAllUsers = async (req, res, next) => {
                     [Op.or]: [
                         { kycverification: { [Op.ne]: 'verified' } },
                         { kycverification: null }
+                    ],
+                    [Op.and]: [
+                        sequelize.literal(`NOT ${IS_RKYC_SQL}`)
+                    ]
+                },
+                include,
+                distinct: true
+            }),
+            User.count({
+                where: {
+                    ...searchWhere,
+                    [Op.and]: [
+                        sequelize.literal(IS_RKYC_SQL)
                     ]
                 },
                 include,
@@ -295,6 +400,8 @@ export const getAllUsers = async (req, res, next) => {
             '': totalCount,
             'All': totalCount,
             'Kyc Pending': kycPendingCount,
+            'R-KYC Pending': rkycPendingCount,
+            'Rkyc Pending': rkycPendingCount,
             'Non Order': nonOrderCount,
             'Start Order': startOrderCount,
             'Daily Order': dailyOrderCount,

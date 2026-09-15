@@ -3,6 +3,7 @@ import { User } from '../models/index.js';
 import logger from '../logger/apiLogger.js';
 import { Op } from 'sequelize';
 import { sendToDevice } from '../services/notification.service.js';
+import { syncInactivePartiesReKYC } from '../controllers/admin/user.controller.js';
 
 /**
  * Initialize Order Reminder Cron Jobs
@@ -122,8 +123,17 @@ export const initReminderCron = () => {
             logger.error(`[ReminderCron Error]: ${error.message}`);
         }
     });
+
+    // Schedule Re-KYC sync every hour to demote parties with 30+ days no-order to pending
+    cron.schedule('0 * * * *', async () => {
+        try {
+            await syncInactivePartiesReKYC();
+        } catch (err) {
+            logger.error(`[Re-KYC Cron Error]: ${err.message}`);
+        }
+    });
     
-    logger.info('[Cron]: Order Reminder Job Initialized ✓');
+    logger.info('[Cron]: Order Reminder & Re-KYC Jobs Initialized ✓');
 };
 
 /**

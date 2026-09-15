@@ -16,6 +16,8 @@ initSocket(server);
 import { initReminderCron } from './utils/reminderCron.js';
 initReminderCron();
 
+import { syncInactivePartiesReKYC } from './controllers/admin/user.controller.js';
+
 // Import Models for seeding
 import Admin from './models/superadmin-models/Admin.js';
 import Godown from './models/superadmin-models/Godown.js';
@@ -115,6 +117,9 @@ const startServer = async () => {
         await seedAdmin();
         // Seed Godown Admin if database is empty / not present
         await seedGodownAdmin();
+
+        // Re-KYC check: automatically demote parties with 30+ days no-order to pending
+        await syncInactivePartiesReKYC();
         
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`[Server] running in ${process.env.NODE_ENV} mode on port ${PORT}`);

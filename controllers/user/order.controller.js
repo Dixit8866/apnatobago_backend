@@ -97,6 +97,32 @@ export const createOrder = async (req, res) => {
         );
     }
 
+    // Check if party has been inactive for >= 30 days (R-KYC trigger)
+    try {
+        const lastValidOrder = await Order.findOne({
+            where: {
+                userId: req.user.id,
+                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+            },
+            order: [[sequelize.literal('COALESCE("orderDate", "createdAt")'), 'DESC']],
+            attributes: ['id', 'orderDate', 'createdAt']
+        });
+
+        const referenceDate = lastValidOrder ? (lastValidOrder.orderDate || lastValidOrder.createdAt) : req.user.createdAt;
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+        if (referenceDate && new Date(referenceDate) < thirtyDaysAgo) {
+            await User.update({ kycverification: 'pending' }, { where: { id: req.user.id } });
+            return sendErrorResponse(
+                res,
+                HTTP_STATUS.FORBIDDEN,
+                "છેલ્લા ૩૦ દિવસથી કોઈ ઓર્ડર ન હોવાથી તમારું KYC ફરીથી વેરિફિકેશન (R-KYC) માટે પેન્ડિંગ કરવામાં આવ્યું છે. કૃપા કરીને એડમિનનો સંપર્ક કરો."
+            );
+        }
+    } catch (rkycErr) {
+        logger.error(`[R-KYC Check Error in createOrder]: ${rkycErr.message}`);
+    }
+
     // Check if order creation is paused/blocked due to emergency/maintenance
     try {
         const blockSetting = await OrderBlockSetting.findOne();
