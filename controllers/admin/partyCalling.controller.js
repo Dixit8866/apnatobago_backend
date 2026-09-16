@@ -59,7 +59,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
             {
                 model: BusinessProfile,
                 as: 'businessProfile',
-                attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
+                attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode', 'area']
             },
             {
                 model: RouteCategory,
