@@ -249,6 +249,12 @@ export const getAllUsers = async (req, res, next) => {
         const KYC_PENDING_SQL = `(
             NOT ${IS_RKYC_SQL}
             AND ("User".kycverification IS NULL OR "User".kycverification != 'verified')
+            AND NOT EXISTS (
+                SELECT 1 FROM orders o
+                WHERE o."userId" = "User".id
+                  AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                  AND o."deletedAt" IS NULL
+            )
         )`;
 
         const NON_ORDER_SQL = `(
