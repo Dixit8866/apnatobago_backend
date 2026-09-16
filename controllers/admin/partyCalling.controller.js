@@ -119,8 +119,8 @@ export const getDailyPartyCalls = async (req, res, next) => {
             ]
         });
 
-        // Calculate 30-day inactivity threshold
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        // Calculate 30-day inactivity threshold based on calendar date start
+        const thirtyDaysAgo = new Date(todayStart.getTime() - 30 * 24 * 60 * 60 * 1000);
 
         // Map users to resolve their daily calling status
         const mappedUsers = users.map(user => {
