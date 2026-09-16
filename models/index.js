@@ -190,6 +190,10 @@ User.belongsTo(CustomLevel, { foreignKey: 'applevel', as: 'rewardLevel' });
 RouteCategory.hasMany(User, { foreignKey: 'routeCategoryId', as: 'users' });
 User.belongsTo(RouteCategory, { foreignKey: 'routeCategoryId', as: 'routeCategory' });
 
+// RouteSection -> User
+RouteSection.hasMany(User, { foreignKey: 'routeSectionId', as: 'users' });
+User.belongsTo(RouteSection, { foreignKey: 'routeSectionId', as: 'routeSection' });
+
 // RouteCategory -> Order
 RouteCategory.hasMany(Order, { foreignKey: 'routeCategoryId', as: 'orders' });
 Order.belongsTo(RouteCategory, { foreignKey: 'routeCategoryId', as: 'routeCategory' });
@@ -585,7 +589,8 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "billPrintTime" VARCHAR(50) DEFAULT NULL');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "minimumOrderValue" DECIMAL(10, 2) DEFAULT 0.00');
-        } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama/billPrintTime/minimumOrderValue migration failed:', e.message); }
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "routeSectionId" UUID DEFAULT NULL');
+        } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama/billPrintTime/minimumOrderValue/routeSectionId migration failed:', e.message); }
 
         try {
             await sequelize.query('ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS "area" VARCHAR(255) DEFAULT NULL');

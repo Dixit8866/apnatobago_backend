@@ -70,6 +70,10 @@ const User = sequelize.define('User', {
         type: DataTypes.UUID,
         allowNull: true,
     },
+    routeSectionId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+    },
     fcmtoken: {
         type: DataTypes.STRING,
         allowNull: true,

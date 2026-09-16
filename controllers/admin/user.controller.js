@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile, RouteCategory, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory, RouteSection, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -12,7 +12,7 @@ const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
 export const createUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, routeSectionId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
 
         if (!fullname || !number || !password) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Fullname, number, and password are required.');
@@ -77,7 +77,8 @@ export const createUser = async (req, res, next) => {
             creditline: creditline || 0,
             blockcredit: blockcredit ?? false,
             applevel: finalAppLevel || null,
-            routeCategoryId: routeCategoryId || null,
+            routeCategoryId: (routeCategoryId === '' || routeCategoryId === 'none') ? null : routeCategoryId,
+            routeSectionId: (routeSectionId === '' || routeSectionId === 'none') ? null : routeSectionId,
             deliveryRoundId: (deliveryRoundId === 'none' || !deliveryRoundId) ? null : deliveryRoundId,
             deliveryRoundTiming: resolvedDeliveryRoundTiming,
             status: status || 'Active',
@@ -544,6 +545,7 @@ export const getUserById = async (req, res, next) => {
                 { model: CustomLevel, as: 'rewardLevel', attributes: ['id', 'name'] },
                 { model: BusinessProfile, as: 'businessProfile' },
                 { model: RouteCategory, as: 'routeCategory', attributes: ['id', 'name', 'pincode'] },
+                { model: RouteSection, as: 'routeSection', attributes: ['id', 'name', 'areaCategoryIds'] },
                 { model: Godown, as: 'assignedGodown', attributes: ['id', 'name'] }
             ]
         });
@@ -556,7 +558,7 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, routeSectionId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
@@ -615,7 +617,8 @@ export const updateUser = async (req, res, next) => {
             creditline: creditline !== undefined ? creditline : user.creditline,
             blockcredit: blockcredit !== undefined ? blockcredit : user.blockcredit,
             applevel: (applevel === '' || applevel === undefined) ? (applevel === '' ? null : user.applevel) : applevel,
-            routeCategoryId: (routeCategoryId === '' || routeCategoryId === undefined) ? (routeCategoryId === '' ? null : user.routeCategoryId) : routeCategoryId,
+            routeCategoryId: (routeCategoryId === '' || routeCategoryId === undefined || routeCategoryId === 'none') ? (routeCategoryId === '' || routeCategoryId === 'none' ? null : user.routeCategoryId) : routeCategoryId,
+            routeSectionId: (routeSectionId === '' || routeSectionId === undefined || routeSectionId === 'none') ? (routeSectionId === '' || routeSectionId === 'none' ? null : user.routeSectionId) : routeSectionId,
             deliveryRoundId: finalDeliveryRoundId !== undefined ? finalDeliveryRoundId : user.deliveryRoundId,
             deliveryRoundTiming: finalDeliveryRoundTiming !== undefined ? finalDeliveryRoundTiming : user.deliveryRoundTiming,
             status: status ?? user.status,
