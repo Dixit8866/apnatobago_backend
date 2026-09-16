@@ -162,6 +162,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
             userJson.callingNotes = resolvedNotes;
             userJson.calledAt = resolvedCalledAt;
             userJson.followupDateTime = resolvedFollowupDateTime;
+            userJson.lastOrderDate = user.getDataValue('lastOrderDate') || null;
 
             // Normalize deliveryRoundTiming based on deliveryRoundId
             if (userJson.deliveryRoundId) {
@@ -227,6 +228,18 @@ export const getDailyPartyCalls = async (req, res, next) => {
             const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
             return matchStatus && matchRoute && matchTiming;
         });
+
+        // Sort users: For 'Pending Call', order by lastOrderDate ASC (oldest last order date / most days without order first)
+        if (status === 'Pending Call' || !status) {
+            filteredUsers.sort((a, b) => {
+                const timeA = a.lastOrderDate ? new Date(a.lastOrderDate).getTime() : Infinity;
+                const timeB = b.lastOrderDate ? new Date(b.lastOrderDate).getTime() : Infinity;
+                if (timeA !== timeB) {
+                    return timeA - timeB; // Ascending: oldest order date (most days ago) first
+                }
+                return (a.fullname || '').localeCompare(b.fullname || '');
+            });
+        }
 
         // Perform in-memory pagination
         const totalRecords = filteredUsers.length;
