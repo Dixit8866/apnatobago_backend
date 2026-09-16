@@ -178,7 +178,9 @@ export const getAllUsers = async (req, res, next) => {
         const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId, deliveryRoundTiming, godownId } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
-        const searchWhere = {};
+        const searchWhere = {
+            status: { [Op.ne]: 'Deleted' }
+        };
         if (search) {
             searchWhere[Op.or] = [
                 { fullname: { [Op.iLike]: `%${search}%` } },
@@ -230,60 +232,70 @@ export const getAllUsers = async (req, res, next) => {
             )
         )`;
 
-        if (status === 'R-KYC Pending' || status === 'Rkyc Pending') {
+        const DAILY_ORDER_SQL = `EXISTS (
+            SELECT 1 FROM orders o
+            WHERE o."userId" = "User".id
+              AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+              AND o."deletedAt" IS NULL
+              AND COALESCE(o."orderDate", o."createdAt") >= CURRENT_DATE - INTERVAL '2 days'
+            HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 3
+        )`;
+
+        const RKYC_CONDITION_SQL = `(
+            ${IS_RKYC_SQL}
+            AND ("User".kycverification IS NULL OR "User".kycverification != 'verified')
+        )`;
+
+        const KYC_PENDING_SQL = `(
+            NOT ${IS_RKYC_SQL}
+            AND ("User".kycverification IS NULL OR "User".kycverification != 'verified')
+        )`;
+
+        const NON_ORDER_SQL = `(
+            "User".kycverification = 'verified'
+            AND NOT EXISTS (
+                SELECT 1 FROM orders o
+                WHERE o."userId" = "User".id
+                  AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                  AND o."deletedAt" IS NULL
+            )
+        )`;
+
+        const START_ORDER_SQL = `(
+            EXISTS (
+                SELECT 1 FROM orders o
+                WHERE o."userId" = "User".id
+                  AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
+                  AND o."deletedAt" IS NULL
+            )
+            AND NOT (${DAILY_ORDER_SQL})
+            AND NOT (${RKYC_CONDITION_SQL})
+        )`;
+
+        if (status === 'Daily Order') {
             where[Op.and] = [
                 ...(where[Op.and] || []),
-                {
-                    [Op.or]: [
-                        { kycverification: { [Op.ne]: 'verified' } },
-                        { kycverification: null }
-                    ]
-                },
-                sequelize.literal(IS_RKYC_SQL)
+                sequelize.literal(DAILY_ORDER_SQL)
             ];
         } else if (status === 'Kyc Pending') {
             where[Op.and] = [
                 ...(where[Op.and] || []),
-                {
-                    [Op.or]: [
-                        { kycverification: { [Op.ne]: 'verified' } },
-                        { kycverification: null }
-                    ]
-                },
-                sequelize.literal(`NOT ${IS_RKYC_SQL}`)
+                sequelize.literal(KYC_PENDING_SQL)
             ];
         } else if (status === 'Non Order') {
             where[Op.and] = [
                 ...(where[Op.and] || []),
-                { kycverification: 'verified' },
-                sequelize.literal(`NOT EXISTS (
-                    SELECT 1 FROM orders o
-                    WHERE o."userId" = "User".id
-                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
-                      AND o."deletedAt" IS NULL
-                )`)
+                sequelize.literal(NON_ORDER_SQL)
             ];
         } else if (status === 'Start Order') {
             where[Op.and] = [
                 ...(where[Op.and] || []),
-                sequelize.literal(`EXISTS (
-                    SELECT 1 FROM orders o
-                    WHERE o."userId" = "User".id
-                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
-                      AND o."deletedAt" IS NULL
-                )`)
+                sequelize.literal(START_ORDER_SQL)
             ];
-        } else if (status === 'Daily Order') {
+        } else if (status === 'R-KYC Pending' || status === 'Rkyc Pending') {
             where[Op.and] = [
                 ...(where[Op.and] || []),
-                sequelize.literal(`EXISTS (
-                    SELECT 1 FROM orders o
-                    WHERE o."userId" = "User".id
-                      AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
-                      AND o."deletedAt" IS NULL
-                      AND COALESCE(o."orderDate", o."createdAt") >= CURRENT_DATE - INTERVAL '2 days'
-                    HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 3
-                )`)
+                sequelize.literal(RKYC_CONDITION_SQL)
             ];
         } else if (status && status !== 'All') {
             where.status = status;
@@ -310,11 +322,11 @@ export const getAllUsers = async (req, res, next) => {
         // Parallel status counts (All, Kyc Pending, R-KYC Pending, Non Order, Start Order, Daily Order)
         const [
             totalCount,
+            dailyOrderCount,
             kycPendingCount,
-            rkycPendingCount,
             nonOrderCount,
             startOrderCount,
-            dailyOrderCount,
+            rkycPendingCount,
             activeCount,
             inactiveCount,
             deletedCount
@@ -323,12 +335,8 @@ export const getAllUsers = async (req, res, next) => {
             User.count({
                 where: {
                     ...searchWhere,
-                    [Op.or]: [
-                        { kycverification: { [Op.ne]: 'verified' } },
-                        { kycverification: null }
-                    ],
                     [Op.and]: [
-                        sequelize.literal(`NOT ${IS_RKYC_SQL}`)
+                        sequelize.literal(DAILY_ORDER_SQL)
                     ]
                 },
                 include,
@@ -338,23 +346,7 @@ export const getAllUsers = async (req, res, next) => {
                 where: {
                     ...searchWhere,
                     [Op.and]: [
-                        sequelize.literal(IS_RKYC_SQL)
-                    ]
-                },
-                include,
-                distinct: true
-            }),
-            User.count({
-                where: {
-                    ...searchWhere,
-                    kycverification: 'verified',
-                    [Op.and]: [
-                        sequelize.literal(`NOT EXISTS (
-                            SELECT 1 FROM orders o
-                            WHERE o."userId" = "User".id
-                              AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
-                              AND o."deletedAt" IS NULL
-                        )`)
+                        sequelize.literal(KYC_PENDING_SQL)
                     ]
                 },
                 include,
@@ -364,12 +356,7 @@ export const getAllUsers = async (req, res, next) => {
                 where: {
                     ...searchWhere,
                     [Op.and]: [
-                        sequelize.literal(`EXISTS (
-                            SELECT 1 FROM orders o
-                            WHERE o."userId" = "User".id
-                              AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
-                              AND o."deletedAt" IS NULL
-                        )`)
+                        sequelize.literal(NON_ORDER_SQL)
                     ]
                 },
                 include,
@@ -379,14 +366,17 @@ export const getAllUsers = async (req, res, next) => {
                 where: {
                     ...searchWhere,
                     [Op.and]: [
-                        sequelize.literal(`EXISTS (
-                            SELECT 1 FROM orders o
-                            WHERE o."userId" = "User".id
-                              AND o."orderStatus" NOT IN (${CANCELLED_STATUSES})
-                              AND o."deletedAt" IS NULL
-                              AND COALESCE(o."orderDate", o."createdAt") >= CURRENT_DATE - INTERVAL '2 days'
-                            HAVING COUNT(DISTINCT DATE(COALESCE(o."orderDate", o."createdAt"))) >= 3
-                        )`)
+                        sequelize.literal(START_ORDER_SQL)
+                    ]
+                },
+                include,
+                distinct: true
+            }),
+            User.count({
+                where: {
+                    ...searchWhere,
+                    [Op.and]: [
+                        sequelize.literal(RKYC_CONDITION_SQL)
                     ]
                 },
                 include,
