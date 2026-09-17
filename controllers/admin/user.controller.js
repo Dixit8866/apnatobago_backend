@@ -124,6 +124,7 @@ export const createUser = async (req, res, next) => {
 
 /**
  * Auto-sync: Any party with >= 30 days of no orders gets their kycverification set to 'pending'
+ * NOTE: Users whose kycverification was updated within the last 7 days are skipped (admin grace period).
  */
 export const syncInactivePartiesReKYC = async () => {
     try {
@@ -133,6 +134,7 @@ export const syncInactivePartiesReKYC = async () => {
             SET kycverification = 'pending'
             WHERE kycverification = 'verified'
               AND status != 'Deleted'
+              AND "updatedAt" < NOW() - INTERVAL '7 days'
               AND (
                   -- Has non-cancelled orders, but latest order is >= 30 days old
                   (
@@ -172,9 +174,6 @@ export const syncInactivePartiesReKYC = async () => {
 
 export const getAllUsers = async (req, res, next) => {
     try {
-        // Auto-demote parties with >= 30 days without orders to KYC pending
-        await syncInactivePartiesReKYC();
-
         const { page = 1, limit = 50, search = '', status, kycverification, routeCategoryId, deliveryRoundTiming, godownId } = req.query;
         const { limit: limitOptions, offset } = getPaginationOptions(req.query);
 
