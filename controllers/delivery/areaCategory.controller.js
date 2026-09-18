@@ -60,7 +60,7 @@ export const getOrdersByAreaCategories = async (req, res) => {
         }
 
         // Workflow statuses ready for pickup/assignment
-        const requestedStatus = req.body.status || req.query.status;
+        const requestedStatus = req.body?.status || req.query?.status;
         const validWorkflowStatuses = ['Pending', 'Packaging', 'Packed'];
         let statusFilter = validWorkflowStatuses;
 
