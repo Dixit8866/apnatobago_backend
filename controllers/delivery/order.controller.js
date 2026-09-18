@@ -2221,29 +2221,47 @@ export const scanAndAssignOrder = async (req, res) => {
 
         const now = new Date();
 
-        // 4. Create or update OrderAssignment
-        let assignment = await OrderAssignment.findOne({ where: { orderId: order.id } });
-        let isReassigned = false;
-        if (assignment) {
-            if (assignment.deliveryBoyId === boy.id && (order.orderStatus === 'Shipping' || assignment.status === 'Assigned')) {
-                // Already assigned to this delivery boy
-                return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને સોંપાયેલ છે.`, {
+        // 4. Check if order is already assigned to a delivery boy
+        let assignment = await OrderAssignment.findOne({
+            where: { orderId: order.id },
+            include: [
+                {
+                    model: DeliveryBoy,
+                    as: 'deliveryBoy',
+                    attributes: ['id', 'name', 'phone']
+                }
+            ]
+        });
+
+        if (assignment && assignment.deliveryBoyId && (assignment.status === 'Assigned' || order.orderStatus === 'Shipping')) {
+            const assignedBoyName = assignment.deliveryBoy?.name || 'અન્ય ડિલિવરી બોય';
+            const isSameBoy = String(assignment.deliveryBoyId) === String(boy.id);
+
+            const message = isSameBoy
+                ? `આ ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને (${boy.name}) સોંપાયેલ છે.`
+                : `આ ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ ${assignedBoyName} ને સોંપાયેલ છે.`;
+
+            return sendErrorResponse(
+                res,
+                HTTP_STATUS.CONFLICT,
+                message,
+                {
+                    alreadyAssigned: true,
                     orderId: order.orderId,
                     id: order.id,
-                    orderStatus: order.orderStatus,
                     shopName,
-                    customerNumber: order.customerNumber || order.user?.number,
-                    grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
-                    deliveryBoy: {
-                        id: boy.id,
-                        name: boy.name,
-                        phone: boy.phone
+                    orderStatus: order.orderStatus,
+                    assignedDeliveryBoy: {
+                        id: assignment.deliveryBoyId,
+                        name: assignedBoyName,
+                        phone: assignment.deliveryBoy?.phone || ''
                     },
-                    assignmentId: assignment.id,
                     assignedAt: assignment.assignedAt
-                });
-            }
-            isReassigned = true;
+                }
+            );
+        }
+
+        if (assignment) {
             await assignment.update({
                 deliveryBoyId: boy.id,
                 status: 'Assigned',
