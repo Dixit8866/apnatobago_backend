@@ -2180,16 +2180,11 @@ export const scanAndAssignOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `આ ડિલિવરી બોય ખાતું ${boy.status} છે.`);
         }
 
-        // 2. Find the order by orderId or id
-        const orderWhere = {
-            [Op.or]: [
-                Order.sequelize.where(
-                    Order.sequelize.cast(Order.sequelize.col('Order.orderId'), 'TEXT'),
-                    cleanId
-                ),
-                { id: cleanId }
-            ]
-        };
+        // 2. Find the order by orderId or id (only if cleanId is valid UUID)
+        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanId);
+        const orderWhere = isUuid
+            ? { [Op.or]: [{ id: cleanId }, { orderId: cleanId }] }
+            : { orderId: cleanId };
 
         const order = await Order.findOne({
             where: orderWhere,
