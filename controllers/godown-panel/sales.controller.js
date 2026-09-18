@@ -5,6 +5,7 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import sequelize from '../../config/db.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import { sendToDevice } from '../../services/notification.service.js';
+import { getIO } from '../../socket.js';
 
 /**
  * @desc    Get orders for this godown
@@ -671,6 +672,14 @@ export const scanAndPackGodownOrder = async (req, res) => {
         order.shippingAt = null;
         order.deliveredAt = null;
         await order.save();
+
+        // Emit real-time update to admin socket room
+        try {
+            const io = getIO();
+            if (io) {
+                io.to('admin_notifications').emit('order_updated', { id: order.id, status: 'Packed' });
+            }
+        } catch (_) {}
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક Packed થઈ ગયો છે.`, {
             id: order.id,

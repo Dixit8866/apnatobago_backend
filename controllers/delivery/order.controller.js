@@ -1,4 +1,4 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile, PartyBalanceLog } from '../../models/index.js';
+import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile, PartyBalanceLog, DeliveryBoy } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -2146,5 +2146,158 @@ export const getUserPreviousBills = async (req, res) => {
     } catch (error) {
         logger.error(`[Get User Previous Bills Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Scan barcode and assign order to delivery boy
+ * @route   POST /api/delivery/orders/scan-assign
+ * @access  Private (Delivery Boy)
+ */
+export const scanAndAssignOrder = async (req, res) => {
+    try {
+        const { orderId, deliveryBoyId } = req.body;
+        // The deliveryBoyId can come from request body or from the authenticated token req.user.id
+        const targetBoyId = deliveryBoyId || req.user?.id;
+
+        if (!orderId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "ઓર્ડર ID જરૂરી છે (Order ID is required).");
+        }
+
+        if (!targetBoyId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "ડિલિવરી બોય ID જરૂરી છે (Delivery Boy ID is required).");
+        }
+
+        // Clean orderId (remove '#' and spaces)
+        const cleanId = String(orderId).replace(/^[#\s]+|[#\s]+$/g, '').trim();
+
+        // 1. Verify delivery boy exists and is active
+        const boy = await DeliveryBoy.findByPk(targetBoyId);
+        if (!boy) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "ડિલિવરી બોય મળ્યો નથી (Delivery boy not found).");
+        }
+        if (boy.status && boy.status !== 'Active') {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `આ ડિલિવરી બોય ખાતું ${boy.status} છે.`);
+        }
+
+        // 2. Find the order by orderId or id
+        const orderWhere = {
+            [Op.or]: [
+                Order.sequelize.where(
+                    Order.sequelize.cast(Order.sequelize.col('Order.orderId'), 'TEXT'),
+                    cleanId
+                ),
+                { id: cleanId }
+            ]
+        };
+
+        const order = await Order.findOne({
+            where: orderWhere,
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'fcmtoken'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['shopName', 'shopNameAlt', 'address']
+                        }
+                    ]
+                }
+            ]
+        });
+
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `ઓર્ડર #${cleanId} સિસ્ટમમાં મળ્યો નથી.`);
+        }
+
+        const shopName = order.user?.businessProfile?.shopName || order.customerName || order.user?.fullname || '-';
+
+        // 3. Validation checks
+        if (['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'].includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) કેન્સલ થયેલ છે, તેથી સોંપી શકાતો નથી.`);
+        }
+
+        if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ પૂર્ણ (${order.orderStatus}) થઈ ગયેલ છે.`);
+        }
+
+        const now = new Date();
+
+        // 4. Create or update OrderAssignment
+        let assignment = await OrderAssignment.findOne({ where: { orderId: order.id } });
+        let isReassigned = false;
+        if (assignment) {
+            if (assignment.deliveryBoyId === boy.id && (order.orderStatus === 'Shipping' || assignment.status === 'Assigned')) {
+                // Already assigned to this delivery boy
+                return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને સોંપાયેલ છે.`, {
+                    orderId: order.orderId,
+                    id: order.id,
+                    orderStatus: order.orderStatus,
+                    shopName,
+                    customerNumber: order.customerNumber || order.user?.number,
+                    grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
+                    deliveryBoy: {
+                        id: boy.id,
+                        name: boy.name,
+                        phone: boy.phone
+                    },
+                    assignmentId: assignment.id,
+                    assignedAt: assignment.assignedAt
+                });
+            }
+            isReassigned = true;
+            await assignment.update({
+                deliveryBoyId: boy.id,
+                status: 'Assigned',
+                assignedAt: now
+            });
+        } else {
+            assignment = await OrderAssignment.create({
+                orderId: order.id,
+                deliveryBoyId: boy.id,
+                status: 'Assigned',
+                assignedAt: now
+            });
+        }
+
+        // 5. Update Order to Shipping
+        const previousStatus = order.orderStatus;
+        order.orderStatus = 'Shipping';
+        order.packagingAt = order.packagingAt || now;
+        order.packedAt = order.packedAt || now;
+        order.shippingAt = now;
+        order.deliveredAt = null;
+        await order.save();
+
+        logger.info(`[Scan and Assign Order]: Order #${order.orderId} assigned to delivery boy ${boy.name} (${boy.id}). Prev status: ${previousStatus}`);
+
+        return sendSuccessResponse(
+            res,
+            HTTP_STATUS.OK,
+            `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક ${boy.name} ને સોંપાઈ ગયો છે અને રવાના (Shipping) થઈ ગયો છે.`,
+            {
+                orderId: order.orderId,
+                id: order.id,
+                orderStatus: order.orderStatus,
+                previousStatus,
+                shopName,
+                customerNumber: order.customerNumber || order.user?.number,
+                grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
+                deliveryBoy: {
+                    id: boy.id,
+                    name: boy.name,
+                    phone: boy.phone
+                },
+                assignmentId: assignment.id,
+                assignedAt: now,
+                isReassigned
+            }
+        );
+    } catch (error) {
+        logger.error(`[Scan and Assign Order Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "ઓર્ડર સોંપવામાં ભૂલ આવી (Error assigning order).", error.message);
     }
 };

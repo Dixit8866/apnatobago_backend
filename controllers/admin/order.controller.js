@@ -10,6 +10,7 @@ import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
 import { restoreOrderStock } from '../../helpers/inventory.helper.js';
+import { getIO } from '../../socket.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -3941,6 +3942,14 @@ export const scanAndPackOrder = async (req, res) => {
 
         try {
             await logActivity(req, 'UPDATE', 'Order', order.id, `Order #${order.orderId} moved from ${previousStatus} to Packed via Barcode Scan.`);
+        } catch (_) {}
+
+        // Emit real-time update to admin socket room
+        try {
+            const io = getIO();
+            if (io) {
+                io.to('admin_notifications').emit('order_updated', { id: order.id, status: 'Packed' });
+            }
         } catch (_) {}
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક Packed થઈ ગયો છે.`, {
