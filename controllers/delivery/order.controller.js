@@ -2202,7 +2202,7 @@ export const scanAndAssignOrder = async (req, res) => {
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['shopName', 'shopNameAlt', 'address']
+                            attributes: ['shopName', 'shopNameAlt', 'shopAddress', 'city', 'area']
                         }
                     ]
                 }
