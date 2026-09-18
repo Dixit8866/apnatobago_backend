@@ -35,7 +35,7 @@ export const getDeliveryAreaCategories = async (req, res) => {
  */
 export const getOrdersByAreaCategories = async (req, res) => {
     try {
-        let areaCategoryIds = req.body.areaCategoryIds || req.query.areaCategoryIds || req.query['areaCategoryIds[]'];
+        let areaCategoryIds = req.body?.areaCategoryIds || req.query?.areaCategoryIds || req.query?.['areaCategoryIds[]'];
 
         if (typeof areaCategoryIds === 'string') {
             try {
