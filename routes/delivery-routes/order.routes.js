@@ -12,6 +12,10 @@ import {
     submitDeliveryBankPayment,
     scanAndAssignOrder
 } from '../../controllers/delivery/order.controller.js';
+import { 
+    getDeliveryAreaCategories, 
+    getOrdersByAreaCategories 
+} from '../../controllers/delivery/areaCategory.controller.js';
 import { createSalesReturn } from '../../controllers/common/salesReturn.controller.js';
 import { protectDeliveryBoy } from '../../middlewares/auth.middleware.js';
 
@@ -42,6 +46,11 @@ router.put('/:assignmentId/status', updateMyAssignmentStatus);
 router.put('/:assignmentId/complete-settle', completeOrderAndSettlePayment);
 router.post('/sales-return', createSalesReturn);
 router.post('/scan-assign', scanAndAssignOrder);
+
+// Area categories & Multi-area order listing for Delivery App
+router.get('/area-categories', getDeliveryAreaCategories);
+router.post('/by-areas', getOrdersByAreaCategories);
+router.get('/by-areas', getOrdersByAreaCategories);
 
 // Direct Bank Transfer Payment (for Delivery Boy App)
 router.post('/:id/bank-payment', bankPaymentUpload, submitDeliveryBankPayment);

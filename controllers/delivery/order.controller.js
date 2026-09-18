@@ -1,4 +1,4 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile, PartyBalanceLog, DeliveryBoy } from '../../models/index.js';
+import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile, PartyBalanceLog, DeliveryBoy, RouteCategory } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -2314,3 +2314,4 @@ export const scanAndAssignOrder = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "ઓર્ડર સોંપવામાં ભૂલ આવી (Error assigning order).", error.message);
     }
 };
+
