@@ -608,4 +608,84 @@ export const getGodownMergeableOrders = async (req, res, next) => {
     }
 };
 
+/**
+ * @desc    Scan barcode and move order to Packed status (Godown Staff)
+ * @route   POST /api/godown-panel/sales/scan-pack
+ * @access  Private (GodownStaff)
+ */
+export const scanAndPackGodownOrder = async (req, res) => {
+    try {
+        const staff = req.user;
+        const isSuperAdmin = staff.role === 'superadmin';
+        const { orderId } = req.body;
+
+        if (!orderId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "ઓર્ડર ID જરૂરી છે (Order ID is required).");
+        }
+
+        const cleanId = String(orderId).replace(/^[#\s]+|[#\s]+$/g, '').trim();
+        const isUuid = /^[0-9a-fA-F-]{36}$/.test(cleanId);
+
+        const whereCondition = isUuid ? { id: cleanId } : { orderId: cleanId };
+        if (!isSuperAdmin && staff.godownId) {
+            whereCondition.godownId = staff.godownId;
+        }
+
+        const order = await Order.findOne({
+            where: whereCondition,
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['shopName']
+                        }
+                    ]
+                }
+            ]
+        });
+
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `ઓર્ડર #${cleanId} મળ્યો નથી.`);
+        }
+
+        const shopName = order.user?.businessProfile?.shopName || order.customerName || order.user?.fullname || '-';
+
+        if (['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'].includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) કેન્સલ થયેલ છે, તેને Packed કરી શકાતો નથી.`);
+        }
+
+        if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ ${order.orderStatus} સ્ટેટસમાં છે.`);
+        }
+
+        const previousStatus = order.orderStatus;
+
+        order.orderStatus = 'Packed';
+        order.packagingAt = order.packagingAt || new Date();
+        order.packedAt = new Date();
+        order.shippingAt = null;
+        order.deliveredAt = null;
+        await order.save();
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક Packed થઈ ગયો છે.`, {
+            id: order.id,
+            orderId: order.orderId,
+            customerName: shopName,
+            orderStatus: order.orderStatus,
+            previousStatus,
+            packedAt: order.packedAt,
+            grandTotal: order.payableAmount || order.totalAmount || order.grandTotal
+        });
+    } catch (error) {
+        console.error("Scan and pack godown error:", error);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "ઓર્ડર પેક કરવામાં ભૂલ આવી.", error.message);
+    }
+};
+
+
 

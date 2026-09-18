@@ -18,7 +18,8 @@ import {
     clearUserCart,
     getCustomerPaymentsReport,
     settlePastDuePayment,
-    adjustPartyBalance
+    adjustPartyBalance,
+    scanAndPackOrder
 } from '../../controllers/admin/order.controller.js';
 import { getSalesReturns, approveSalesReturn, approveAllSalesReturnByOrder, getPartyOrdersForReturn, createAdminSalesReturn, updateCompanyReturnStatus } from '../../controllers/common/salesReturn.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
@@ -49,6 +50,7 @@ router.put('/sales-returns/approve-all/:orderId', protect, approveAllSalesReturn
 router.get('/', getAllOrders);
 router.get('/:id/invoice', downloadInvoice);
 router.get('/:id/delivery-label', downloadDeliveryLabel);
+router.post('/scan-pack', scanAndPackOrder);
 router.put('/bulk-status', bulkUpdateOrderStatus);
 router.put('/bulk-verify-payments', bulkVerifyPayments);
 router.put('/:id/verify-settlement', verifyAndSettleOrder);

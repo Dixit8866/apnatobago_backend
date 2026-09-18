@@ -34,6 +34,7 @@ router.use('/party-calling', partyCallingRoutes);
 
 // Sales / Orders
 router.use('/sales', salesRoutes);
+router.use('/orders', salesRoutes);
 
 // Payments
 router.use('/payments', paymentRoutes);

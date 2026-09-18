@@ -3880,4 +3880,83 @@ export const adjustPartyBalance = async (req, res) => {
     }
 };
 
+/**
+ * @desc    Scan barcode and move order to Packed status
+ * @route   POST /api/admin/orders/scan-pack
+ * @access  Private (Admin)
+ */
+export const scanAndPackOrder = async (req, res) => {
+    try {
+        const { orderId } = req.body;
+        if (!orderId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "ઓર્ડર ID જરૂરી છે (Order ID is required).");
+        }
+
+        const cleanId = String(orderId).replace(/^[#\s]+|[#\s]+$/g, '').trim();
+        const isUuid = /^[0-9a-fA-F-]{36}$/.test(cleanId);
+
+        const order = await Order.findOne({
+            where: isUuid ? { id: cleanId } : { orderId: cleanId },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullname', 'number'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            attributes: ['shopName']
+                        }
+                    ]
+                }
+            ]
+        });
+
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `ઓર્ડર #${cleanId} સિસ્ટમમાં મળ્યો નથી.`);
+        }
+
+        const shopName = order.user?.businessProfile?.shopName || order.customerName || order.user?.fullname || '-';
+
+        // Check if already cancelled
+        if (['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'].includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) કેન્સલ થયેલ છે, તેને Packed કરી શકાતો નથી.`);
+        }
+
+        // Check if downstream (e.g. Delivered)
+        if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ ${order.orderStatus} સ્ટેટસમાં છે.`);
+        }
+
+        const previousStatus = order.orderStatus;
+
+        // Update to Packed
+        order.orderStatus = 'Packed';
+        order.packagingAt = order.packagingAt || new Date();
+        order.packedAt = new Date();
+        order.shippingAt = null;
+        order.deliveredAt = null;
+        await order.save();
+
+        try {
+            await logActivity(req, 'UPDATE', 'Order', order.id, `Order #${order.orderId} moved from ${previousStatus} to Packed via Barcode Scan.`);
+        } catch (_) {}
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક Packed થઈ ગયો છે.`, {
+            id: order.id,
+            orderId: order.orderId,
+            customerName: shopName,
+            orderStatus: order.orderStatus,
+            previousStatus,
+            packedAt: order.packedAt,
+            grandTotal: order.payableAmount || order.totalAmount || order.grandTotal
+        });
+    } catch (error) {
+        logger.error(`[Scan and Pack Order Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "ઓર્ડર પેક કરવામાં ભૂલ આવી.", error.message);
+    }
+};
+
+
 
