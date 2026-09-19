@@ -460,7 +460,7 @@ export const getAllOrders = async (req, res) => {
                             model: BusinessProfile,
                             as: 'businessProfile',
                             required: false,
-                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
+                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'area', 'postcode']
                         },
                         {
                             model: RouteCategory,
@@ -749,7 +749,7 @@ export const getAllOrders = async (req, res) => {
                         model: BusinessProfile,
                         as: 'businessProfile',
                         required: false,
-                        attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
+                        attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'area', 'postcode']
                     }
                 ]
             },
@@ -2052,7 +2052,7 @@ export const getOrderDetails = async (req, res) => {
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'postcode']
+                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'area', 'postcode']
                         }
                     ]
                 },
@@ -2829,7 +2829,7 @@ export const getUserCarts = async (req, res) => {
                             model: BusinessProfile,
                             as: 'businessProfile',
                             required: false,
-                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                            attributes: ['id', 'shopName', 'shopAddress', 'area', 'postcode']
                         },
                         {
                             model: RouteCategory,
@@ -3058,7 +3058,7 @@ export const getCustomerPaymentsReport = async (req, res) => {
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['id', 'shopName', 'shopAddress', 'postcode']
+                            attributes: ['id', 'shopName', 'shopAddress', 'area', 'postcode']
                         }
                     ]
                 },
