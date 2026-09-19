@@ -2237,14 +2237,31 @@ export const scanAndAssignOrder = async (req, res) => {
             const assignedBoyName = assignment.deliveryBoy?.name || 'અન્ય ડિલિવરી બોય';
             const isSameBoy = String(assignment.deliveryBoyId) === String(boy.id);
 
-            const message = isSameBoy
-                ? `આ ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને (${boy.name}) સોંપાયેલ છે.`
-                : `આ ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ ${assignedBoyName} ને સોંપાયેલ છે.`;
+            if (isSameBoy) {
+                // Same delivery boy re-scanning their own order → return success (200 OK)
+                return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને (${boy.name}) સોંપાયેલ છે.`, {
+                    orderId: order.orderId,
+                    id: order.id,
+                    orderStatus: order.orderStatus,
+                    shopName,
+                    customerNumber: order.customerNumber || order.user?.number,
+                    grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
+                    deliveryBoy: {
+                        id: boy.id,
+                        name: boy.name,
+                        phone: boy.phone
+                    },
+                    assignmentId: assignment.id,
+                    assignedAt: assignment.assignedAt,
+                    alreadyAssigned: true
+                });
+            }
 
+            // Different delivery boy trying to assign → return 409 Conflict
             return sendErrorResponse(
                 res,
                 HTTP_STATUS.CONFLICT,
-                message,
+                `આ ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ ${assignedBoyName} ને સોંપાયેલ છે.`,
                 {
                     alreadyAssigned: true,
                     orderId: order.orderId,
