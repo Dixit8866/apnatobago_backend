@@ -2273,23 +2273,28 @@ export const scanAndAssignOrder = async (req, res) => {
             const isSameBoy = String(assignment.deliveryBoyId) === String(boy.id);
 
             if (isSameBoy) {
-                // Same delivery boy re-scanning their own order → return success (200 OK)
-                return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને (${boy.name}) સોંપાયેલ છે.`, {
-                    orderId: order.orderId,
-                    id: order.id,
-                    orderStatus: order.orderStatus,
-                    shopName,
-                    customerNumber: order.customerNumber || order.user?.number,
-                    grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
-                    deliveryBoy: {
-                        id: boy.id,
-                        name: boy.name,
-                        phone: boy.phone
-                    },
-                    assignmentId: assignment.id,
-                    assignedAt: assignment.assignedAt,
-                    alreadyAssigned: true
-                });
+                // Same delivery boy re-scanning their own order → return 409 Conflict (success: false) so mobile shows popup
+                return sendErrorResponse(
+                    res,
+                    HTTP_STATUS.CONFLICT,
+                    `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને (${boy.name}) સોંપાયેલ છે.`,
+                    {
+                        alreadyAssigned: true,
+                        orderId: order.orderId,
+                        id: order.id,
+                        orderStatus: order.orderStatus,
+                        shopName,
+                        customerNumber: order.customerNumber || order.user?.number,
+                        grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
+                        deliveryBoy: {
+                            id: boy.id,
+                            name: boy.name,
+                            phone: boy.phone
+                        },
+                        assignmentId: assignment.id,
+                        assignedAt: assignment.assignedAt
+                    }
+                );
             }
 
             // Different delivery boy trying to assign → return 409 Conflict
