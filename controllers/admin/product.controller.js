@@ -1192,15 +1192,39 @@ export const updateProductPrices = async (req, res, next) => {
                                 await t.rollback();
                                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Selling price (${p.price}) cannot be lower than purchase price (${currentPurchasePrice}) for variant "${variant.volume}". (વેચાણ કિંમત ખરીદ કિંમત કરતા ઓછી ન હોવી જોઈએ.)`);
                             }
+
+                            // 1. Update the base pricing row (the one with the given id)
+                            const updateFields = { purchasePrice: currentPurchasePrice };
+                            if (p.price !== undefined) updateFields.price = p.price;
+                            if (p.mrp !== undefined) updateFields.mrp = p.mrp;
+
                             await ProductPricing.update(
-                                { price: p.price, mrp: p.mrp, purchasePrice: currentPurchasePrice },
+                                updateFields,
                                 { where: { id: p.id }, transaction: t }
                             );
-                            if (p.mrp !== undefined) {
-                                await ProductPricing.update(
-                                    { mrp: p.mrp },
-                                    { where: { variantId: variant.id }, transaction: t }
-                                );
+
+                            // 2. Sync to godown-specific rows for the same level/range
+                            //    so app users with a godownId also see the updated price.
+                            if (p.price !== undefined || p.mrp !== undefined) {
+                                const basePricing = await ProductPricing.findByPk(p.id, { transaction: t });
+                                if (basePricing && basePricing.godownId === null) {
+                                    const godownSyncFields = { purchasePrice: currentPurchasePrice };
+                                    if (p.price !== undefined) godownSyncFields.price = p.price;
+                                    if (p.mrp !== undefined) godownSyncFields.mrp = p.mrp;
+
+                                    await ProductPricing.update(
+                                        godownSyncFields,
+                                        {
+                                            where: {
+                                                variantId: variant.id,
+                                                customLevelId: basePricing.customLevelId,
+                                                quantityRange: basePricing.quantityRange,
+                                                godownId: { [Op.ne]: null }
+                                            },
+                                            transaction: t
+                                        }
+                                    );
+                                }
                             }
                         }
                     }
