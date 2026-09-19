@@ -2278,7 +2278,9 @@ export const scanAndAssignOrder = async (req, res) => {
             );
         }
 
+        let isReassigned = false;
         if (assignment) {
+            isReassigned = true;
             await assignment.update({
                 deliveryBoyId: boy.id,
                 status: 'Assigned',
