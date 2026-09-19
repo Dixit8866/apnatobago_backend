@@ -1,9 +1,10 @@
-import { OrderAssignment, Order, DeliveryBoy, User, OrderItem, Product, ProductVariant, Volume } from '../../models/index.js';
+import { OrderAssignment, Order, DeliveryBoy, User, OrderItem, Product, ProductVariant, Volume, BusinessProfile } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
+import { broadcastOrderAssigned } from '../../services/socketEvent.service.js';
 
 /**
  * @desc    Assign multiple orders to a delivery boy
@@ -41,6 +42,36 @@ export const bulkAssignOrders = async (req, res) => {
             attributes: { exclude: ['orderId'] },
             include: [{ model: Order, as: 'order', attributes: ['id', 'orderId'] }]
         });
+
+        // Broadcast real-time assignment events to Admin and the assigned Delivery Rider
+        try {
+            const assignedOrders = await Order.findAll({
+                where: { id: { [Op.in]: orderIds } },
+                include: [
+                    {
+                        model: User,
+                        as: 'user',
+                        attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'],
+                        include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'area'] }]
+                    },
+                    {
+                        model: OrderAssignment,
+                        as: 'assignment',
+                        include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone'] }]
+                    }
+                ]
+            });
+            for (const aOrder of assignedOrders) {
+                broadcastOrderAssigned({
+                    order: aOrder,
+                    assignment: aOrder.assignment,
+                    deliveryBoyId,
+                    routeCategoryId: aOrder.routeCategoryId || aOrder.user?.routeCategoryId
+                });
+            }
+        } catch (sErr) {
+            logger.error(`[Socket Broadcast Error in bulkAssignOrders]: ${sErr.message}`);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `${orderIds.length} orders assigned successfully.`, finalAssignments);
     } catch (error) {

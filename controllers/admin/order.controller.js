@@ -11,6 +11,7 @@ import { roundTotal } from '../../utils/roundHelper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
 import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
+import { broadcastOrderStatusChanged, broadcastOrderDelivered } from '../../services/socketEvent.service.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -1412,6 +1413,35 @@ export const updateOrderStatus = async (req, res) => {
             metadata: { orderId: order.id, orderNo: order.orderId, prevStatus, newStatus: order.orderStatus, paymentStatus: order.paymentStatus }
         });
 
+        if (orderStatus && orderStatus !== prevStatus) {
+            try {
+                const freshOrder = await Order.findByPk(order.id, {
+                    include: [
+                        {
+                            model: User,
+                            as: 'user',
+                            attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'],
+                            include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'area'] }]
+                        },
+                        {
+                            model: OrderAssignment,
+                            as: 'assignment',
+                            include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone'] }]
+                        }
+                    ]
+                });
+                broadcastOrderStatusChanged({
+                    order: freshOrder || order,
+                    oldStatus: prevStatus,
+                    newStatus: order.orderStatus,
+                    routeCategoryId: freshOrder?.routeCategoryId || freshOrder?.user?.routeCategoryId,
+                    godownId: order.godownId
+                });
+            } catch (sErr) {
+                logger.error(`[Socket Broadcast Error in updateOrderStatus]: ${sErr.message}`);
+            }
+        }
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", order);
     } catch (error) {
         logger.error(`[Admin Update Order Status Error]: ${error.message}`);
@@ -1562,6 +1592,37 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             }
         } catch (pushErr) {
             console.error('[Bulk Update Status Push Error]:', pushErr);
+        }
+
+        // Broadcast socket status change for all bulk-updated orders
+        try {
+            const freshOrders = await Order.findAll({
+                where: { id: orderIds },
+                include: [
+                    {
+                        model: User,
+                        as: 'user',
+                        attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'],
+                        include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'area'] }]
+                    },
+                    {
+                        model: OrderAssignment,
+                        as: 'assignment',
+                        include: [{ model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name', 'phone'] }]
+                    }
+                ]
+            });
+            for (const fOrder of freshOrders) {
+                broadcastOrderStatusChanged({
+                    order: fOrder,
+                    oldStatus: null,
+                    newStatus: fOrder.orderStatus,
+                    routeCategoryId: fOrder.routeCategoryId || fOrder.user?.routeCategoryId,
+                    godownId: fOrder.godownId
+                });
+            }
+        } catch (sErr) {
+            logger.error(`[Socket Broadcast Error in bulkUpdateOrderStatus]: ${sErr.message}`);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders status updated successfully.");

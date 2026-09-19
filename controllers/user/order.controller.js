@@ -1,5 +1,6 @@
 import { Order, OrderItem, Product, ProductVariant, User, Volume, Cart, AppSettings, InventoryStock, InventoryTransaction, Godown, AdminNotification, ProductPricing, SalesReturn, Notification, Admin, OrderBlockSetting } from '../../models/index.js';
 import { emitAdminNotification, getIO } from '../../socket.js';
+import { broadcastOrderCreated, broadcastOrderStatusChanged } from '../../services/socketEvent.service.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
@@ -954,6 +955,33 @@ export const createOrder = async (req, res) => {
             });
             emitAdminNotification(adminNotify);
             
+            // Broadcast real-time order event to Admin, Godown, and Route Area sockets
+            try {
+                const freshOrderForSocket = await Order.findByPk(targetOrder.id, {
+                    include: [
+                        {
+                            model: User,
+                            as: 'user',
+                            attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'],
+                            include: [{ model: User.sequelize.models.BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'area'] }]
+                        }
+                    ]
+                });
+                if (existingOrder) {
+                    broadcastOrderStatusChanged({
+                        order: freshOrderForSocket || targetOrder,
+                        oldStatus: 'Pending',
+                        newStatus: 'Pending',
+                        routeCategoryId: freshOrderForSocket?.routeCategoryId || freshOrderForSocket?.user?.routeCategoryId,
+                        godownId: targetOrder.godownId
+                    });
+                } else {
+                    broadcastOrderCreated(freshOrderForSocket || targetOrder);
+                }
+            } catch (socketBroadcastErr) {
+                logger.error(`[Socket Broadcast Error on createOrder]: ${socketBroadcastErr.message}`);
+            }
+
             // Send push notification to all active admins
             const adminTitle = existingOrder ? 'Order Merged' : 'New Order Received';
             const adminBody = existingOrder 
@@ -1610,10 +1638,15 @@ export const cancelOrder = async (req, res) => {
             );
         }
 
-        // Emit Admin Notification (Real-time)
+        // Emit Admin Notification & Socket Event (Real-time)
         try {
-            // Emit a direct socket event so the admin panel table refreshes,
-            // without sending any notification to the admin dropdown or playing a sound.
+            broadcastOrderStatusChanged({
+                order,
+                oldStatus: prevStatus,
+                newStatus: order.orderStatus,
+                routeCategoryId: order.routeCategoryId,
+                godownId: order.godownId
+            });
             const io = getIO();
             if (io) {
                 io.to('admin_notifications').emit('order_updated', { id: order.id, status: 'Cancelled' });

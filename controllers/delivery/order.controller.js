@@ -8,6 +8,7 @@ import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import { getTodayRangeIST } from './dashboard.controller.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
+import { broadcastOrderStatusChanged, broadcastOrderAssigned, broadcastOrderDelivered } from '../../services/socketEvent.service.js';
 
 const sendDeliveredNotification = async (orderId) => {
     try {
@@ -814,6 +815,19 @@ export const updateMyAssignmentStatus = async (req, res) => {
         } else if (status === 'Completed') {
             await Order.update({ orderStatus: 'Delivered', deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') }, { where: { id: assignment.orderId } });
             await sendDeliveredNotification(assignment.orderId);
+            try {
+                const deliveredOrder = await Order.findByPk(assignment.orderId, {
+                    include: [
+                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
+                        { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
+                    ]
+                });
+                if (deliveredOrder) {
+                    broadcastOrderDelivered({ order: deliveredOrder, deliveryBoyId });
+                }
+            } catch (sErr) {
+                logger.error(`[Socket Broadcast Error in updateMyAssignmentStatus]: ${sErr.message}`);
+            }
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Assignment status updated successfully.", assignment);
@@ -1314,6 +1328,27 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
         // Trigger Delivered Push Notification
         await sendDeliveredNotification(assignment.orderId);
+
+        try {
+            const deliveredOrder = await Order.findByPk(assignment.orderId, {
+                include: [
+                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
+                    { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
+                ]
+            });
+            if (deliveredOrder) {
+                broadcastOrderStatusChanged({
+                    order: deliveredOrder,
+                    oldStatus: 'Shipping',
+                    newStatus: 'Payment Collect',
+                    routeCategoryId: deliveredOrder.routeCategoryId || deliveredOrder.user?.routeCategoryId,
+                    godownId: deliveredOrder.godownId,
+                    deliveryBoyId
+                });
+            }
+        } catch (sErr) {
+            logger.error(`[Socket Broadcast Error in completeOrderAndSettlePayment]: ${sErr.message}`);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order delivered and payments auto-adjusted successfully.");
     } catch (error) {
@@ -2303,6 +2338,31 @@ export const scanAndAssignOrder = async (req, res) => {
         order.shippingAt = now;
         order.deliveredAt = null;
         await order.save();
+
+        try {
+            const freshOrder = await Order.findByPk(order.id, {
+                include: [
+                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
+                    { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
+                ]
+            });
+            broadcastOrderAssigned({
+                order: freshOrder || order,
+                assignment,
+                deliveryBoyId: boy.id,
+                routeCategoryId: freshOrder?.routeCategoryId || freshOrder?.user?.routeCategoryId
+            });
+            broadcastOrderStatusChanged({
+                order: freshOrder || order,
+                oldStatus: previousStatus,
+                newStatus: 'Shipping',
+                routeCategoryId: freshOrder?.routeCategoryId || freshOrder?.user?.routeCategoryId,
+                godownId: order.godownId,
+                deliveryBoyId: boy.id
+            });
+        } catch (sErr) {
+            logger.error(`[Socket Broadcast Error in scanAndAssignOrder]: ${sErr.message}`);
+        }
 
         logger.info(`[Scan and Assign Order]: Order #${order.orderId} assigned to delivery boy ${boy.name} (${boy.id}). Prev status: ${previousStatus}`);
 
