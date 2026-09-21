@@ -231,15 +231,11 @@ export const getMyAssignedOrders = async (req, res) => {
                     data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
 
                     const uCredit = parseFloat(data.order.user.creditline || 0);
-                    if (uCredit > 0 && parseFloat(data.order.dueAmount || 0) > 0) {
-                        const billAmt = parseFloat(data.order.totalAmount || 0);
-                        const netPay = Math.max(0, parseFloat(data.order.dueAmount || 0) - uCredit);
-                        data.order.originalBillAmount = billAmt.toFixed(2);
-                        data.order.salesReturnAmount = uCredit.toFixed(2);
-                        data.order.netPayableAmount = netPay.toFixed(2);
-                        data.order.displayFormula = `₹${billAmt.toFixed(0)} - ₹${uCredit.toFixed(0)} = ₹${netPay.toFixed(0)}`;
-                        data.order.formula = `${billAmt.toFixed(0)} - ${uCredit.toFixed(0)} = ${netPay.toFixed(0)}`;
-                    }
+                    const uJama = parseFloat(data.order.user.advanceJama || 0);
+                    const bType = data.order.user.balanceType || (uJama > 0 ? 'JAMA' : (uCredit > 0 ? 'DUE' : 'CLEAR'));
+                    data.order.user.balanceType = bType;
+                    data.order.user.creditline = uCredit.toFixed(2);
+                    data.order.user.advanceJama = uJama.toFixed(2);
                 }
                 return data;
             });
@@ -443,23 +439,83 @@ export const getAssignmentDetails = async (req, res) => {
 
         // Fetch past due payments for this user
         const userId = assignment.order?.userId;
-        let pastDueOrders = [];
-        let totalPastDueAmount = 0;
+        const userPhoneClean = assignment.order?.user?.number ? String(assignment.order.user.number).replace(/\D/g, '').slice(-10) : '';
+        const currentOrderDbId = assignment.order?.id;
+        const currentOrderNum = parseInt(String(assignment.order?.orderId || '').replace(/\D/g, ''), 10) || 0;
+        const currentOrderCreated = assignment.order?.createdAt ? new Date(assignment.order.createdAt).getTime() : Date.now();
 
-        if (userId) {
-            pastDueOrders = await Order.findAll({
+        let pastDueOrders = [];
+        let unpaidOrdersSum = 0;
+
+        if (userId || userPhoneClean) {
+            const userOrConditions = [];
+            if (userId) userOrConditions.push({ userId });
+            if (userPhoneClean && userPhoneClean.length >= 7) {
+                userOrConditions.push({ customerNumber: { [Op.like]: `%${userPhoneClean}` } });
+            }
+
+            const candidateOrders = await Order.findAll({
                 where: {
-                    userId,
-                    dueAmount: { [Op.gt]: 0 },
-                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] },
-                    orderId: { [Op.ne]: assignment.order.orderId } // Exclude current order
+                    [Op.or]: userOrConditions,
+                    id: { [Op.ne]: currentOrderDbId },
+                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
                 },
-                attributes: ['id', 'orderId', 'totalAmount', 'dueAmount', 'paymentStatus'],
+                include: [
+                    {
+                        model: OrderPayment,
+                        as: 'payments',
+                        required: false,
+                        attributes: ['id', 'amount', 'paymentMethod']
+                    }
+                ],
+                attributes: ['id', 'orderId', 'totalAmount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
                 order: [['createdAt', 'DESC']]
             });
 
-            const unpaidOrdersSum = pastDueOrders.reduce((sum, order) => sum + parseFloat(order.dueAmount || 0), 0);
-            totalPastDueAmount = Math.max(0, unpaidOrdersSum);
+            candidateOrders.forEach(uo => {
+                const uoOrderNum = parseInt(String(uo.orderId || '').replace(/\D/g, ''), 10) || 0;
+                const uoTime = new Date(uo.createdAt).getTime();
+                const isEarlier = (uoOrderNum > 0 && currentOrderNum > 0)
+                    ? (uoOrderNum < currentOrderNum)
+                    : (uoTime <= currentOrderCreated);
+
+                if (!isEarlier) return;
+
+                const tot = parseFloat(uo.totalAmount || 0);
+                const dueCol = parseFloat(uo.dueAmount || 0);
+                const paid = parseFloat(uo.paidAmount || 0);
+                const pStatus = String(uo.paymentStatus || '').toLowerCase();
+
+                let realPaid = paid;
+                if (Array.isArray(uo.payments) && uo.payments.length > 0) {
+                    realPaid = uo.payments.reduce((pSum, p) => {
+                        const m = String(p.paymentMethod || p.method || '').toUpperCase();
+                        return m !== 'CREDIT' ? pSum + parseFloat(p.amount || 0) : pSum;
+                    }, 0);
+                }
+
+                let due = 0;
+                if (pStatus !== 'paid') {
+                    if (dueCol > 0) {
+                        due = Math.min(tot, dueCol);
+                    } else if (realPaid < tot - 0.01) {
+                        due = Math.max(0, tot - realPaid);
+                    }
+                }
+
+                if (due > 0) {
+                    unpaidOrdersSum += due;
+                    pastDueOrders.push({
+                        id: uo.id,
+                        orderId: uo.orderId,
+                        totalAmount: tot,
+                        dueAmount: due,
+                        paymentStatus: uo.paymentStatus,
+                        orderStatus: uo.orderStatus,
+                        createdAt: uo.createdAt
+                    });
+                }
+            });
         }
 
         const data = assignment.toJSON();
@@ -577,11 +633,18 @@ export const getAssignmentDetails = async (req, res) => {
 
         const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
 
-        // Customer Advance Jama Balance (Only true JAMA advance money, NEVER customer udhari/creditline)
-        const userBalanceType = assignment.order?.user?.balanceType || 'DUE';
+        // Customer Advance Jama / Udhari Balance
         const userAdvanceJama = parseFloat(assignment.order?.user?.advanceJama || 0);
+        const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
+        const userBalanceType = assignment.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
         const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
-        const userCreditVal = (userBalanceType === 'DUE') ? parseFloat(assignment.order?.user?.creditline || 0) : 0;
+
+        let totalPastDueAmount = 0;
+        if (userBalanceType === 'DUE') {
+            totalPastDueAmount = userCreditVal > 0 ? Math.max(userCreditVal, unpaidOrdersSum) : unpaidOrdersSum;
+        } else if (userBalanceType !== 'JAMA') {
+            totalPastDueAmount = unpaidOrdersSum;
+        }
 
         const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
         const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
@@ -590,7 +653,11 @@ export const getAssignmentDetails = async (req, res) => {
 
         data.pastDueOrders = pastDueOrders;
         data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
+        data.duePayment = totalPastDueAmount.toFixed(2);
+        data.pastDueAmount = totalPastDueAmount.toFixed(2);
+        data.currentPayment = netOrderCollectible.toFixed(2);
         data.netPayableAmount = netPayableVal.toFixed(2);
+        data.totalAmount = netPayableVal.toFixed(2);
         data.jamaAmount = jamaAmountVal.toFixed(2);
         data.userCreditline = userCreditVal.toFixed(2);
         data.advanceJama = userAdvanceJama.toFixed(2);
@@ -605,6 +672,8 @@ export const getAssignmentDetails = async (req, res) => {
             data.order.netPayableAmount = netOrderCollectible.toFixed(2);
             data.order.payableAmount = netOrderCollectible.toFixed(2);
             data.order.dueAmount = netOrderCollectible.toFixed(2);
+            data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
+            data.order.duePayment = totalPastDueAmount.toFixed(2);
             data.order.salesReturnCalculation = data.salesReturnCalculation;
         }
 
