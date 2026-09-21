@@ -520,11 +520,31 @@ export const createOrder = async (req, res) => {
             const currentCredit = parseFloat(user.creditline) || 0;
             if (currentCredit < finalTotal) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ${currentCredit}, Required: ${finalTotal}`);
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ₹${currentCredit.toFixed(2)}, Required: ₹${finalTotal.toFixed(2)}`);
             }
 
-            // Do NOT deduct from credit line during order creation as per user request (ત્યારે ક્રેડિટ કટ નથી કરવાની)
-            paymentStatus = 'Pending'; // Set to Pending so CREDIT orders are treated as outstanding dues (baki)
+            // Deduct from customer's available credit line (e.g. 10000 - 600 = 9400)
+            user.creditline = Math.max(0, currentCredit - finalTotal);
+            if (user.creditline <= 0) {
+                user.blockcredit = true;
+            }
+            await user.save({ transaction: t });
+
+            // Record in Party Balance Log
+            const PartyBalanceLog = User.sequelize.models.PartyBalanceLog;
+            if (PartyBalanceLog) {
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    type: 'DUE',
+                    amount: finalTotal,
+                    previousBalance: currentCredit,
+                    newBalance: user.creditline,
+                    note: `Order placed on Credit: -₹${finalTotal.toFixed(2)}. Available Credit: ₹${user.creditline.toFixed(2)}`,
+                    createdByName: 'Customer Order'
+                }, { transaction: t });
+            }
+
+            paymentStatus = 'Pending';
         } else if (method === 'ONLINE') {
             paymentStatus = 'Pending';
         } else {

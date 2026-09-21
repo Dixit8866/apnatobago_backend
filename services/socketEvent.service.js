@@ -113,6 +113,7 @@ export const broadcastOrderCreated = (order) => {
                 order: payload,
                 timestamp: new Date().toISOString()
             });
+            io.to(`area_${payload.routeCategoryId}`).emit('order:created', eventData);
         }
 
         logger.info(`[Socket Broadcast] ORDER_CREATED emitted for Order #${payload.orderId}`);

@@ -7,6 +7,7 @@ import { Op } from 'sequelize';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
+import { broadcastOrderCreated, broadcastOrderStatusChanged } from '../../services/socketEvent.service.js';
 
 /**
  * Generate a unique human-readable Order ID for Direct Sales
@@ -402,7 +403,58 @@ export const createCustomSale = async (req, res) => {
             await OrderPayment.bulkCreate(paymentRecords, { transaction: t });
         }
 
+        // Deduct from User creditline if order was placed on Credit
+        if (userId && (orderPaymentMethod === 'CREDIT' || (Array.isArray(payments) && payments.some(p => p.method === 'CREDIT')))) {
+            const user = await User.findByPk(userId, { transaction: t });
+            if (user) {
+                const creditUsed = Array.isArray(payments) && payments.length > 0
+                    ? payments.filter(p => p.method === 'CREDIT').reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+                    : dueAmount;
+
+                if (creditUsed > 0) {
+                    const prevCred = parseFloat(user.creditline || 0);
+                    user.creditline = Math.max(0, prevCred - creditUsed);
+                    if (user.creditline <= 0) {
+                        user.blockcredit = true;
+                    }
+                    await user.save({ transaction: t });
+
+                    const PartyBalanceLog = User.sequelize.models.PartyBalanceLog;
+                    if (PartyBalanceLog) {
+                        await PartyBalanceLog.create({
+                            userId: user.id,
+                            orderId: newSale.id,
+                            type: 'DUE',
+                            amount: creditUsed,
+                            previousBalance: prevCred,
+                            newBalance: user.creditline,
+                            note: `Custom Sale #${newSale.orderId} placed on Credit: -₹${creditUsed.toFixed(2)}. Available Credit: ₹${user.creditline.toFixed(2)}`,
+                            createdByName: req.user?.fullname || 'Admin'
+                        }, { transaction: t });
+                    }
+                }
+            }
+        }
+
         await t.commit();
+
+        // Broadcast socket real-time update
+        try {
+            const freshSaleForSocket = await Order.findByPk(newSale.id, {
+                include: [
+                    {
+                        model: User,
+                        as: 'user',
+                        attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'],
+                        include: [{ model: User.sequelize.models.BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'area'] }]
+                    }
+                ]
+            });
+            broadcastOrderCreated(freshSaleForSocket || newSale);
+        } catch (sErr) {
+            logger.error(`[Socket Broadcast Error on createCustomSale]: ${sErr.message}`);
+        }
+
         logActivity(req, {
             module: 'Custom Sales',
             action: 'CREATE',
