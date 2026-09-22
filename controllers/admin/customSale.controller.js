@@ -1,4 +1,4 @@
-import { Order, OrderItem, Product, ProductVariant, ProductPricing, User, Volume, InventoryStock, InventoryTransaction, AppSettings, OrderPayment } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, ProductPricing, User, Volume, InventoryStock, InventoryTransaction, AppSettings, OrderPayment, BusinessProfile } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -88,8 +88,9 @@ export const createCustomSale = async (req, res) => {
         let resolvedRouteCategoryId = null;
         let resolvedCustomerName = customerName || null;
         let resolvedCustomerNumber = customerNumber || null;
+        let userObj = null;
         if (userId) {
-            const userObj = await User.findByPk(userId, { transaction: t });
+            userObj = await User.findByPk(userId, { transaction: t });
             if (userObj) {
                 userAppLevel = userObj.applevel || null;
                 resolvedRouteCategoryId = userObj.routeCategoryId || null;
@@ -322,7 +323,7 @@ export const createCustomSale = async (req, res) => {
             deliveryCharge,
             createdByAdminId: req.user?.id,
             notes,
-            deliveryNotice: notes || (user ? user.deliveryNotice : null) || null,
+            deliveryNotice: notes || (userObj ? userObj.deliveryNotice : null) || null,
             routeCategoryId: resolvedRouteCategoryId,
             godownId: req.body.godownId || null,
             orderDate: orderDate || new Date().toISOString().split('T')[0],
