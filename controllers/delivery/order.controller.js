@@ -699,8 +699,9 @@ export const getAssignmentDetails = async (req, res) => {
 export const updateMyAssignmentStatus = async (req, res) => {
     try {
         const { assignmentId } = req.params;
-        const { status, notes } = req.body;
+        const { status, notes, note, deliveryNote } = req.body;
         const deliveryBoyId = req.user.id;
+        const noteText = String(notes || note || deliveryNote || '').trim();
         logger.info(`[Update Assignment Status]: Param ${assignmentId}, New Status: ${status}, Boy: ${deliveryBoyId}`);
 
         const validStatuses = ['Pending', 'Assigned', 'Cancelled', 'Completed'];
@@ -814,7 +815,7 @@ export const updateMyAssignmentStatus = async (req, res) => {
             return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", { order });
         }
 
-        await assignment.update({ status, notes: notes || assignment.notes });
+        await assignment.update({ status, notes: noteText || assignment.notes });
 
         if (status === 'Cancelled') {
             const order = await Order.findByPk(assignment.orderId, {
@@ -882,7 +883,18 @@ export const updateMyAssignmentStatus = async (req, res) => {
                 }
             }
         } else if (status === 'Completed') {
-            await Order.update({ orderStatus: 'Delivered', deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') }, { where: { id: assignment.orderId } });
+            const order = await Order.findByPk(assignment.orderId);
+            if (order) {
+                let updatedNotes = order.notes || '';
+                if (noteText) {
+                    updatedNotes = updatedNotes ? `${updatedNotes}\n[Delivery Note]: ${noteText}` : `[Delivery Note]: ${noteText}`;
+                }
+                await order.update({
+                    orderStatus: 'Delivered',
+                    deliveredAt: order.deliveredAt || new Date(),
+                    notes: updatedNotes || order.notes
+                });
+            }
             await sendDeliveredNotification(assignment.orderId);
             try {
                 const deliveredOrder = await Order.findByPk(assignment.orderId, {
@@ -982,6 +994,8 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             returnItems,
             onlineTransactionId,
             notes,
+            note,
+            deliveryNote,
             totalCouponPoints,
             couponPoints,
             totalCouponPrice,
@@ -991,6 +1005,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             couponItems
         } = req.body;
         const deliveryBoyId = req.user.id;
+        const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
 
         const assignment = await OrderAssignment.findOne({
             where: { id: assignmentId, deliveryBoyId },
@@ -1299,10 +1314,13 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         if (pastDueSettled > 0) orderNotes.push(`Past Due Cleared: ₹${pastDueSettled}`);
 
         let newNotes = assignment.order.notes ? assignment.order.notes + '\n' : '';
+        if (customDeliveryNote) {
+            newNotes += `[Delivery Note]: ${customDeliveryNote}\n`;
+        }
         if (orderNotes.length > 0) {
             newNotes += `[${new Date().toLocaleString()}] Adjustments: ${orderNotes.join(', ')}`;
         }
-        assignment.order.notes = newNotes;
+        assignment.order.notes = newNotes.trim();
         await assignment.order.save({ transaction: t });
 
         let remainingCash = Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded - pastDueSettled);
@@ -1390,7 +1408,7 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
         await assignment.update({
             status: 'Completed',
-            notes: notes || assignment.notes
+            notes: customDeliveryNote || assignment.notes
         }, { transaction: t });
 
         await t.commit();
@@ -1484,9 +1502,12 @@ export const settleSingleOrderPayment = async (req, res) => {
             salesReturnItems,
             returnItems,
             onlineTransactionId,
-            notes
+            notes,
+            note,
+            deliveryNote
         } = req.body;
         const deliveryBoyId = req.user.id;
+        const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
 
         if (!orderId) {
             await t.rollback();
@@ -1769,9 +1790,12 @@ export const settleSingleOrderPayment = async (req, res) => {
             }
 
             let newNotes = order.notes ? order.notes + '\n' : '';
+            if (customDeliveryNote) {
+                newNotes += `[Delivery Note]: ${customDeliveryNote}\n`;
+            }
             if (orderNotes.length > 0) {
                 newNotes += `[${new Date().toLocaleString()}] Single Settle Adjustments: ${orderNotes.join(', ')}`;
-            } else {
+            } else if (!customDeliveryNote) {
                 newNotes = order.notes;
             }
 
@@ -1781,7 +1805,7 @@ export const settleSingleOrderPayment = async (req, res) => {
                 paymentStatus: newPaymentStatus,
                 paymentMethod: finalMethod,
                 orderStatus: 'Payment Collect',
-                notes: newNotes
+                notes: (newNotes || '').trim()
             }, { transaction: t });
 
             // Complete associated assignment if found
@@ -1792,7 +1816,7 @@ export const settleSingleOrderPayment = async (req, res) => {
             if (assignment) {
                 await assignment.update({
                     status: 'Completed',
-                    notes: notes || assignment.notes
+                    notes: customDeliveryNote || assignment.notes
                 }, { transaction: t });
             }
         }
@@ -1952,8 +1976,9 @@ export const submitDeliveryBankPayment = async (req, res) => {
     const t = await OrderAssignment.sequelize.transaction();
     try {
         const { id } = req.params;
-        const { bankSettingId, screenshot, transactionId, amount } = req.body;
+        const { bankSettingId, screenshot, transactionId, amount, notes, note, deliveryNote } = req.body;
         const deliveryBoyId = req.user.id; // Authenticated delivery boy
+        const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
 
         // 1. Find the order (Support both UUID primary key and human-readable orderId e.g. '1006')
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -2023,15 +2048,20 @@ export const submitDeliveryBankPayment = async (req, res) => {
         if (assignment) {
             await assignment.update({
                 status: 'Completed',
-                notes: 'Settled via Direct Bank Transfer in Delivery Boy App'
+                notes: customDeliveryNote || 'Settled via Direct Bank Transfer in Delivery Boy App'
             }, { transaction: t });
         }
 
         // 7. Settle/Update the Order status to 'Payment Verify' since payment proof is submitted and needs verification
         // Also set deliveredAt since the order has been delivered
+        let updatedNotes = order.notes || '';
+        if (customDeliveryNote) {
+            updatedNotes = updatedNotes ? `${updatedNotes}\n[Delivery Note]: ${customDeliveryNote}` : `[Delivery Note]: ${customDeliveryNote}`;
+        }
         await order.update({
             orderStatus: 'Payment Verify',
-            deliveredAt: order.deliveredAt || new Date()
+            deliveredAt: order.deliveredAt || new Date(),
+            notes: updatedNotes || order.notes
         }, { transaction: t });
 
         await t.commit();
