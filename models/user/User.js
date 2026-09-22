@@ -142,6 +142,10 @@ const User = sequelize.define('User', {
         defaultValue: 0.00,
         allowNull: true,
     },
+    deliveryNotice: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+    },
     credit: {
         type: DataTypes.VIRTUAL,
         get() {

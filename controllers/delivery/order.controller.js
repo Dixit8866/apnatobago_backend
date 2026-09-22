@@ -885,14 +885,10 @@ export const updateMyAssignmentStatus = async (req, res) => {
         } else if (status === 'Completed') {
             const order = await Order.findByPk(assignment.orderId);
             if (order) {
-                let updatedNotes = order.notes || '';
-                if (noteText) {
-                    updatedNotes = updatedNotes ? `${updatedNotes}\n[Delivery Note]: ${noteText}` : `[Delivery Note]: ${noteText}`;
-                }
                 await order.update({
                     orderStatus: 'Delivered',
                     deliveredAt: order.deliveredAt || new Date(),
-                    notes: updatedNotes || order.notes
+                    notes: noteText || order.notes
                 });
             }
             await sendDeliveredNotification(assignment.orderId);
@@ -1306,22 +1302,10 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             assignment.order.paymentMethod = 'SPLIT';
         }
 
-        const orderNotes = [];
-        if (inputCash > 0) orderNotes.push(`Paid ${inputCash} via Cash`);
-        if (inputOnline > 0) orderNotes.push(`Paid ${inputOnline} via Online`);
-        if (inputReturn > 0) orderNotes.push(`Paid ₹${inputReturn} via Sales Return`);
-        if (inputCredit > 0) orderNotes.push(`Paid ${inputCredit} via Credit (Baki)`);
-        if (pastDueSettled > 0) orderNotes.push(`Past Due Cleared: ₹${pastDueSettled}`);
-
-        let newNotes = assignment.order.notes ? assignment.order.notes + '\n' : '';
         if (customDeliveryNote) {
-            newNotes += `[Delivery Note]: ${customDeliveryNote}\n`;
+            assignment.order.notes = customDeliveryNote;
+            await assignment.order.save({ transaction: t });
         }
-        if (orderNotes.length > 0) {
-            newNotes += `[${new Date().toLocaleString()}] Adjustments: ${orderNotes.join(', ')}`;
-        }
-        assignment.order.notes = newNotes.trim();
-        await assignment.order.save({ transaction: t });
 
         let remainingCash = Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded - pastDueSettled);
         let remainingOnline = 0;
@@ -1789,23 +1773,13 @@ export const settleSingleOrderPayment = async (req, res) => {
                 finalMethod = 'SPLIT';
             }
 
-            let newNotes = order.notes ? order.notes + '\n' : '';
-            if (customDeliveryNote) {
-                newNotes += `[Delivery Note]: ${customDeliveryNote}\n`;
-            }
-            if (orderNotes.length > 0) {
-                newNotes += `[${new Date().toLocaleString()}] Single Settle Adjustments: ${orderNotes.join(', ')}`;
-            } else if (!customDeliveryNote) {
-                newNotes = order.notes;
-            }
-
             await order.update({
                 paidAmount: order.paidAmount,
                 dueAmount: due,
                 paymentStatus: newPaymentStatus,
                 paymentMethod: finalMethod,
                 orderStatus: 'Payment Collect',
-                notes: (newNotes || '').trim()
+                notes: customDeliveryNote || order.notes
             }, { transaction: t });
 
             // Complete associated assignment if found
@@ -2054,14 +2028,10 @@ export const submitDeliveryBankPayment = async (req, res) => {
 
         // 7. Settle/Update the Order status to 'Payment Verify' since payment proof is submitted and needs verification
         // Also set deliveredAt since the order has been delivered
-        let updatedNotes = order.notes || '';
-        if (customDeliveryNote) {
-            updatedNotes = updatedNotes ? `${updatedNotes}\n[Delivery Note]: ${customDeliveryNote}` : `[Delivery Note]: ${customDeliveryNote}`;
-        }
         await order.update({
             orderStatus: 'Payment Verify',
             deliveredAt: order.deliveredAt || new Date(),
-            notes: updatedNotes || order.notes
+            notes: customDeliveryNote || order.notes
         }, { transaction: t });
 
         await t.commit();

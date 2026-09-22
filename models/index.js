@@ -590,7 +590,8 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "billPrintTime" VARCHAR(50) DEFAULT NULL');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "minimumOrderValue" DECIMAL(10, 2) DEFAULT 0.00');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "routeSectionId" UUID DEFAULT NULL');
-        } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama/billPrintTime/minimumOrderValue/routeSectionId migration failed:', e.message); }
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "deliveryNotice" TEXT DEFAULT NULL');
+        } catch (e) { console.log('[Migration Warning] Users balanceType/advanceJama/billPrintTime/minimumOrderValue/routeSectionId/deliveryNotice migration failed:', e.message); }
 
         try {
             await sequelize.query('ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS "area" VARCHAR(255) DEFAULT NULL');
@@ -604,6 +605,7 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "createdByAdminId" UUID DEFAULT NULL');
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "verifiedByAdminId" UUID DEFAULT NULL');
             await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "pastDueCollected" DECIMAL(10, 2) DEFAULT 0.00');
+            await sequelize.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS "deliveryNotice" TEXT DEFAULT NULL');
             await sequelize.query('UPDATE orders SET "pastDueCollected" = 200.00 WHERE "orderId" = \'100079\' AND ("pastDueCollected" IS NULL OR "pastDueCollected" = 0)');
             await sequelize.query('UPDATE orders SET "dueAmount" = 8000.00, "pastDueCollected" = 6000.00 WHERE "orderId" = \'100081\'');
             await sequelize.query(`

@@ -4028,5 +4028,22 @@ export const scanAndPackOrder = async (req, res) => {
     }
 };
 
+export const resolvePartyNotice = async (req, res) => {
+    try {
+        const { orderId, userId } = req.body;
+        if (orderId) {
+            await Order.update({ deliveryNotice: null, notes: null }, { where: { id: orderId } });
+            await OrderAssignment.update({ notes: null }, { where: { orderId } });
+        }
+        if (userId) {
+            await User.update({ deliveryNotice: null }, { where: { id: userId } });
+        }
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Party notice resolved successfully.");
+    } catch (err) {
+        logger.error(`[Resolve Party Notice Error]: ${err.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to resolve party notice.", err.message);
+    }
+};
+
 
 

@@ -88,6 +88,10 @@ const Order = sequelize.define(
             type: DataTypes.TEXT,
             allowNull: true,
         },
+        deliveryNotice: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
         deliveryMode: {
             type: DataTypes.STRING,
             allowNull: true,
