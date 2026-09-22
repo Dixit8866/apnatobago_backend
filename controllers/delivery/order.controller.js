@@ -2483,3 +2483,83 @@ export const scanAndAssignOrder = async (req, res) => {
     }
 };
 
+/**
+ * @desc    Resolve delivery notice for an order/party (Delivery Boy App)
+ * @route   PUT /api/delivery/orders/notice/resolve or PUT /api/delivery/orders/:orderId/resolve-notice
+ * @access  Private (Delivery Boy)
+ */
+export const resolveDeliveryNotice = async (req, res) => {
+    try {
+        const orderIdParam = req.params.orderId || req.params.id;
+        const { orderId: bodyOrderId, userId } = req.body;
+        const targetOrderId = orderIdParam || bodyOrderId;
+
+        let targetUserId = userId;
+        let ord = null;
+
+        if (targetOrderId) {
+            const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(targetOrderId);
+            const whereCond = isUuid ? { [Op.or]: [{ id: targetOrderId }, { orderId: targetOrderId }] } : { orderId: targetOrderId };
+            ord = await Order.findOne({ where: whereCond });
+            
+            if (ord) {
+                if (ord.userId) targetUserId = ord.userId;
+                await Order.update({ deliveryNotice: null, notes: null }, { where: { id: ord.id } });
+                await OrderAssignment.update({ notes: null }, { where: { orderId: ord.id } });
+            }
+        }
+
+        if (targetUserId) {
+            await User.update({ deliveryNotice: null }, { where: { id: targetUserId } });
+            await Order.update({ deliveryNotice: null, notes: null }, { where: { userId: targetUserId } });
+        }
+
+        logger.info(`[Delivery App Resolve Notice]: Notice resolved for orderId: ${targetOrderId}, userId: ${targetUserId} by delivery boy ${req.user?.id}`);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "નોંધ સફળતાપૂર્વક સોલ્વ થઈ ગઈ છે (Delivery notice resolved successfully).", {
+            orderId: targetOrderId,
+            userId: targetUserId,
+            resolved: true,
+            hasNotice: false,
+            deliveryNotice: null
+        });
+    } catch (err) {
+        logger.error(`[Delivery App Resolve Notice Error]: ${err.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "નોંધ સોલ્વ કરવામાં ભૂલ આવી (Failed to resolve notice).", err.message);
+    }
+};
+
+/**
+ * @desc    Decline / Acknowledge delivery notice for an order (Delivery Boy App)
+ * @route   PUT /api/delivery/orders/notice/decline or PUT /api/delivery/orders/:orderId/decline-notice
+ * @access  Private (Delivery Boy)
+ */
+export const declineDeliveryNotice = async (req, res) => {
+    try {
+        const orderIdParam = req.params.orderId || req.params.id;
+        const { orderId: bodyOrderId, note, notes } = req.body;
+        const targetOrderId = orderIdParam || bodyOrderId;
+
+        let ord = null;
+        if (targetOrderId) {
+            const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(targetOrderId);
+            const whereCond = isUuid ? { [Op.or]: [{ id: targetOrderId }, { orderId: targetOrderId }] } : { orderId: targetOrderId };
+            ord = await Order.findOne({ where: whereCond });
+        }
+
+        const currentNotice = ord?.deliveryNotice || ord?.notes || note || notes || null;
+        logger.info(`[Delivery App Decline Notice]: Notice acknowledged/declined for orderId: ${targetOrderId} by delivery boy ${req.user?.id}`);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "નોંધ ધ્યાનમાં લેવાઈ છે (Notice acknowledged).", {
+            orderId: targetOrderId,
+            acknowledged: true,
+            hasNotice: Boolean(currentNotice),
+            deliveryNotice: currentNotice
+        });
+    } catch (err) {
+        logger.error(`[Delivery App Decline Notice Error]: ${err.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "નોંધ સ્વીકારવામાં ભૂલ આવી (Failed to process notice action).", err.message);
+    }
+};
+
+

@@ -10,7 +10,9 @@ import {
     getUserPreviousBills,
     settleSingleOrderPayment,
     submitDeliveryBankPayment,
-    scanAndAssignOrder
+    scanAndAssignOrder,
+    resolveDeliveryNotice,
+    declineDeliveryNotice
 } from '../../controllers/delivery/order.controller.js';
 import { 
     getDeliveryAreaCategories, 
@@ -42,6 +44,13 @@ router.get('/user-credit/:userId', getUserCreditDetails);
 router.get('/user-previous-bills/:userId', getUserPreviousBills);
 router.put('/reorder', reorderAssignments);
 router.put('/settle-single', settleSingleOrderPayment);
+
+// Delivery Notice Resolve & Decline APIs (For Delivery App popup modal)
+router.put('/notice/resolve', resolveDeliveryNotice);
+router.put('/notice/decline', declineDeliveryNotice);
+router.put('/:orderId/resolve-notice', resolveDeliveryNotice);
+router.put('/:orderId/decline-notice', declineDeliveryNotice);
+
 router.put('/:assignmentId/status', updateMyAssignmentStatus);
 router.put('/:assignmentId/complete-settle', completeOrderAndSettlePayment);
 router.post('/sales-return', createSalesReturn);
