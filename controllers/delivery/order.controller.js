@@ -1779,8 +1779,13 @@ export const settleSingleOrderPayment = async (req, res) => {
                 paymentStatus: newPaymentStatus,
                 paymentMethod: finalMethod,
                 orderStatus: 'Payment Collect',
-                notes: customDeliveryNote || order.notes
+                notes: customDeliveryNote || order.notes,
+                deliveryNotice: customDeliveryNote || order.deliveryNotice
             }, { transaction: t });
+
+            if (customDeliveryNote && order.userId) {
+                await User.update({ deliveryNotice: customDeliveryNote }, { where: { id: order.userId }, transaction: t });
+            }
 
             // Complete associated assignment if found
             const assignment = await OrderAssignment.findOne({
@@ -2031,8 +2036,13 @@ export const submitDeliveryBankPayment = async (req, res) => {
         await order.update({
             orderStatus: 'Payment Verify',
             deliveredAt: order.deliveredAt || new Date(),
-            notes: customDeliveryNote || order.notes
+            notes: customDeliveryNote || order.notes,
+            deliveryNotice: customDeliveryNote || order.deliveryNotice
         }, { transaction: t });
+
+        if (customDeliveryNote && order.userId) {
+            await User.update({ deliveryNotice: customDeliveryNote }, { where: { id: order.userId }, transaction: t });
+        }
 
         await t.commit();
 

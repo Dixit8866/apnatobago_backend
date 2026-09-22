@@ -51,7 +51,7 @@ export const bulkAssignOrders = async (req, res) => {
                     {
                         model: User,
                         as: 'user',
-                        attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'],
+                        attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId', 'deliveryNotice'],
                         include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress', 'area'] }]
                     },
                     {

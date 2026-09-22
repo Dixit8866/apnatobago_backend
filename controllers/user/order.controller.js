@@ -679,6 +679,7 @@ export const createOrder = async (req, res) => {
                 deliveryDate: deliveryDate || null,
                 routeCategoryId: userData.routeCategoryId || null,
                 godownId: targetGodownId,
+                deliveryNotice: userData.deliveryNotice || null,
             }, { transaction: t });
 
             targetOrder = newOrder;

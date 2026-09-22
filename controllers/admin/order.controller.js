@@ -455,7 +455,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'routeCategoryId'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'routeCategoryId', 'deliveryNotice'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -599,7 +599,7 @@ export const getAllOrders = async (req, res) => {
                             model: User,
                             as: 'user',
                             required: false,
-                            attributes: ['id', 'number', 'fullname'],
+                            attributes: ['id', 'number', 'fullname', 'deliveryNotice'],
                             include: [
                                 {
                                     model: BusinessProfile,
@@ -614,9 +614,16 @@ export const getAllOrders = async (req, res) => {
                             as: 'payments',
                             required: false,
                             attributes: ['id', 'amount', 'paymentMethod']
+                        },
+                        {
+                            model: OrderAssignment,
+                            as: 'assignment',
+                            required: false,
+                            attributes: ['id', 'notes']
                         }
                     ],
-                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt']
+                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt', 'notes', 'deliveryNotice'],
+                    order: [['createdAt', 'DESC']]
                 });
 
                 unpaidOrdersStore = unpaidOrdersList.map(uo => {
@@ -648,6 +655,15 @@ export const getAllOrders = async (req, res) => {
                     const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
                     const uName = String(uo.user?.fullname || uo.customerName || '').toLowerCase().trim();
 
+                    let pastNote = uo.deliveryNotice || uo.user?.deliveryNotice || '';
+                    if (!pastNote && uo.assignment?.notes && !uo.assignment.notes.includes('Settled via Direct Bank Transfer') && !uo.assignment.notes.includes('Cancelled by Delivery Boy')) {
+                        pastNote = String(uo.assignment.notes).replace(/^\[Delivery Note\]:\s*/i, '').trim();
+                    }
+                    if (!pastNote && uo.notes) {
+                        const clean = String(uo.notes).replace(/\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Adjustments:[^\n]*/gi, '').replace(/\[Delivery Note\]:\s*/gi, '').trim();
+                        if (clean && !clean.includes('Adjustments:')) pastNote = clean;
+                    }
+
                     return {
                         id: uo.id,
                         orderId: uo.orderId,
@@ -656,9 +672,10 @@ export const getAllOrders = async (req, res) => {
                         shopName: uShop,
                         name: uName,
                         due,
+                        pastNote,
                         createdAt: new Date(uo.createdAt).getTime()
                     };
-                }).filter(o => o.due > 0);
+                });
 
             } catch (dueErr) {
                 console.error(`[DEBUG DUES ERROR] Previous Unpaid Dues Calc Error: ${dueErr.message}`, dueErr);
@@ -713,6 +730,37 @@ export const getAllOrders = async (req, res) => {
                 const userAdvanceJama = parseFloat(order.user?.advanceJama || 0);
                 const userBalanceType = order.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditline > 0 ? 'DUE' : 'CLEAR'));
 
+                // Determine active delivery note/notice for this party
+                let activeDeliveryNotice = order.deliveryNotice || order.user?.deliveryNotice || '';
+                if (!activeDeliveryNotice && order.assignment?.notes && !order.assignment.notes.includes('Settled via Direct Bank Transfer') && !order.assignment.notes.includes('Cancelled by Delivery Boy')) {
+                    activeDeliveryNotice = String(order.assignment.notes).replace(/^\[Delivery Note\]:\s*/i, '').trim();
+                }
+                if (!activeDeliveryNotice && order.notes) {
+                    const clean = String(order.notes).replace(/\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Adjustments:[^\n]*/gi, '').replace(/\[Delivery Note\]:\s*/gi, '').trim();
+                    if (clean && !clean.includes('Adjustments:')) activeDeliveryNotice = clean;
+                }
+
+                // If this order itself didn't have notice, look up the party's recent past order notice!
+                if (!activeDeliveryNotice) {
+                    const recentPastWithNote = unpaidOrdersStore.find(uo => {
+                        let isSameCust = false;
+                        if (uId && uo.userId && String(uId) === String(uo.userId)) isSameCust = true;
+                        else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) isSameCust = true;
+                        else if (oShop && uo.shopName && oShop.length >= 3 && oShop === uo.shopName) isSameCust = true;
+                        else if (oName && uo.name && oName.length >= 3 && oName === uo.name) isSameCust = true;
+                        return isSameCust && Boolean(uo.pastNote);
+                    });
+                    if (recentPastWithNote) {
+                        activeDeliveryNotice = recentPastWithNote.pastNote;
+                    }
+                }
+
+                order.setDataValue('deliveryNotice', activeDeliveryNotice || null);
+                order.setDataValue('partyActiveNotice', activeDeliveryNotice || null);
+                if (order.user) {
+                    order.user.setDataValue ? order.user.setDataValue('deliveryNotice', activeDeliveryNotice || null) : (order.user.deliveryNotice = activeDeliveryNotice || null);
+                }
+
                 order.setDataValue('userCreditline', userCreditline);
                 order.setDataValue('userAdvanceJama', userAdvanceJama);
                 order.setDataValue('userBalanceType', userBalanceType);
@@ -723,11 +771,14 @@ export const getAllOrders = async (req, res) => {
 
                 const adjusted = adjustOrderPayments(order);
                 if (adjusted) {
+                    adjusted.deliveryNotice = activeDeliveryNotice || null;
+                    adjusted.partyActiveNotice = activeDeliveryNotice || null;
                     adjusted.previousUnpaidDue = prevUnpaidDue;
                     adjusted.userCreditline = userCreditline;
                     adjusted.userAdvanceJama = userAdvanceJama;
                     adjusted.userBalanceType = userBalanceType;
                     if (adjusted.user) {
+                        adjusted.user.deliveryNotice = activeDeliveryNotice || null;
                         adjusted.user.previousUnpaidDue = prevUnpaidDue;
                         adjusted.user.creditline = userCreditline;
                         adjusted.user.advanceJama = userAdvanceJama;
@@ -2108,7 +2159,7 @@ export const getOrderDetails = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel', 'walletBalance', 'creditline', 'blockcredit'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'deliveryNotice'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -4031,12 +4082,18 @@ export const scanAndPackOrder = async (req, res) => {
 export const resolvePartyNotice = async (req, res) => {
     try {
         const { orderId, userId } = req.body;
+        let targetUserId = userId;
         if (orderId) {
+            const ord = await Order.findByPk(orderId);
+            if (ord && ord.userId) {
+                targetUserId = ord.userId;
+            }
             await Order.update({ deliveryNotice: null, notes: null }, { where: { id: orderId } });
             await OrderAssignment.update({ notes: null }, { where: { orderId } });
         }
-        if (userId) {
-            await User.update({ deliveryNotice: null }, { where: { id: userId } });
+        if (targetUserId) {
+            await User.update({ deliveryNotice: null }, { where: { id: targetUserId } });
+            await Order.update({ deliveryNotice: null, notes: null }, { where: { userId: targetUserId } });
         }
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Party notice resolved successfully.");
     } catch (err) {

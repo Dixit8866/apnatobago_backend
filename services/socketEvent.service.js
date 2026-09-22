@@ -39,6 +39,8 @@ export const formatOrderSocketPayload = (order) => {
         deliveryDate: plain.deliveryDate,
         godownId: plain.godownId,
         routeCategoryId: plain.routeCategoryId || plain.user?.routeCategoryId,
+        deliveryNotice: plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || plain.notes || null,
+        hasNotice: Boolean(plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || plain.notes),
         createdAt: plain.createdAt,
         user: plain.user ? {
             id: plain.user.id,
@@ -46,6 +48,7 @@ export const formatOrderSocketPayload = (order) => {
             number: plain.user.number,
             city: plain.user.city,
             routeCategoryId: plain.user.routeCategoryId,
+            deliveryNotice: plain.user.deliveryNotice || plain.deliveryNotice || null,
             businessProfile: plain.user.businessProfile ? {
                 shopName: plain.user.businessProfile.shopName,
                 shopAddress: plain.user.businessProfile.shopAddress,

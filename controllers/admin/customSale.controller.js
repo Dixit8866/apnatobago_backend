@@ -322,6 +322,7 @@ export const createCustomSale = async (req, res) => {
             deliveryCharge,
             createdByAdminId: req.user?.id,
             notes,
+            deliveryNotice: notes || (user ? user.deliveryNotice : null) || null,
             routeCategoryId: resolvedRouteCategoryId,
             godownId: req.body.godownId || null,
             orderDate: orderDate || new Date().toISOString().split('T')[0],
