@@ -45,11 +45,25 @@ router.get('/user-previous-bills/:userId', getUserPreviousBills);
 router.put('/reorder', reorderAssignments);
 router.put('/settle-single', settleSingleOrderPayment);
 
-// Delivery Notice Resolve & Decline APIs (For Delivery App popup modal)
+// Delivery Notice Resolve & Decline APIs (For Delivery App popup modal - supports PUT & POST)
 router.put('/notice/resolve', resolveDeliveryNotice);
+router.post('/notice/resolve', resolveDeliveryNotice);
+router.put('/party-notice/resolve', resolveDeliveryNotice);
+router.post('/party-notice/resolve', resolveDeliveryNotice);
+router.put('/resolve-notice', resolveDeliveryNotice);
+router.post('/resolve-notice', resolveDeliveryNotice);
+
 router.put('/notice/decline', declineDeliveryNotice);
+router.post('/notice/decline', declineDeliveryNotice);
+router.put('/party-notice/decline', declineDeliveryNotice);
+router.post('/party-notice/decline', declineDeliveryNotice);
+router.put('/decline-notice', declineDeliveryNotice);
+router.post('/decline-notice', declineDeliveryNotice);
+
 router.put('/:orderId/resolve-notice', resolveDeliveryNotice);
+router.post('/:orderId/resolve-notice', resolveDeliveryNotice);
 router.put('/:orderId/decline-notice', declineDeliveryNotice);
+router.post('/:orderId/decline-notice', declineDeliveryNotice);
 
 router.put('/:assignmentId/status', updateMyAssignmentStatus);
 router.put('/:assignmentId/complete-settle', completeOrderAndSettlePayment);
