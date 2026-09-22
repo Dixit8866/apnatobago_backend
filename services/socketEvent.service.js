@@ -1,5 +1,7 @@
 import { getIO } from '../socket.js';
 import logger from '../logger/apiLogger.js';
+import { Order, User } from '../models/index.js';
+import { Op } from 'sequelize';
 
 /**
  * Standardized Real-Time Socket Event Broadcaster
@@ -18,6 +20,69 @@ const safeGetIO = () => {
 };
 
 /**
+ * Dynamically resolve active delivery notice for an order if missing from the current payload
+ */
+export const resolveActiveNoticeForOrder = async (order) => {
+    if (!order) return null;
+    const plain = typeof order.toJSON === 'function' ? order.toJSON() : { ...order };
+
+    let notice = plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || null;
+    if (!notice && plain.notes) {
+        const clean = String(plain.notes).replace(/\[.*?\]\s*/g, '').trim();
+        if (clean && !clean.includes('Adjustments:')) notice = clean;
+    }
+
+    if (!notice) {
+        const uId = plain.userId || plain.user?.id;
+        const phone = plain.customerNumber || plain.user?.number;
+        const whereConditions = [];
+        if (uId) whereConditions.push({ userId: uId });
+        if (phone && String(phone).replace(/\D/g, '').length >= 7) {
+            whereConditions.push({ customerNumber: phone });
+        }
+
+        if (whereConditions.length > 0) {
+            try {
+                // First check User model
+                if (uId) {
+                    const u = await User.findByPk(uId, { attributes: ['id', 'deliveryNotice'] });
+                    if (u && u.deliveryNotice) {
+                        notice = u.deliveryNotice;
+                    }
+                }
+
+                // If still not found, check most recent non-cancelled order of this customer
+                if (!notice) {
+                    const pastOrder = await Order.findOne({
+                        where: {
+                            [Op.or]: whereConditions,
+                            [Op.or]: [
+                                { deliveryNotice: { [Op.ne]: null } },
+                                { notes: { [Op.ne]: null } }
+                            ],
+                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                        },
+                        order: [['createdAt', 'DESC']],
+                        attributes: ['id', 'deliveryNotice', 'notes']
+                    });
+                    if (pastOrder) {
+                        notice = pastOrder.deliveryNotice || pastOrder.notes;
+                        if (notice) {
+                            notice = String(notice).replace(/\[.*?\]\s*/g, '').trim();
+                            if (notice.includes('Adjustments:')) notice = null;
+                        }
+                    }
+                }
+            } catch (err) {
+                logger.error(`[Error resolving active notice for socket]: ${err.message}`);
+            }
+        }
+    }
+
+    return notice || null;
+};
+
+/**
  * Extract clean, uniform order summary payload
  */
 export const formatOrderSocketPayload = (order) => {
@@ -25,6 +90,7 @@ export const formatOrderSocketPayload = (order) => {
     
     // Safely parse or handle nested sequelize objects
     const plain = typeof order.toJSON === 'function' ? order.toJSON() : { ...order };
+    const notice = plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || (plain.notes && !String(plain.notes).includes('Adjustments:') ? plain.notes : null) || null;
     
     return {
         id: plain.id,
@@ -39,8 +105,8 @@ export const formatOrderSocketPayload = (order) => {
         deliveryDate: plain.deliveryDate,
         godownId: plain.godownId,
         routeCategoryId: plain.routeCategoryId || plain.user?.routeCategoryId,
-        deliveryNotice: plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || plain.notes || null,
-        hasNotice: Boolean(plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || plain.notes),
+        deliveryNotice: notice,
+        hasNotice: Boolean(notice),
         createdAt: plain.createdAt,
         user: plain.user ? {
             id: plain.user.id,
@@ -48,7 +114,7 @@ export const formatOrderSocketPayload = (order) => {
             number: plain.user.number,
             city: plain.user.city,
             routeCategoryId: plain.user.routeCategoryId,
-            deliveryNotice: plain.user.deliveryNotice || plain.deliveryNotice || null,
+            deliveryNotice: plain.user.deliveryNotice || notice || null,
             businessProfile: plain.user.businessProfile ? {
                 shopName: plain.user.businessProfile.shopName,
                 shopAddress: plain.user.businessProfile.shopAddress,
@@ -80,12 +146,21 @@ export const formatOrderSocketPayload = (order) => {
  * - Godown room (`godown_${godownId}`)
  * - Area route room (`area_${routeCategoryId}`)
  */
-export const broadcastOrderCreated = (order) => {
+export const broadcastOrderCreated = async (order) => {
     const io = safeGetIO();
     if (!io) return;
 
     try {
         const payload = formatOrderSocketPayload(order);
+        if (!payload.deliveryNotice) {
+            const dynamicNotice = await resolveActiveNoticeForOrder(order);
+            if (dynamicNotice) {
+                payload.deliveryNotice = dynamicNotice;
+                payload.hasNotice = true;
+                if (payload.user) payload.user.deliveryNotice = dynamicNotice;
+            }
+        }
+
         const eventData = {
             type: 'ORDER_CREATED',
             order: payload,
@@ -133,12 +208,21 @@ export const broadcastOrderCreated = (order) => {
  * - Area route room (`area_${routeCategoryId}`)
  * - Targeted Rider room if assigned (`rider_${deliveryBoyId}`)
  */
-export const broadcastOrderStatusChanged = ({ order, oldStatus, newStatus, routeCategoryId, godownId, deliveryBoyId }) => {
+export const broadcastOrderStatusChanged = async ({ order, oldStatus, newStatus, routeCategoryId, godownId, deliveryBoyId }) => {
     const io = safeGetIO();
     if (!io) return;
 
     try {
         const payload = formatOrderSocketPayload(order);
+        if (!payload.deliveryNotice) {
+            const dynamicNotice = await resolveActiveNoticeForOrder(order);
+            if (dynamicNotice) {
+                payload.deliveryNotice = dynamicNotice;
+                payload.hasNotice = true;
+                if (payload.user) payload.user.deliveryNotice = dynamicNotice;
+            }
+        }
+
         const effectiveRouteId = routeCategoryId || payload.routeCategoryId;
         const effectiveGodownId = godownId || payload.godownId;
         const effectiveRiderId = deliveryBoyId || payload.assignment?.deliveryBoyId;
@@ -174,7 +258,7 @@ export const broadcastOrderStatusChanged = ({ order, oldStatus, newStatus, route
             io.to(`rider_${effectiveRiderId}`).emit('order:status_changed', eventData);
         }
 
-        logger.info(`[Socket Broadcast] ORDER_STATUS_CHANGED emitted: #${payload.orderId} from [${oldStatus}] to [${newStatus}]`);
+        logger.info(`[Socket Broadcast] ORDER_STATUS_CHANGED emitted: #${payload.orderId} from [${oldStatus}] to [${newStatus}] (hasNotice: ${payload.hasNotice})`);
     } catch (err) {
         logger.error(`[Socket Broadcast Error] broadcastOrderStatusChanged: ${err.message}`);
     }
@@ -187,12 +271,21 @@ export const broadcastOrderStatusChanged = ({ order, oldStatus, newStatus, route
  * - Targeted Rider room (`rider_${deliveryBoyId}`)
  * - Area route room (`area_${routeCategoryId}`)
  */
-export const broadcastOrderAssigned = ({ order, assignment, deliveryBoyId, routeCategoryId }) => {
+export const broadcastOrderAssigned = async ({ order, assignment, deliveryBoyId, routeCategoryId }) => {
     const io = safeGetIO();
     if (!io) return;
 
     try {
         const payload = formatOrderSocketPayload(order);
+        if (!payload.deliveryNotice) {
+            const dynamicNotice = await resolveActiveNoticeForOrder(order);
+            if (dynamicNotice) {
+                payload.deliveryNotice = dynamicNotice;
+                payload.hasNotice = true;
+                if (payload.user) payload.user.deliveryNotice = dynamicNotice;
+            }
+        }
+
         const effectiveRiderId = deliveryBoyId || assignment?.deliveryBoyId || payload.assignment?.deliveryBoyId;
         const effectiveRouteId = routeCategoryId || payload.routeCategoryId;
 
@@ -209,7 +302,7 @@ export const broadcastOrderAssigned = ({ order, assignment, deliveryBoyId, route
         // 1. Notify Admin
         io.to('admin_orders').emit('order:assigned', eventData);
 
-        // 2. Notify Targeted Delivery Boy (Appears in their 'Assigned' tab instantly!)
+        // 2. Notify Targeted Delivery Boy (Appears in their 'Assigned' tab instantly with popup notice!)
         if (effectiveRiderId) {
             io.to(`rider_${effectiveRiderId}`).emit('order:assigned_to_me', eventData);
         }
@@ -222,7 +315,7 @@ export const broadcastOrderAssigned = ({ order, assignment, deliveryBoyId, route
             });
         }
 
-        logger.info(`[Socket Broadcast] ORDER_ASSIGNED emitted for Order #${payload.orderId} to Rider ${effectiveRiderId}`);
+        logger.info(`[Socket Broadcast] ORDER_ASSIGNED emitted for Order #${payload.orderId} to Rider ${effectiveRiderId} (hasNotice: ${payload.hasNotice}, notice: ${payload.deliveryNotice})`);
     } catch (err) {
         logger.error(`[Socket Broadcast Error] broadcastOrderAssigned: ${err.message}`);
     }
@@ -231,7 +324,7 @@ export const broadcastOrderAssigned = ({ order, assignment, deliveryBoyId, route
 /**
  * 4. Broadcast Order Delivered & Payment Settled
  */
-export const broadcastOrderDelivered = ({ order, deliveryBoyId }) => {
+export const broadcastOrderDelivered = async ({ order, deliveryBoyId }) => {
     const io = safeGetIO();
     if (!io) return;
 
@@ -261,3 +354,4 @@ export const broadcastOrderDelivered = ({ order, deliveryBoyId }) => {
         logger.error(`[Socket Broadcast Error] broadcastOrderDelivered: ${err.message}`);
     }
 };
+

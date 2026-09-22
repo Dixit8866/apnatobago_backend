@@ -659,6 +659,32 @@ export const createOrder = async (req, res) => {
         } else {
             logger.info(`[Create Order] Creating new order. totalAmount: ${finalTotal}, paymentMethod: ${paymentMethod}`);
             const netPayableDue = paymentStatus === 'Paid' ? 0 : finalTotal;
+            let activeDeliveryNotice = userData.deliveryNotice || null;
+            if (!activeDeliveryNotice && userId) {
+                const pastOrderWithNotice = await Order.findOne({
+                    where: {
+                        userId,
+                        [Op.or]: [
+                            { deliveryNotice: { [Op.ne]: null } },
+                            { notes: { [Op.ne]: null } }
+                        ],
+                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                    },
+                    order: [['createdAt', 'DESC']],
+                    attributes: ['deliveryNotice', 'notes'],
+                    transaction: t
+                });
+                if (pastOrderWithNotice) {
+                    const found = pastOrderWithNotice.deliveryNotice || pastOrderWithNotice.notes;
+                    if (found && !String(found).includes('Adjustments:')) {
+                        activeDeliveryNotice = String(found).replace(/\[.*?\]\s*/g, '').trim();
+                        if (activeDeliveryNotice) {
+                            await User.update({ deliveryNotice: activeDeliveryNotice }, { where: { id: userId }, transaction: t });
+                        }
+                    }
+                }
+            }
+
             // Create a new Order
             const newOrder = await Order.create({
                 orderId: await generateUniqueOrderId(),
@@ -679,7 +705,7 @@ export const createOrder = async (req, res) => {
                 deliveryDate: deliveryDate || null,
                 routeCategoryId: userData.routeCategoryId || null,
                 godownId: targetGodownId,
-                deliveryNotice: userData.deliveryNotice || null,
+                deliveryNotice: activeDeliveryNotice || null,
             }, { transaction: t });
 
             targetOrder = newOrder;

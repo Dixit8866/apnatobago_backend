@@ -1304,7 +1304,12 @@ export const completeOrderAndSettlePayment = async (req, res) => {
 
         if (customDeliveryNote) {
             assignment.order.notes = customDeliveryNote;
+            assignment.order.deliveryNotice = customDeliveryNote;
             await assignment.order.save({ transaction: t });
+            if (user) {
+                user.deliveryNotice = customDeliveryNote;
+                await user.save({ transaction: t });
+            }
         }
 
         let remainingCash = Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded - pastDueSettled);
@@ -2426,7 +2431,7 @@ export const scanAndAssignOrder = async (req, res) => {
         try {
             const freshOrder = await Order.findByPk(order.id, {
                 include: [
-                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
+                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId', 'deliveryNotice'] },
                     { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
                 ]
             });

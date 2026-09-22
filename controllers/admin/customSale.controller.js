@@ -299,6 +299,39 @@ export const createCustomSale = async (req, res) => {
             }
         }
 
+        let activeDeliveryNotice = notes || (userObj ? userObj.deliveryNotice : null) || null;
+        if (!activeDeliveryNotice && (userId || resolvedCustomerNumber)) {
+            const whereConds = [];
+            if (userId) whereConds.push({ userId });
+            if (resolvedCustomerNumber && String(resolvedCustomerNumber).replace(/\D/g, '').length >= 7) {
+                whereConds.push({ customerNumber: resolvedCustomerNumber });
+            }
+            if (whereConds.length > 0) {
+                const pastOrderWithNotice = await Order.findOne({
+                    where: {
+                        [Op.or]: whereConds,
+                        [Op.or]: [
+                            { deliveryNotice: { [Op.ne]: null } },
+                            { notes: { [Op.ne]: null } }
+                        ],
+                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                    },
+                    order: [['createdAt', 'DESC']],
+                    attributes: ['deliveryNotice', 'notes'],
+                    transaction: t
+                });
+                if (pastOrderWithNotice) {
+                    const found = pastOrderWithNotice.deliveryNotice || pastOrderWithNotice.notes;
+                    if (found && !String(found).includes('Adjustments:')) {
+                        activeDeliveryNotice = String(found).replace(/\[.*?\]\s*/g, '').trim();
+                        if (activeDeliveryNotice && userId) {
+                            await User.update({ deliveryNotice: activeDeliveryNotice }, { where: { id: userId }, transaction: t });
+                        }
+                    }
+                }
+            }
+        }
+
         // 2. Create the Order
         const newSale = await Order.create({
             orderId: await generateUniqueDirectSaleId(),
@@ -323,7 +356,7 @@ export const createCustomSale = async (req, res) => {
             deliveryCharge,
             createdByAdminId: req.user?.id,
             notes,
-            deliveryNotice: notes || (userObj ? userObj.deliveryNotice : null) || null,
+            deliveryNotice: activeDeliveryNotice || null,
             routeCategoryId: resolvedRouteCategoryId,
             godownId: req.body.godownId || null,
             orderDate: orderDate || new Date().toISOString().split('T')[0],
