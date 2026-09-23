@@ -46,6 +46,8 @@ export const initSocket = (server) => {
                 socket.join(roomName);
                 logger.info(`[Socket] Client ${socket.id} joined room: ${roomName}`);
             }
+            socket.join('admin_orders');
+            socket.join('admin_notifications');
         });
 
         // 3. Delivery Rider Join Area Route (e.g. "Varachha Route" as selected in delivery app)
