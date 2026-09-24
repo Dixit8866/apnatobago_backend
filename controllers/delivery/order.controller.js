@@ -14,9 +14,13 @@ import {
 import {
     completeOrderAndSettlePaymentService,
     settleSingleOrderPaymentService,
-    submitDeliveryBankPaymentService
+    submitDeliveryBankPaymentService,
+    restoreUserCreditFromPayment
 } from '../../services/delivery/deliverySettlement.service.js';
 import { scanAndAssignOrderService } from '../../services/delivery/deliveryScanner.service.js';
+
+export { restoreUserCreditFromPayment };
+
 
 /**
  * ==============================================================================

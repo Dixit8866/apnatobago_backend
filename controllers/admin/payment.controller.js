@@ -237,8 +237,9 @@ export const updatePaymentSubmission = async (req, res) => {
                     const user = await User.findByPk(order.userId, { transaction: t });
                     if (user) {
                         // Dynamically import restoreUserCreditFromPayment to avoid circular dependencies
-                        const { restoreUserCreditFromPayment } = await import('../delivery/order.controller.js');
+                        const { restoreUserCreditFromPayment } = await import('../../services/delivery/deliverySettlement.service.js');
                         await restoreUserCreditFromPayment(order.id, paymentAmt, user, t);
+
                         await user.save({ transaction: t });
                     }
                 }
