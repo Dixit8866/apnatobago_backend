@@ -146,6 +146,90 @@ export const syncOrderFinancials = async (orderId, transaction = null) => {
 };
 
 /**
+ * Synchronize delivery notice for a specific party/user.
+ * Checks active (non-cancelled, non-delivered) orders. If no active order
+ * has a valid delivery notice, clears User.deliveryNotice.
+ *
+ * @param {string} userId - User ID
+ * @param {Object} [transaction] - Sequelize transaction
+ * @returns {Promise<string|null>} Active notice or null
+ */
+export const syncPartyDeliveryNotice = async (userId, transaction = null) => {
+    if (!userId) return null;
+    try {
+        // Find any active order that has a delivery notice
+        const activeOrderWithNotice = await Order.findOne({
+            where: {
+                userId,
+                orderStatus: { [Op.notIn]: ['Delivered', 'Cancelled', 'Admin Cancel', 'Auto Cancelled', 'Rejected'] },
+                [Op.or]: [
+                    { deliveryNotice: { [Op.ne]: null } },
+                    { notes: { [Op.ne]: null } }
+                ]
+            },
+            attributes: ['id', 'orderId', 'deliveryNotice', 'notes', 'orderStatus'],
+            order: [['createdAt', 'DESC']],
+            transaction
+        });
+
+        let validNotice = null;
+        if (activeOrderWithNotice) {
+            const raw = activeOrderWithNotice.deliveryNotice || activeOrderWithNotice.notes;
+            const clean = String(raw || '')
+                .replace(/^\[Delivery Note\]:\s*/i, '')
+                .replace(/\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Adjustments:[^\n]*/gi, '')
+                .trim();
+            if (clean && !clean.includes('Adjustments:') && !clean.includes('Settled via Direct Bank Transfer')) {
+                validNotice = clean;
+            }
+        }
+
+        // Update User.deliveryNotice with valid notice or null
+        await User.update(
+            { deliveryNotice: validNotice || null },
+            { where: { id: userId }, transaction }
+        );
+
+        return validNotice || null;
+    } catch (error) {
+        logger.error(`[syncPartyDeliveryNotice Error for userId ${userId}]: ${error.message}`);
+        return null;
+    }
+};
+
+/**
+ * Centrally clear delivery notice for an order, assignment, and party.
+ *
+ * @param {Object} params - { orderId, userId, transaction }
+ */
+export const clearOrderDeliveryNotice = async ({ orderId, userId, transaction = null }) => {
+    try {
+        let targetUserId = userId;
+
+        if (orderId) {
+            const ord = await Order.findByPk(orderId, { transaction });
+            if (ord) {
+                if (ord.userId) targetUserId = ord.userId;
+                await Order.update({ deliveryNotice: null, notes: null }, { where: { id: ord.id }, transaction });
+                if (OrderAssignment) {
+                    await OrderAssignment.update({ notes: null }, { where: { orderId: ord.id }, transaction });
+                }
+            }
+        }
+
+        if (targetUserId) {
+            await User.update({ deliveryNotice: null }, { where: { id: targetUserId }, transaction });
+            await syncPartyDeliveryNotice(targetUserId, transaction);
+        }
+
+        return { success: true };
+    } catch (error) {
+        logger.error(`[clearOrderDeliveryNotice Error]: ${error.message}`);
+        throw error;
+    }
+};
+
+/**
  * Standardize order serialization for all API responses without stripping relations.
  * Ensures 100% backward compatibility for Admin and Delivery Boy Mobile App.
  *
@@ -192,4 +276,7 @@ export default {
     calculateOrderFinancials,
     syncOrderFinancials,
     adjustOrderResponse,
+    syncPartyDeliveryNotice,
+    clearOrderDeliveryNotice,
 };
+

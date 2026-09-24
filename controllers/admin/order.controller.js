@@ -28,12 +28,13 @@ const getStatusLabel = (status) => {
         default: return status;
     }
 };
-// Import Centralized Financial Settlement Service (Single Source of Truth)
-import { adjustOrderResponse, calculateOrderFinancials } from '../../services/financialSettlement.service.js';
+// Import Centralized Financial Settlement & Notice Service (Single Source of Truth)
+import { adjustOrderResponse, calculateOrderFinancials, syncPartyDeliveryNotice, clearOrderDeliveryNotice } from '../../services/financialSettlement.service.js';
 
 const adjustOrderPayments = (order) => {
     return adjustOrderResponse(order);
 };
+
 
 /**
  * @desc    Generate Delivery Label PDF
@@ -600,19 +601,19 @@ export const getAllOrders = async (req, res) => {
                 const userAdvanceJama = parseFloat(order.user?.advanceJama || 0);
                 const userBalanceType = order.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditline > 0 ? 'DUE' : 'CLEAR'));
 
-                // Determine active delivery note/notice for this party
-                let activeDeliveryNotice = order.deliveryNotice || order.user?.deliveryNotice || '';
+                // Determine active delivery note/notice for this party (strictly from active orders, not stale records)
+                let activeDeliveryNotice = order.deliveryNotice || '';
                 if (!activeDeliveryNotice && order.assignment?.notes && !order.assignment.notes.includes('Settled via Direct Bank Transfer') && !order.assignment.notes.includes('Cancelled by Delivery Boy')) {
                     activeDeliveryNotice = String(order.assignment.notes).replace(/^\[Delivery Note\]:\s*/i, '').trim();
                 }
                 if (!activeDeliveryNotice && order.notes) {
                     const clean = String(order.notes).replace(/\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Adjustments:[^\n]*/gi, '').replace(/\[Delivery Note\]:\s*/gi, '').trim();
-                    if (clean && !clean.includes('Adjustments:')) activeDeliveryNotice = clean;
+                    if (clean && !clean.includes('Adjustments:') && !clean.includes('Settled via Direct Bank Transfer')) activeDeliveryNotice = clean;
                 }
 
-                // If this order itself didn't have notice, look up the party's recent past order notice!
+                // If this order itself didn't have notice, look up active unpaid/pending orders for this party
                 if (!activeDeliveryNotice) {
-                    const recentPastWithNote = unpaidOrdersStore.find(uo => {
+                    const activePastWithNote = unpaidOrdersStore.find(uo => {
                         let isSameCust = false;
                         if (uId && uo.userId && String(uId) === String(uo.userId)) isSameCust = true;
                         else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) isSameCust = true;
@@ -620,8 +621,8 @@ export const getAllOrders = async (req, res) => {
                         else if (oName && uo.name && oName.length >= 3 && oName === uo.name) isSameCust = true;
                         return isSameCust && Boolean(uo.pastNote);
                     });
-                    if (recentPastWithNote) {
-                        activeDeliveryNotice = recentPastWithNote.pastNote;
+                    if (activePastWithNote) {
+                        activeDeliveryNotice = activePastWithNote.pastNote;
                     }
                 }
 
@@ -638,6 +639,7 @@ export const getAllOrders = async (req, res) => {
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
+
 
                 const adjusted = adjustOrderPayments(order);
                 if (adjusted) {
@@ -3952,25 +3954,15 @@ export const scanAndPackOrder = async (req, res) => {
 export const resolvePartyNotice = async (req, res) => {
     try {
         const { orderId, userId } = req.body;
-        let targetUserId = userId;
-        if (orderId) {
-            const ord = await Order.findByPk(orderId);
-            if (ord && ord.userId) {
-                targetUserId = ord.userId;
-            }
-            await Order.update({ deliveryNotice: null, notes: null }, { where: { id: orderId } });
-            await OrderAssignment.update({ notes: null }, { where: { orderId } });
-        }
-        if (targetUserId) {
-            await User.update({ deliveryNotice: null }, { where: { id: targetUserId } });
-            await Order.update({ deliveryNotice: null, notes: null }, { where: { userId: targetUserId } });
-        }
+        await clearOrderDeliveryNotice({ orderId, userId });
+        logger.info(`[Admin Resolve Party Notice]: Notice cleared centrally for orderId: ${orderId}, userId: ${userId}`);
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Party notice resolved successfully.");
     } catch (err) {
         logger.error(`[Resolve Party Notice Error]: ${err.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to resolve party notice.", err.message);
     }
 };
+
 
 
 

@@ -620,7 +620,25 @@ const runManualMigrations = async () => {
             `);
         } catch (e) { console.log('[Migration Warning] Orders pastDueCollected migration failed:', e.message); }
 
+        try {
+
+            // Clean up orphan delivery notices on users who have no active (non-cancelled, non-delivered) orders with a notice
+            await sequelize.query(`
+                UPDATE users 
+                SET "deliveryNotice" = NULL 
+                WHERE "deliveryNotice" IS NOT NULL 
+                AND id NOT IN (
+                    SELECT DISTINCT "userId" 
+                    FROM orders 
+                    WHERE "userId" IS NOT NULL 
+                    AND "orderStatus" NOT IN ('Delivered', 'Cancelled', 'Admin Cancel', 'Auto Cancelled', 'Rejected')
+                    AND ("deliveryNotice" IS NOT NULL OR "notes" IS NOT NULL)
+                )
+            `);
+        } catch (e) { console.log('[Migration Warning] Orphan deliveryNotice cleanup failed:', e.message); }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
+
 
     } catch (error) {
         console.error('[Migration Error] Failed to update category tables:', error.message);

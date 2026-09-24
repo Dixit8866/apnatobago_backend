@@ -1,39 +1,30 @@
-import { OrderAssignment, Order, User, OrderItem, Product, ProductVariant, Volume, OrderPayment, InventoryStock, SalesReturn, Notification, BusinessProfile, PartyBalanceLog, DeliveryBoy, RouteCategory } from '../../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
-import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
-import { sendToDevice } from '../../services/notification.service.js';
-import { roundTotal } from '../../utils/roundHelper.js';
-import { getTodayRangeIST } from './dashboard.controller.js';
-import { uploadToS3 } from '../../utils/aws.s3.js';
-import { broadcastOrderStatusChanged, broadcastOrderAssigned, broadcastOrderDelivered } from '../../services/socketEvent.service.js';
-import { calculateOrderFinancials } from '../../services/financialSettlement.service.js';
+import { Order, User } from '../../models/index.js';
+import { clearOrderDeliveryNotice } from '../../services/financialSettlement.service.js';
+import {
+    getMyAssignedOrdersService,
+    getAssignmentDetailsService,
+    getUserPreviousBillsService,
+    reorderAssignmentsService,
+    updateMyAssignmentStatusService
+} from '../../services/delivery/deliveryOrder.service.js';
+import {
+    completeOrderAndSettlePaymentService,
+    settleSingleOrderPaymentService,
+    submitDeliveryBankPaymentService
+} from '../../services/delivery/deliverySettlement.service.js';
+import { scanAndAssignOrderService } from '../../services/delivery/deliveryScanner.service.js';
 
-const sendDeliveredNotification = async (orderId) => {
-    try {
-        const order = await Order.findByPk(orderId, {
-            include: [{ model: User, as: 'user' }]
-        });
-        if (order && order.user && order.user.fcmtoken) {
-            const title = 'Order Delivered!';
-            const body = `Hey ${order.user.fullname}, your order #${order.orderId} of ₹${order.totalAmount} has been delivered successfully!`;
-            await sendToDevice(order.user.fcmtoken, title, body, null, { type: 'order', id: String(order.id), orderId: String(order.id) });
-            await Notification.create({
-                title,
-                body,
-                type: 'ORDER',
-                target: String(order.userId),
-                status: 'SENT',
-                clickAction: String(order.id)
-            });
-        }
-    } catch (pushErr) {
-        console.error('[Delivered Push Notification Error]:', pushErr);
-        logger.error(`[Delivered Push Notification Error]: ${pushErr.message}`);
-    }
-};
+/**
+ * ==============================================================================
+ * DELIVERY ORDER CONTROLLER (Service-Based Architecture)
+ * ==============================================================================
+ * High-performance, clean controller delegating domain logic to specialized services.
+ * Maintains 100% backward compatibility with the Delivery Boy Mobile App.
+ */
 
 /**
  * @desc    Get assigned orders for the logged-in delivery boy
@@ -43,206 +34,13 @@ const sendDeliveredNotification = async (orderId) => {
 export const getMyAssignedOrders = async (req, res) => {
     try {
         const deliveryBoyId = req.user.id;
-        const { status, search, date } = req.query; // 'Pending', 'Assigned', 'Cancelled', 'Completed'
-        logger.info(`[Get My Assigned Orders]: Fetching orders for delivery boy ${deliveryBoyId}, status: ${status || 'Any'}, date: ${date || 'Today'}`);
+        logger.info(`[Get My Assigned Orders]: Fetching orders for delivery boy ${deliveryBoyId}`);
 
-        const whereClause = { deliveryBoyId };
-        const orderIncludeWhere = {};
-
-        let todayStart, todayEnd;
-        if (date) {
-            const selectDate = new Date(date);
-            const year = selectDate.getFullYear();
-            const month = selectDate.getMonth();
-            const day = selectDate.getDate();
-            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-            todayStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0) - IST_OFFSET_MS);
-            todayEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999) - IST_OFFSET_MS);
-        } else {
-            const todayRange = getTodayRangeIST();
-            todayStart = todayRange.todayStart;
-            todayEnd = todayRange.todayEnd;
-        }
-
-        // ── DEBUG ─────────────────────────────────────────────────────────────
-        const toIST = (d) => new Date(d.getTime() + (5.5 * 60 * 60 * 1000))
-            .toISOString().replace('T', ' ').slice(0, 19) + ' IST';
-        // ─────────────────────────────────────────────────────────────────────
-
-        if (status) {
-            if (status === 'Cancelled') {
-                // Use ONLY order.updatedAt - assignment.updatedAt is unreliable (bulk reset)
-                // Match: order was cancelled TODAY (by its own updatedAt, not assignment's)
-                whereClause['$order.orderStatus$'] = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
-                orderIncludeWhere.updatedAt = { [Op.between]: [todayStart, todayEnd] };
-
-            } else if (status === 'Completed') {
-                // Use ONLY order.updatedAt - assignment.updatedAt is unreliable (bulk reset)
-                // Match: order was delivered/completed TODAY (by order's own updatedAt)
-                whereClause['$order.orderStatus$'] = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
-                orderIncludeWhere.updatedAt = { [Op.between]: [todayStart, todayEnd] };
-
-            } else if (status === 'Assigned' || status === 'Pending') {
-                // If a date is selected, filter by order.createdAt on that day
-                // If no date, show ALL pending/assigned (any date) - existing behaviour
-                whereClause.status = status;
-                orderIncludeWhere.orderStatus = {
-                    [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel']
-                };
-                if (date) {
-                    // Apply the selected date to order's createdAt
-                    orderIncludeWhere.createdAt = { [Op.between]: [todayStart, todayEnd] };
-                }
-            } else {
-                whereClause.status = status;
-            }
-        } else {
-            // Default: show ALL pending/assigned (any date) + TODAY's completed + TODAY's cancelled
-            // Use order.updatedAt for date filtering (assignment.updatedAt is unreliable - gets bulk reset)
-            whereClause[Op.or] = [
-                {
-                    // Branch 1: active pending/assigned - order NOT in terminal status
-                    status: { [Op.in]: ['Pending', 'Assigned'] },
-                    '$order.orderStatus$': {
-                        [Op.notIn]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel']
-                    }
-                },
-                {
-                    // Branch 2: order delivered/paid TODAY (by order's own updatedAt)
-                    '$order.orderStatus$': { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
-                    '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
-                },
-                {
-                    // Branch 3: order cancelled TODAY (by order's own updatedAt)
-                    '$order.orderStatus$': { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
-                    '$order.updatedAt$': { [Op.between]: [todayStart, todayEnd] }
-                }
-            ];
-        }
-
-        if (search) {
-            orderIncludeWhere.orderId = { [Op.iLike]: `%${search}%` };
-        }
-
-        const pagination = getPaginationOptions(req.query);
-        const { limit, offset, page } = pagination;
-
-        const result = await OrderAssignment.findAndCountAll({
-            where: whereClause,
-            attributes: { exclude: ['orderId'] },
-            include: [
-                {
-                    model: Order,
-                    as: 'order',
-                    where: Object.keys(orderIncludeWhere).length > 0 ? orderIncludeWhere : null,
-                    include: [
-                        {
-                            model: User,
-                            as: 'user',
-                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
-                            include: [
-                                {
-                                    model: BusinessProfile,
-                                    as: 'businessProfile',
-                                    attributes: ['id', 'shopName', 'shopAddress', 'postcode']
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ],
-            ...(req.query.paginate !== 'false' ? { limit, offset } : {}),
-            // Pending/Assigned: oldest order first (ASC). Completed/Cancelled: latest first (DESC)
-            order: [['position', 'ASC'], ['assignedAt', 'ASC']],
-            subQuery: false
+        const responseData = await getMyAssignedOrdersService({
+            deliveryBoyId,
+            query: req.query
         });
 
-        // ── DEBUG: Print every returned row ───────────────────────────────────
-        result.rows.forEach((row, i) => {
-            const o = row.order;
-            const updatedIST = row.updatedAt ? toIST(new Date(row.updatedAt)) : 'N/A';
-            const orderUpdatedIST = o?.updatedAt ? toIST(new Date(o.updatedAt)) : 'N/A';
-            const assignedIST = row.assignedAt ? toIST(new Date(row.assignedAt)) : 'N/A';
-        });
-        // ─────────────────────────────────────────────────────────────────────
-
-        // Lazy load items for the assigned orders
-        if (result.rows.length > 0) {
-            const orderIds = result.rows.map(item => item.order?.id).filter(Boolean);
-
-            if (orderIds.length > 0) {
-                const items = await OrderItem.findAll({
-                    where: { orderId: orderIds },
-                    include: [
-                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                        {
-                            model: ProductVariant,
-                            as: 'variant',
-                            include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
-                        }
-                    ]
-                });
-
-                // Group items by orderId
-                const itemsMap = {};
-                items.forEach(item => {
-                    if (!itemsMap[item.orderId]) itemsMap[item.orderId] = [];
-                    itemsMap[item.orderId].push(item);
-                });
-
-                // Attach items to the order models
-                result.rows.forEach(item => {
-                    if (item.order) {
-                        const rawItems = itemsMap[item.order.id] || [];
-                        const formattedItems = rawItems.map(it => {
-                            const itemData = it.toJSON ? it.toJSON() : it;
-                            if (itemData.variantInfo) {
-                                if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
-                                    itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
-                                }
-                                if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
-                                if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
-                            }
-                            return itemData;
-                        });
-                        item.order.setDataValue('items', formattedItems);
-                    }
-                });
-            }
-        }
-
-        let responseData;
-        if (req.query.paginate !== 'false') {
-            responseData = formatPaginatedResponse(result, page, limit);
-        } else {
-            responseData = {
-                totalRecords: result.count,
-                data: result.rows
-            };
-        }
-
-        if (responseData.data) {
-            responseData.data = responseData.data.map(item => {
-                const data = item.toJSON ? item.toJSON() : item;
-                if (data.order && data.order.orderStatus === 'Cancelled') {
-                    data.status = 'Cancelled';
-                }
-                if (data.order && data.order.user) {
-                    data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
-                    data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
-
-                    const uCredit = parseFloat(data.order.user.creditline || 0);
-                    const uJama = parseFloat(data.order.user.advanceJama || 0);
-                    const bType = data.order.user.balanceType || (uJama > 0 ? 'JAMA' : (uCredit > 0 ? 'DUE' : 'CLEAR'));
-                    data.order.user.balanceType = bType;
-                    data.order.user.creditline = uCredit.toFixed(2);
-                    data.order.user.advanceJama = uJama.toFixed(2);
-                }
-                return data;
-            });
-        }
-
-        logger.info(`[Get My Assigned Orders]: Found ${result.count} orders for delivery boy ${deliveryBoyId}`);
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Assigned orders fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Get My Assigned Orders Error]: ${error.message}`);
@@ -251,134 +49,8 @@ export const getMyAssignedOrders = async (req, res) => {
 };
 
 /**
- * Helper to enrich order items with volume options, base units, and single unit prices
- */
-const enrichItemsWithProductVolumes = async (items) => {
-    if (!items || !Array.isArray(items) || items.length === 0) return items;
-
-    const productIds = [...new Set(items.map(item => item.productId).filter(Boolean))];
-    if (productIds.length === 0) return items;
-
-    let productVariantsMap = {};
-    try {
-        const variants = await ProductVariant.findAll({
-            where: {
-                productId: { [Op.in]: productIds },
-                status: 'Active'
-            },
-            include: [
-                { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
-                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
-            ]
-        });
-
-        variants.forEach(v => {
-            if (!productVariantsMap[v.productId]) {
-                productVariantsMap[v.productId] = [];
-            }
-            productVariantsMap[v.productId].push(v);
-        });
-    } catch (err) {
-        logger.error(`[enrichItemsWithProductVolumes] Error fetching variants: ${err.message}`);
-    }
-
-    const helperGetVolName = (vObj) => {
-        if (!vObj) return '';
-        if (typeof vObj.name === 'string') return vObj.name;
-        if (typeof vObj.name === 'object' && vObj.name !== null) {
-            return vObj.name.en || vObj.name.guj || Object.values(vObj.name)[0] || '';
-        }
-        return '';
-    };
-
-    for (const item of items) {
-        const itemVariant = item.variant || {};
-        const variantInfo = item.variantInfo || {};
-        
-        const baseUnitsPerPack = Number(itemVariant.baseUnitsPerPack || variantInfo.baseUnitsPerPack || 1);
-        const sellingVolume = Number(itemVariant.sellingVolume || variantInfo.sellingVolume || 1);
-        const packUnits = (baseUnitsPerPack * sellingVolume) > 0 ? (baseUnitsPerPack * sellingVolume) : 1;
-
-        const itemPrice = parseFloat(item.price || 0);
-        const singleUnitPrice = itemPrice / packUnits;
-
-        item.baseUnitsPerPack = baseUnitsPerPack;
-        item.sellingVolume = sellingVolume;
-        item.packUnits = packUnits;
-        item.singleUnitPrice = parseFloat(singleUnitPrice.toFixed(2));
-        item.unitPrice = parseFloat(singleUnitPrice.toFixed(2));
-        item.totalUnits = parseFloat((parseFloat(item.quantity || 0) * packUnits).toFixed(2));
-
-        const pVariants = productVariantsMap[item.productId] || [];
-        const volumeOptions = [];
-
-        pVariants.forEach(v => {
-            const volName = helperGetVolName(v.volumeRef) ||
-                           helperGetVolName(v.baseUnitRef) ||
-                           helperGetVolName(v.innerUnitRef) ||
-                           v.volume || v.extra || 'Unit';
-
-            const vBaseUnits = Number(v.baseUnitsPerPack || 1);
-            const vSellingVol = Number(v.sellingVolume || 1);
-            const vPackUnits = (vBaseUnits * vSellingVol) > 0 ? (vBaseUnits * vSellingVol) : 1;
-            const calculatedPrice = parseFloat((singleUnitPrice * vPackUnits).toFixed(2));
-
-            volumeOptions.push({
-                id: v.id,
-                variantId: v.id,
-                volumeId: v.volumeId,
-                volumeName: volName,
-                volume: volName,
-                baseUnitsPerPack: vBaseUnits,
-                sellingVolume: vSellingVol,
-                unitsPerPack: vPackUnits,
-                singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
-                price: calculatedPrice > 0 ? calculatedPrice : parseFloat(v.purchasePrice || 0),
-                purchasePrice: parseFloat(v.purchasePrice || 0)
-            });
-        });
-
-        if (volumeOptions.length === 0) {
-            const currentVolName = typeof variantInfo.volume === 'string' ? variantInfo.volume : '1 Pack';
-            volumeOptions.push({
-                id: item.variantId,
-                variantId: item.variantId,
-                volumeId: itemVariant.volumeId || null,
-                volumeName: currentVolName,
-                volume: currentVolName,
-                baseUnitsPerPack: baseUnitsPerPack,
-                sellingVolume: sellingVolume,
-                unitsPerPack: packUnits,
-                singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
-                price: itemPrice
-            });
-
-            if (packUnits > 1) {
-                volumeOptions.push({
-                    id: item.variantId,
-                    variantId: item.variantId,
-                    volumeId: null,
-                    volumeName: '1 Pcs / Unit',
-                    volume: '1 Pcs / Unit',
-                    baseUnitsPerPack: 1,
-                    sellingVolume: 1,
-                    unitsPerPack: 1,
-                    singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
-                    price: parseFloat(singleUnitPrice.toFixed(2))
-                });
-            }
-        }
-
-        item.productVolumes = volumeOptions;
-    }
-
-    return items;
-};
-
-/**
  * @desc    Get order details for delivery boy
- * @route   GET /api/delivery/orders/:assignmentId
+ * @route   GET /api/delivery/orders/details/:assignmentId
  * @access  Private (Delivery Boy)
  */
 export const getAssignmentDetails = async (req, res) => {
@@ -387,288 +59,13 @@ export const getAssignmentDetails = async (req, res) => {
         const deliveryBoyId = req.user.id;
         logger.info(`[Get Assignment Details]: Fetching assignment ${assignmentId} for delivery boy ${deliveryBoyId}`);
 
-        const assignment = await OrderAssignment.findOne({
-            where: { id: assignmentId, deliveryBoyId },
-            attributes: { exclude: ['orderId'] },
-            include: [
-                {
-                    model: Order,
-                    as: 'order',
-                    include: [
-                        {
-                            model: User,
-                            as: 'user',
-                            attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit', 'advanceJama', 'balanceType'],
-                            include: [
-                                {
-                                    model: BusinessProfile,
-                                    as: 'businessProfile',
-                                    attributes: ['id', 'shopName', 'shopAddress', 'postcode']
-                                }
-                            ]
-                        },
-                        { model: OrderPayment, as: 'payments' },
-                        {
-                            model: OrderItem,
-                            as: 'items',
-                            include: [
-                                { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail', 'hasCoupon', 'couponPoints', 'couponPrice'] },
-                                {
-                                    model: ProductVariant,
-                                    as: 'variant',
-                                    include: [
-                                        { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
-                                        { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                                        { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
-                                    ]
-                                }
-                            ]
-                        },
-                        {
-                            model: SalesReturn,
-                            as: 'returns',
-                            required: false
-                        }
-                    ]
-                }
-            ]
+        const data = await getAssignmentDetailsService({
+            assignmentId,
+            deliveryBoyId
         });
 
-        if (!assignment) {
+        if (!data) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment not found.");
-        }
-
-        // Fetch past due payments for this user
-        const userId = assignment.order?.userId;
-        const userPhoneClean = assignment.order?.user?.number ? String(assignment.order.user.number).replace(/\D/g, '').slice(-10) : '';
-        const currentOrderDbId = assignment.order?.id;
-        const currentOrderNum = parseInt(String(assignment.order?.orderId || '').replace(/\D/g, ''), 10) || 0;
-        const currentOrderCreated = assignment.order?.createdAt ? new Date(assignment.order.createdAt).getTime() : Date.now();
-
-        let pastDueOrders = [];
-        let unpaidOrdersSum = 0;
-
-        if (userId || userPhoneClean) {
-            const userOrConditions = [];
-            if (userId) userOrConditions.push({ userId });
-            if (userPhoneClean && userPhoneClean.length >= 7) {
-                userOrConditions.push({ customerNumber: { [Op.like]: `%${userPhoneClean}` } });
-            }
-
-            const candidateOrders = await Order.findAll({
-                where: {
-                    [Op.or]: userOrConditions,
-                    id: { [Op.ne]: currentOrderDbId },
-                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-                },
-                include: [
-                    {
-                        model: OrderPayment,
-                        as: 'payments',
-                        required: false,
-                        attributes: ['id', 'amount', 'paymentMethod']
-                    }
-                ],
-                attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
-                order: [['createdAt', 'DESC']]
-            });
-
-            candidateOrders.forEach(uo => {
-                const uoOrderNum = parseInt(String(uo.orderId || '').replace(/\D/g, ''), 10) || 0;
-                const uoTime = new Date(uo.createdAt).getTime();
-                const isEarlier = (uoOrderNum > 0 && currentOrderNum > 0)
-                    ? (uoOrderNum < currentOrderNum)
-                    : (uoTime <= currentOrderCreated);
-
-                if (!isEarlier) return;
-
-                // Centralized financial calculation for past unpaid bills
-                const fin = calculateOrderFinancials(uo, uo.payments);
-                const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-
-                if (due > 0) {
-                    unpaidOrdersSum += due;
-                    pastDueOrders.push({
-                        id: uo.id,
-                        orderId: uo.orderId,
-                        totalAmount: fin.totalAmount,
-                        couponDiscount: fin.couponDiscount,
-                        paidAmount: parseFloat(fin.paidAmount),
-                        dueAmount: due,
-                        paymentStatus: fin.paymentStatus,
-                        orderStatus: uo.orderStatus,
-                        createdAt: uo.createdAt
-                    });
-                }
-            });
-        }
-
-        const data = assignment.toJSON();
-
-        if (data.order && data.order.user) {
-            data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
-            data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
-        }
-
-        // Sanitize variantInfo in items & extract couponProducts
-        const couponProducts = [];
-
-        if (data.order && data.order.items) {
-            data.order.items.forEach(itemData => {
-                const p = itemData.product || {};
-                const isItemCouponApplied = itemData.hasCoupon === true || itemData.hasCoupon === 'true';
-                
-                itemData.hasCoupon = isItemCouponApplied;
-                itemData.couponPoints = isItemCouponApplied ? Number(itemData.couponPoints || 0) : 0;
-                itemData.couponPrice = isItemCouponApplied ? parseFloat(itemData.couponPrice || 0).toFixed(2) : "0.00";
-
-                if (itemData.variantInfo) {
-                    if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
-                        itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
-                    }
-                    if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
-                    if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
-                }
-
-                const masterHasCoupon = p.hasCoupon === true || p.hasCoupon === 'true';
-                if (masterHasCoupon) {
-                    const masterPts = Number(p.couponPoints || 0);
-                    const masterPrice = Number(p.couponPrice || 0);
-
-                    let pName = p.name;
-                    if (typeof pName === 'object' && pName !== null) {
-                        pName = pName.en || Object.values(pName)[0] || 'Product';
-                    }
-
-                    couponProducts.push({
-                        id: itemData.productId,
-                        itemId: itemData.id,
-                        name: pName || itemData.productName || 'Product',
-                        image: p.thumbnail || '',
-                        couponPoints: masterPts,
-                        couponPrice: masterPrice.toFixed(2)
-                    });
-                }
-            });
-            await enrichItemsWithProductVolumes(data.order.items);
-        }
-
-        // Centralized financial calculation for the current order
-        const currentFin = calculateOrderFinancials(assignment.order, assignment.order?.payments);
-        const fullTotal = currentFin.totalAmount;
-        const savedCouponDisc = currentFin.couponDiscount;
-        const payableAmt = currentFin.netPayable;
-        const paidAmount = parseFloat(currentFin.paidAmount);
-        const calculatedDueAmt = parseFloat(currentFin.dueAmount);
-        const savedCouponPts = Number(assignment.order?.couponPoints || 0);
-
-        delete data.payableAmount; // Remove duplicate top-level field
-
-        if (data.order) {
-            data.order.couponPoints = savedCouponPts;
-            data.order.couponDiscount = savedCouponDisc.toFixed(2);
-            data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (assignment.order?.discountType || 'Coupon Discount') : null;
-            data.order.couponProducts = couponProducts;
-            data.order.payableAmount = payableAmt.toFixed(2);
-            data.order.paidAmount = paidAmount.toFixed(2);
-            data.order.dueAmount = calculatedDueAmt.toFixed(2);
-            data.order.totalAmount = fullTotal.toFixed(2);
-        }
-
-        // Dynamically adjust CREDIT payments based on real (CASH/ONLINE) repayments
-        if (data.order && data.order.payments) {
-            const payments = data.order.payments || [];
-            const totalCredit = payments.filter(p => p.paymentMethod === 'CREDIT').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-            const totalReal = payments.filter(p => p.paymentMethod === 'CASH' || p.paymentMethod === 'ONLINE').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-            const orderTotal = parseFloat(data.order.totalAmount || 0);
-
-            const nonCreditPortion = Math.max(0, orderTotal - totalCredit);
-            const realPaidToCredit = Math.max(0, totalReal - nonCreditPortion);
-            const outstandingCredit = Math.max(0, totalCredit - realPaidToCredit);
-
-            let remainingCreditToDistribute = outstandingCredit;
-            for (const payment of payments) {
-                if (payment.paymentMethod === 'CREDIT') {
-                    const currentAmount = parseFloat(payment.amount || 0);
-                    const allowedAmount = Math.min(currentAmount, remainingCreditToDistribute);
-                    payment.amount = allowedAmount.toFixed(2);
-                    remainingCreditToDistribute -= allowedAmount;
-                }
-            }
-            data.order.payments = payments;
-        }
-
-        // Calculate Sales Return deductions:
-        // A. Direct sales returns on this current order:
-        const orderReturns = (assignment.order?.returns || []).filter(r => r.status !== 'Rejected' && r.status !== 'Cancelled');
-        const directReturnAmount = orderReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-
-        // B. Unsettled sales returns for this user from past bills (e.g. submitted in previous_bills_screen during delivery):
-        let unsettledPastReturnAmount = 0;
-        if (userId) {
-            const unsettledReturns = await SalesReturn.findAll({
-                where: {
-                    userId,
-                    creditProcessed: false,
-                    orderId: { [Op.ne]: assignment.order.id },
-                    status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                }
-            });
-            unsettledPastReturnAmount = unsettledReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
-        }
-
-        const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
-
-        // Customer Advance Jama / Udhari Balance
-        const userAdvanceJama = parseFloat(assignment.order?.user?.advanceJama || 0);
-        const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
-        const userBalanceType = assignment.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
-        const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
-
-        // Total past due amount: prioritize actual unpaid bills total if present, otherwise opening balance creditline
-        let totalPastDueAmount = 0;
-        if (unpaidOrdersSum > 0) {
-            totalPastDueAmount = unpaidOrdersSum;
-        } else if (userBalanceType === 'DUE' && userCreditVal > 0) {
-            totalPastDueAmount = userCreditVal;
-        }
-
-        const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
-        const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
-        const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
-        const netPayableVal = Math.max(0, totalDueAmt);
-
-        data.pastDueOrders = pastDueOrders;
-        data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.duePayment = totalPastDueAmount.toFixed(2);
-        data.pastDueAmount = totalPastDueAmount.toFixed(2);
-        data.currentPayment = netOrderCollectible.toFixed(2);
-        data.netPayableAmount = netPayableVal.toFixed(2);
-        data.totalAmount = netPayableVal.toFixed(2);
-        data.jamaAmount = jamaAmountVal.toFixed(2);
-        data.userCreditline = userCreditVal.toFixed(2);
-        data.advanceJama = userAdvanceJama.toFixed(2);
-        data.balanceType = userBalanceType;
-        data.salesReturnCalculation = {
-            billAmount: roundedFullTotal,
-            returnAmount: totalSalesReturnDeduction,
-            netToCollect: netOrderCollectible
-        };
-
-        if (data.order) {
-            data.order.netPayableAmount = netOrderCollectible.toFixed(2);
-            data.order.payableAmount = netOrderCollectible.toFixed(2);
-            data.order.dueAmount = netOrderCollectible.toFixed(2);
-            data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-            data.order.duePayment = totalPastDueAmount.toFixed(2);
-            data.order.salesReturnCalculation = data.salesReturnCalculation;
-        }
-
-        if (data.order && data.order.user) {
-            data.order.user.creditline = userCreditVal.toFixed(2);
-            data.order.user.advanceJama = userAdvanceJama.toFixed(2);
-            data.order.user.balanceType = userBalanceType;
-            data.order.user.jamaAmount = jamaAmountVal.toFixed(2);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", data);
@@ -679,782 +76,30 @@ export const getAssignmentDetails = async (req, res) => {
 };
 
 /**
- * @desc    Update assignment status by delivery boy
- * @route   PUT /api/delivery/orders/:assignmentId/status
+ * @desc    Get user previous pending bills/orders with items for delivery boy payment settlement
+ * @route   GET /api/delivery/orders/user-previous-bills/:userId
  * @access  Private (Delivery Boy)
  */
-export const updateMyAssignmentStatus = async (req, res) => {
+export const getUserPreviousBills = async (req, res) => {
     try {
-        const { assignmentId } = req.params;
-        const { status, notes, note, deliveryNote } = req.body;
-        const deliveryBoyId = req.user.id;
-        const noteText = String(notes || note || deliveryNote || '').trim();
-        logger.info(`[Update Assignment Status]: Param ${assignmentId}, New Status: ${status}, Boy: ${deliveryBoyId}`);
+        const { userId } = req.params;
+        const currentOrdId = String(req.query.currentOrderId || req.query.excludeOrderId || req.query.orderId || req.query.excludeId || '').trim();
 
-        const validStatuses = ['Pending', 'Assigned', 'Cancelled', 'Completed'];
-        if (status && !validStatuses.includes(status)) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid status.");
-        }
+        logger.info(`[Get User Previous Bills]: Fetching previous bills for user ${userId}, excluding current ${currentOrdId}`);
 
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assignmentId);
-        const whereConditions = [
-            { id: assignmentId }
-        ];
-        if (isUuid) {
-            whereConditions.push({ orderId: assignmentId });
-        }
-
-        const assignment = await OrderAssignment.findOne({
-            where: {
-                deliveryBoyId,
-                [Op.or]: whereConditions
-            }
+        const result = await getUserPreviousBillsService({
+            userId,
+            currentOrderId: currentOrdId
         });
 
-        if (!assignment) {
-            // Fallback: Check if an Order exists with id = assignmentId
-            let order = null;
-            if (isUuid) {
-                order = await Order.findByPk(assignmentId, { include: [{ model: OrderItem, as: 'items' }] });
-            } else {
-                order = await Order.findOne({ where: { orderId: assignmentId }, include: [{ model: OrderItem, as: 'items' }] });
-            }
-
-            if (!order) {
-                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment or Order not found.");
-            }
-
-            if (status === 'Cancelled') {
-                const prevStatus = order.orderStatus;
-
-                order.orderStatus = 'Delivery Boy Cancel';
-                order.dueAmount = 0;
-                order.notes = order.notes ? `${order.notes}\n[Delivery Boy Cancelled]: ${notes || 'Refused'}` : `[Delivery Boy Cancelled]: ${notes || 'Refused'}`;
-                await order.save();
-
-                if (prevStatus === 'Shipping') {
-                    // Create SalesReturn entries (Pending) instead of restoring stock immediately
-                    const deliveryBoyId = req.user.id;
-                    let totalReturnAmount = 0;
-                    for (const item of order.items || []) {
-                        const returnQty = Number(item.quantity);
-                        const returnAmount = Number(item.price) * returnQty;
-                        await SalesReturn.create({
-                            orderId: order.id,
-                            userId: order.userId,
-                            deliveryBoyId,
-                            productId: item.productId,
-                            variantId: item.variantId,
-                            volumeId: item.volumeId || null,
-                            quantity: returnQty,
-                            price: item.price,
-                            returnAmount,
-                            reason: 'Cancelled after shipping (Delivery Boy)',
-                            status: 'Pending'
-                        });
-                        totalReturnAmount += returnAmount;
-                        await OrderItem.destroy({ where: { id: item.id } });
-                    }
-                    // Recalculate order totals
-                    const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
-                    let newSubtotal = 0;
-                    for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
-                    order.totalAmount = roundTotal(newSubtotal + (Number(order.deliveryCharge) || 0));
-                    order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
-                    await order.save();
-                } else {
-                    // Restore stock for all items (existing behaviour)
-                    if (order.items && order.items.length > 0) {
-                        for (const item of order.items) {
-                            const variant = await ProductVariant.findByPk(item.variantId);
-                            const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                            const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                            const baseUnitsToRestore = item.sellUnit === 'Inner'
-                                ? Number(item.quantity)
-                                : Number(item.quantity) * sellingVolume * bUPP;
-
-                            logger.info(`[Delivery Cancel Restore (no-assignment)]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
-
-                            const stock = await InventoryStock.findOne({
-                                where: { productId: item.productId },
-                                order: [['createdAt', 'DESC']]
-                            });
-                            if (stock) {
-                                await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
-                            }
-                        }
-                    }
-                }
-
-                const OrderAssignment = order.sequelize.models.OrderAssignment;
-                if (OrderAssignment) {
-                    await OrderAssignment.update(
-                        { status: 'Cancelled', notes: notes || 'Cancelled by Delivery Boy' },
-                        { where: { orderId: order.id } }
-                    );
-                }
-            } else if (status === 'Completed') {
-                order.orderStatus = 'Delivered';
-                order.deliveredAt = order.deliveredAt || new Date();
-                await order.save();
-                await sendDeliveredNotification(order.id);
-            }
-            return sendSuccessResponse(res, HTTP_STATUS.OK, "Order status updated successfully.", { order });
+        if (!result) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "No orders or user found.");
         }
 
-        await assignment.update({ status, notes: noteText || assignment.notes });
-
-        if (status === 'Cancelled') {
-            const order = await Order.findByPk(assignment.orderId, {
-                include: [{ model: OrderItem, as: 'items' }]
-            });
-            if (order) {
-                const prevStatus = order.orderStatus;
-
-                order.orderStatus = 'Delivery Boy Cancel';
-                order.dueAmount = 0;
-                order.notes = order.notes ? `${order.notes}\n[Delivery Boy Cancelled]: ${notes || 'Refused'}` : `[Delivery Boy Cancelled]: ${notes || 'Refused'}`;
-                await order.save();
-
-                if (prevStatus === 'Shipping') {
-                    // Create SalesReturn entries (Pending)
-                    const deliveryBoyId = req.user.id;
-                    let totalReturnAmount = 0;
-                    for (const item of order.items || []) {
-                        const returnQty = Number(item.quantity);
-                        const returnAmount = Number(item.price) * returnQty;
-                        await SalesReturn.create({
-                            orderId: order.id,
-                            userId: order.userId,
-                            deliveryBoyId,
-                            productId: item.productId,
-                            variantId: item.variantId,
-                            volumeId: item.volumeId || null,
-                            quantity: returnQty,
-                            price: item.price,
-                            returnAmount,
-                            reason: 'Cancelled after shipping (Delivery Boy)',
-                            status: 'Pending'
-                        });
-                        totalReturnAmount += returnAmount;
-                        await OrderItem.destroy({ where: { id: item.id } });
-                    }
-                    const remainingItems = await OrderItem.findAll({ where: { orderId: order.id } });
-                    let newSubtotal = 0;
-                    for (const it of remainingItems) newSubtotal += Number(it.price) * Number(it.quantity);
-                    order.totalAmount = roundTotal(newSubtotal + (Number(order.deliveryCharge) || 0));
-                    order.dueAmount = Math.max(0, order.dueAmount - totalReturnAmount);
-                    await order.save();
-                } else {
-                    // Restore stock for all items (existing behaviour)
-                    if (order.items && order.items.length > 0) {
-                        for (const item of order.items) {
-                            const variant = await ProductVariant.findByPk(item.variantId);
-                            const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                            const sellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                            const baseUnitsToRestore = item.sellUnit === 'Inner'
-                                ? Number(item.quantity)
-                                : Number(item.quantity) * sellingVolume * bUPP;
-
-                            logger.info(`[Delivery Cancel Restore (assignment)]: productId=${item.productId}, qty=${item.quantity}, sellUnit=${item.sellUnit}, sellingVolume=${sellingVolume}, bUPP=${bUPP}, restoring=${baseUnitsToRestore}`);
-
-                            const stock = await InventoryStock.findOne({
-                                where: { productId: item.productId },
-                                order: [['createdAt', 'DESC']]
-                            });
-                            if (stock) {
-                                await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore });
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (status === 'Completed') {
-            const order = await Order.findByPk(assignment.orderId);
-            if (order) {
-                await order.update({
-                    orderStatus: 'Delivered',
-                    deliveredAt: order.deliveredAt || new Date(),
-                    notes: noteText || order.notes
-                });
-            }
-            await sendDeliveredNotification(assignment.orderId);
-            try {
-                const deliveredOrder = await Order.findByPk(assignment.orderId, {
-                    include: [
-                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
-                        { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
-                    ]
-                });
-                if (deliveredOrder) {
-                    broadcastOrderDelivered({ order: deliveredOrder, deliveryBoyId });
-                }
-            } catch (sErr) {
-                logger.error(`[Socket Broadcast Error in updateMyAssignmentStatus]: ${sErr.message}`);
-            }
-        }
-
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Assignment status updated successfully.", assignment);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Previous bills fetched successfully.", result);
     } catch (error) {
-        logger.error(`[Update Assignment Status Error]: ${error.message}`);
+        logger.error(`[Get User Previous Bills Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
-    }
-};
-
-/**
- * @desc    Bulk update assignment positions or single item shifting
- * @route   PUT /api/delivery/orders/reorder
- * @access  Private (Delivery Boy)
- */
-export const reorderAssignments = async (req, res) => {
-    const transaction = await OrderAssignment.sequelize.transaction();
-    try {
-        const { id, fromIndex, toIndex } = req.body;
-        const deliveryBoyId = req.user.id;
-        logger.info(`[Reorder Assignments]: Boy: ${deliveryBoyId}, ID: ${id}, from ${fromIndex} to ${toIndex}`);
-
-        if (id === undefined || fromIndex === undefined || toIndex === undefined) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "id, fromIndex, and toIndex are required.");
-        }
-
-        if (fromIndex === toIndex) {
-            return sendSuccessResponse(res, HTTP_STATUS.OK, "No changes needed.");
-        }
-
-        if (toIndex < fromIndex) {
-            // Moving UP: Shift items in between DOWN
-            await OrderAssignment.increment('position', {
-                by: 1,
-                where: {
-                    deliveryBoyId,
-                    position: { [Op.gte]: toIndex, [Op.lt]: fromIndex }
-                },
-                transaction
-            });
-        } else {
-            // Moving DOWN: Shift items in between UP
-            await OrderAssignment.increment('position', {
-                by: -1,
-                where: {
-                    deliveryBoyId,
-                    position: { [Op.gt]: fromIndex, [Op.lte]: toIndex }
-                },
-                transaction
-            });
-        }
-
-        // Update the target item's position
-        await OrderAssignment.update(
-            { position: toIndex },
-            { where: { id, deliveryBoyId }, transaction }
-        );
-
-        await transaction.commit();
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order reordered and shifted successfully.");
-    } catch (error) {
-        if (transaction) await transaction.rollback();
-        logger.error(`[Reorder Assignments Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
-    }
-};
-
-/**
- * @desc    Complete an order and settle multiple payments (current + past dues)
- * @route   PUT /api/delivery/orders/:assignmentId/complete-settle
- * @access  Private (Delivery Boy)
- */
-export const completeOrderAndSettlePayment = async (req, res) => {
-    const t = await OrderAssignment.sequelize.transaction();
-    try {
-        const { assignmentId } = req.params;
-        const {
-            cashAmount = 0,
-            onlineAmount = 0,
-            creditAmount = 0,
-            salesReturnAmount = 0,
-            returnAmount = 0,
-            salesReturnItems,
-            returnItems,
-            onlineTransactionId,
-            notes,
-            note,
-            deliveryNote,
-            totalCouponPoints,
-            couponPoints,
-            totalCouponPrice,
-            couponDiscount,
-            couponPrice,
-            discountType,
-            couponItems
-        } = req.body;
-        const deliveryBoyId = req.user.id;
-        const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
-
-        const assignment = await OrderAssignment.findOne({
-            where: { id: assignmentId, deliveryBoyId },
-            include: [{ model: Order, as: 'order' }],
-            transaction: t
-        });
-
-        if (!assignment) {
-            logger.warn(`[Complete Order Settle]: Assignment ${assignmentId} not found for delivery boy ${deliveryBoyId}`);
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment not found.");
-        }
-
-        logger.info(`[Complete Order Settle]: Starting settlement for assignment ${assignmentId}, delivery boy ${deliveryBoyId}`);
-
-        // Handle product-wise coupon items if sent by Delivery Boy App
-        let calcCouponPts = null;
-        let calcCouponDisc = null;
-
-        if (Array.isArray(couponItems) && couponItems.length > 0) {
-            for (const cItem of couponItems) {
-                const itemPts = Number(cItem.couponPoints || cItem.points || 0);
-                const itemDisc = parseFloat(cItem.couponPrice || cItem.discount || cItem.price || 0);
-
-                const whereCond = { orderId: assignment.order.id };
-                if (cItem.itemId || cItem.id) whereCond.id = cItem.itemId || cItem.id;
-                else if (cItem.productId) whereCond.productId = cItem.productId;
-
-                await OrderItem.update({
-                    hasCoupon: itemPts > 0 || itemDisc > 0,
-                    couponPoints: itemPts,
-                    couponPrice: itemDisc
-                }, {
-                    where: whereCond,
-                    transaction: t
-                });
-            }
-        }
-
-        // Calculate actual sum of all coupon items in this order
-        const allOrderItems = await OrderItem.findAll({
-            where: { orderId: assignment.order.id },
-            transaction: t
-        });
-
-        const totalOrderCouponPts = allOrderItems.reduce((sum, item) => sum + Number(item.couponPoints || 0), 0);
-        const totalOrderCouponDisc = allOrderItems.reduce((sum, item) => sum + parseFloat(item.couponPrice || 0), 0);
-
-        // Check if top-level coupon parameters were sent in req.body
-        const passedDisc = couponDiscount !== undefined ? parseFloat(couponDiscount) : (totalCouponPrice !== undefined ? parseFloat(totalCouponPrice) : (couponPrice !== undefined ? parseFloat(couponPrice) : 0));
-        const passedPts = couponPoints !== undefined ? Number(couponPoints) : (totalCouponPoints !== undefined ? Number(totalCouponPoints) : 0);
-
-        const existingCouponPts = Number(assignment.order?.couponPoints || 0);
-        const existingCouponDisc = parseFloat(assignment.order?.couponDiscount || 0);
-
-        // Final coupon discount is either sum of all items or accumulated top-level discount
-        const finalCouponPts = Math.max(totalOrderCouponPts, existingCouponPts + passedPts);
-        const finalCouponDisc = Math.max(totalOrderCouponDisc, existingCouponDisc + passedDisc);
-
-        if (assignment.order) {
-            assignment.order.couponPoints = finalCouponPts;
-            assignment.order.couponDiscount = finalCouponDisc.toFixed(2);
-            assignment.order.discountType = (finalCouponPts > 0 || finalCouponDisc > 0) ? (discountType || 'Coupon Discount') : null;
-
-            // Adjust order's dueAmount to reflect net bill after total cumulative coupon discount
-            const netPayableBill = Math.max(0, parseFloat(assignment.order.totalAmount || 0) - finalCouponDisc);
-            const netDueBeforePayment = Math.max(0, netPayableBill - parseFloat(assignment.order.paidAmount || 0));
-            assignment.order.dueAmount = netDueBeforePayment.toFixed(2);
-            await assignment.order.save({ transaction: t });
-        }
-
-        const userId = assignment.order.userId;
-
-        // Verify user credit if creditAmount is used
-        let user = null;
-        if (userId) {
-            user = await User.findByPk(userId, { transaction: t });
-        }
-
-        if (creditAmount > 0) {
-            if (!user) {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot use credit: User not associated with this order.");
-            }
-            if (parseFloat(user.creditline) < parseFloat(creditAmount)) {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit. Available: ${user.creditline}, Attempted: ${creditAmount}`);
-            }
-        }
-
-        // Fetch all past due orders for this user
-        let pastDueOrders = [];
-        if (userId) {
-            pastDueOrders = await Order.findAll({
-                where: {
-                    userId,
-                    dueAmount: { [Op.gt]: 0 },
-                    orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] },
-                    id: { [Op.ne]: assignment.orderId } // Exclude current order as we'll add it manually
-                },
-                order: [['createdAt', 'ASC']], // Oldest first
-                transaction: t
-            });
-        }
-
-        const inputCash = parseFloat(cashAmount) || 0;
-        const inputOnline = parseFloat(onlineAmount) || 0;
-        const inputCredit = parseFloat(creditAmount) || 0;
-        let inputReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
-
-        if (inputReturn === 0 && user) {
-            const unadjustedReturns = await SalesReturn.findAll({
-                where: {
-                    userId: user.id,
-                    creditProcessed: false,
-                    status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                },
-                transaction: t
-            });
-            inputReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
-        }
-
-        const totalPastDue = pastDueOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
-        const currentBillTotal = parseFloat(assignment.order.totalAmount || 0);
-        const netBill = Math.max(0, currentBillTotal - finalCouponDisc);
-
-        // Calculate how much past due is settled:
-        // Money used for current bill = Math.max(0, netBill - inputCredit)
-        // Remainder of cash/online goes to settle past due:
-        const currentBillCashOnlineNeeded = Math.max(0, netBill - inputReturn - inputCredit);
-        const totalCashOnlineCollected = inputCash + inputOnline;
-        const pastDueSettled = Math.min(totalPastDue, Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded));
-
-        // 1. Settle past due orders:
-        let remainingToClearPast = pastDueSettled;
-        for (const pOrder of pastDueOrders) {
-            if (remainingToClearPast <= 0) break;
-            const pDue = parseFloat(pOrder.dueAmount);
-            if (pDue <= 0) continue;
-            const clearAmt = Math.min(pDue, remainingToClearPast);
-            remainingToClearPast -= clearAmt;
-            pOrder.dueAmount = Math.max(0, pDue - clearAmt);
-            pOrder.paidAmount = parseFloat(pOrder.paidAmount || 0) + clearAmt;
-            pOrder.paymentStatus = pOrder.dueAmount <= 1e-7 ? 'Paid' : 'Partial';
-            await pOrder.save({ transaction: t });
-
-            await OrderPayment.create({
-                orderId: pOrder.id,
-                deliveryBoyId,
-                amount: clearAmt,
-                paymentMethod: 'CASH',
-                notes: `Auto-adjusted ₹${clearAmt} past due during delivery of Order #${assignment.order.orderId || assignment.orderId}`
-            }, { transaction: t });
-
-            await restoreUserCreditFromPayment(pOrder.id, clearAmt, user, t);
-        }
-
-        // 2. Create SalesReturn records if provided:
-        const returnItemsList = salesReturnItems || returnItems;
-        if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
-            for (const rItem of returnItemsList) {
-                if (rItem.productId && Number(rItem.quantity) > 0) {
-                    const rPrice = parseFloat(rItem.price || 0);
-                    const rQty = Number(rItem.quantity);
-                    const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
-                    await SalesReturn.create({
-                        orderId: assignment.order.id,
-                        userId: assignment.order.userId,
-                        deliveryBoyId,
-                        productId: rItem.productId,
-                        variantId: rItem.variantId || null,
-                        volumeId: rItem.volumeId || null,
-                        quantity: rQty,
-                        price: rPrice,
-                        returnAmount: rAmt,
-                        reason: rItem.reason || 'Customer Return at Delivery',
-                        status: 'Pending',
-                        creditProcessed: true
-                    }, { transaction: t });
-                }
-            }
-        }
-        if (user && inputReturn > 0) {
-            await SalesReturn.update(
-                { creditProcessed: true },
-                {
-                    where: {
-                        userId: user.id,
-                        creditProcessed: false,
-                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                    },
-                    transaction: t
-                }
-            );
-        }
-
-        // Determine how much cash and online were consumed by past dues:
-        const cashUsedForPastDue = Math.min(inputCash, pastDueSettled);
-        const onlineUsedForPastDue = Math.max(0, pastDueSettled - cashUsedForPastDue);
-
-        const currentOrderCash = Math.max(0, inputCash - cashUsedForPastDue);
-        const currentOrderOnline = Math.max(0, inputOnline - onlineUsedForPastDue);
-
-        // 3. Record true payments ON CURRENT ASSIGNMENT ORDER:
-        // Cash payment record
-        if (currentOrderCash > 0) {
-            const existingCash = await OrderPayment.findOne({
-                where: { orderId: assignment.order.id, paymentMethod: 'CASH' },
-                transaction: t
-            });
-            if (existingCash) {
-                await existingCash.update({ amount: currentOrderCash }, { transaction: t });
-            } else {
-                await OrderPayment.create({
-                    orderId: assignment.order.id,
-                    deliveryBoyId,
-                    amount: currentOrderCash,
-                    paymentMethod: 'CASH',
-                    notes: 'Cash collected during delivery'
-                }, { transaction: t });
-            }
-        } else {
-            await OrderPayment.destroy({
-                where: { orderId: assignment.order.id, paymentMethod: 'CASH' },
-                transaction: t
-            });
-        }
-
-        // Online payment record
-        if (currentOrderOnline > 0) {
-            const existingOnline = await OrderPayment.findOne({
-                where: { orderId: assignment.order.id, paymentMethod: 'ONLINE' },
-                transaction: t
-            });
-            if (existingOnline) {
-                await existingOnline.update({ amount: currentOrderOnline, transactionId: onlineTransactionId || existingOnline.transactionId }, { transaction: t });
-            } else {
-                await OrderPayment.create({
-                    orderId: assignment.order.id,
-                    deliveryBoyId,
-                    amount: currentOrderOnline,
-                    paymentMethod: 'ONLINE',
-                    transactionId: onlineTransactionId,
-                    notes: 'Online payment during delivery'
-                }, { transaction: t });
-            }
-        } else {
-            await OrderPayment.destroy({
-                where: { orderId: assignment.order.id, paymentMethod: 'ONLINE' },
-                transaction: t
-            });
-        }
-
-        // Sales return payment record
-        if (inputReturn > 0) {
-            const existingReturn = await OrderPayment.findOne({
-                where: { orderId: assignment.order.id, paymentMethod: 'SALES_RETURN' },
-                transaction: t
-            });
-            if (existingReturn) {
-                await existingReturn.update({ amount: inputReturn }, { transaction: t });
-            } else {
-                await OrderPayment.create({
-                    orderId: assignment.order.id,
-                    deliveryBoyId,
-                    amount: inputReturn,
-                    paymentMethod: 'SALES_RETURN',
-                    notes: `Adjusted ₹${inputReturn} from Sales Return (Bill: ₹${assignment.order.totalAmount})`
-                }, { transaction: t });
-            }
-        } else {
-            await OrderPayment.destroy({
-                where: { orderId: assignment.order.id, paymentMethod: 'SALES_RETURN' },
-                transaction: t
-            });
-        }
-
-        // Credit payment record
-        if (inputCredit > 0) {
-            const existingCredit = await OrderPayment.findOne({
-                where: { orderId: assignment.order.id, paymentMethod: 'CREDIT' },
-                transaction: t
-            });
-            if (existingCredit) {
-                await existingCredit.update({ amount: inputCredit }, { transaction: t });
-            } else {
-                await OrderPayment.create({
-                    orderId: assignment.order.id,
-                    deliveryBoyId,
-                    amount: inputCredit,
-                    paymentMethod: 'CREDIT',
-                    notes: 'Goods given on credit (baki)'
-                }, { transaction: t });
-            }
-
-            if (user) {
-                user.creditline = Math.max(0, parseFloat(user.creditline || 0) - inputCredit);
-                if (user.creditline <= 0) {
-                    user.blockcredit = true;
-                }
-            }
-        } else {
-            await OrderPayment.destroy({
-                where: { orderId: assignment.order.id, paymentMethod: 'CREDIT' },
-                transaction: t
-            });
-        }
-
-        // Update current order balances:
-        assignment.order.dueAmount = inputCredit.toFixed(2);
-        const actualPaidOnThisBill = Math.max(0, netBill - inputCredit);
-        assignment.order.paidAmount = actualPaidOnThisBill.toFixed(2);
-        assignment.order.pastDueCollected = pastDueSettled.toFixed(2);
-        assignment.order.paymentStatus = inputCredit <= 1e-7 ? 'Paid' : 'Partial';
-
-        const paymentMethodsUsed = [];
-        if (currentOrderCash > 0) paymentMethodsUsed.push('CASH');
-        if (currentOrderOnline > 0) paymentMethodsUsed.push('ONLINE');
-        if (inputCredit > 0) paymentMethodsUsed.push('CREDIT');
-        if (inputReturn > 0) paymentMethodsUsed.push('SALES_RETURN');
-
-        if (paymentMethodsUsed.length === 1) {
-            assignment.order.paymentMethod = paymentMethodsUsed[0];
-        } else if (paymentMethodsUsed.length > 1) {
-            assignment.order.paymentMethod = 'SPLIT';
-        }
-
-        if (customDeliveryNote) {
-            assignment.order.notes = customDeliveryNote;
-            assignment.order.deliveryNotice = customDeliveryNote;
-            await assignment.order.save({ transaction: t });
-            if (user) {
-                user.deliveryNotice = customDeliveryNote;
-                await user.save({ transaction: t });
-            }
-        }
-
-        let remainingCash = Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded - pastDueSettled);
-        let remainingOnline = 0;
-        let remainingSalesReturn = Math.max(0, inputReturn - netBill);
-
-        if (user) {
-            const excessCashOnline = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
-            const excessReturn = remainingSalesReturn > 0 ? remainingSalesReturn : 0;
-            const excessCollected = excessCashOnline + excessReturn;
-
-            if (excessCollected > 0) {
-                const prevCredit = parseFloat(user.creditline || 0);
-                user.creditline = prevCredit + excessCollected;
-                const newCredit = user.creditline;
-                logger.info(`[Complete Order Settle Overpayment]: Added excess ${excessCollected} (Cash/Online: ${excessCashOnline}, Return: ${excessReturn}) to user ${user.id} creditline. New creditline: ${user.creditline}`);
-                
-                const noteParts = [];
-                if (excessCashOnline > 0) noteParts.push(`Cash/Online Overpayment: +₹${excessCashOnline.toFixed(2)}`);
-                if (excessReturn > 0) noteParts.push(`Excess Sales Return: +₹${excessReturn.toFixed(2)}`);
-
-                await PartyBalanceLog.create({
-                    userId: user.id,
-                    orderId: assignment.orderId,
-                    type: 'JAMA',
-                    amount: excessCollected,
-                    previousBalance: prevCredit,
-                    newBalance: newCredit,
-                    note: `Credit Jama on Order #${assignment.order?.orderId || assignment.orderId}: +₹${excessCollected.toFixed(2)} (${noteParts.join(', ')})`,
-                    createdByName: 'Delivery Boy Settlement'
-                }, { transaction: t });
-
-                // Also update or create the OrderPayment record for this assignment order to reflect full collected amount!
-                if (remainingCash > 0) {
-                    const existingCashPay = await OrderPayment.findOne({
-                        where: { orderId: assignment.orderId, paymentMethod: 'CASH' },
-                        transaction: t
-                    });
-                    if (existingCashPay) {
-                        const newAmt = parseFloat(existingCashPay.amount) + remainingCash;
-                        await existingCashPay.update({
-                            amount: newAmt,
-                            notes: `Cash collected ₹${newAmt.toFixed(2)} (Bill: ₹${assignment.order?.totalAmount || '0'} + Advance Jama: +₹${remainingCash.toFixed(2)})`
-                        }, { transaction: t });
-                    } else {
-                        await OrderPayment.create({
-                            orderId: assignment.orderId,
-                            deliveryBoyId,
-                            amount: remainingCash,
-                            paymentMethod: 'CASH',
-                            notes: `Advance Jama Credit Cash (+₹${remainingCash.toFixed(2)})`
-                        }, { transaction: t });
-                    }
-                }
-                if (remainingOnline > 0) {
-                    const existingOnlinePay = await OrderPayment.findOne({
-                        where: { orderId: assignment.orderId, paymentMethod: 'ONLINE' },
-                        transaction: t
-                    });
-                    if (existingOnlinePay) {
-                        const newAmt = parseFloat(existingOnlinePay.amount) + remainingOnline;
-                        await existingOnlinePay.update({
-                            amount: newAmt,
-                            notes: `Online collected ₹${newAmt.toFixed(2)} (Bill: ₹${assignment.order?.totalAmount || '0'} + Advance Jama: +₹${remainingOnline.toFixed(2)})`
-                        }, { transaction: t });
-                    } else {
-                        await OrderPayment.create({
-                            orderId: assignment.orderId,
-                            deliveryBoyId,
-                            amount: remainingOnline,
-                            paymentMethod: 'ONLINE',
-                            notes: `Advance Jama Credit Online (+₹${remainingOnline.toFixed(2)})`
-                        }, { transaction: t });
-                    }
-                }
-            }
-            await user.save({ transaction: t });
-        }
-
-        // Ensure current order status is updated to Payment Collect so it lands in the Payment Collect tab
-        await Order.update(
-            { orderStatus: 'Payment Collect', deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') },
-            { where: { id: assignment.orderId }, transaction: t }
-        );
-
-        await assignment.update({
-            status: 'Completed',
-            notes: customDeliveryNote || assignment.notes
-        }, { transaction: t });
-
-        await t.commit();
-
-        // Trigger Delivered Push Notification
-        await sendDeliveredNotification(assignment.orderId);
-
-        try {
-            const deliveredOrder = await Order.findByPk(assignment.orderId, {
-                include: [
-                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
-                    { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
-                ]
-            });
-            if (deliveredOrder) {
-                broadcastOrderStatusChanged({
-                    order: deliveredOrder,
-                    oldStatus: 'Shipping',
-                    newStatus: 'Payment Collect',
-                    routeCategoryId: deliveredOrder.routeCategoryId || deliveredOrder.user?.routeCategoryId,
-                    godownId: deliveredOrder.godownId,
-                    deliveryBoyId
-                });
-            }
-        } catch (sErr) {
-            logger.error(`[Socket Broadcast Error in completeOrderAndSettlePayment]: ${sErr.message}`);
-        }
-
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order delivered and payments auto-adjusted successfully.");
-    } catch (error) {
-        if (t) await t.rollback();
-        logger.error(`[Complete Order Settle Error]: ${error.message}`);
-
-        // Return debug info in the error response for troubleshooting
-        return res.status(500).json({
-            success: false,
-            message: error.message,
-            debug: {
-                deliveryBoyId: req.user?.id,
-                userObject: req.user ? { id: req.user.id, name: req.user.fullname || req.user.name } : null,
-                assignmentId: req.params.assignmentId
-            }
-        });
     }
 };
 
@@ -1488,798 +133,171 @@ export const getUserCreditDetails = async (req, res) => {
 };
 
 /**
+ * @desc    Bulk update assignment positions or single item shifting
+ * @route   PUT /api/delivery/orders/reorder
+ * @access  Private (Delivery Boy)
+ */
+export const reorderAssignments = async (req, res) => {
+    try {
+        const { id, fromIndex, toIndex } = req.body;
+        const deliveryBoyId = req.user.id;
+
+        if (id === undefined || fromIndex === undefined || toIndex === undefined) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "id, fromIndex, and toIndex are required.");
+        }
+
+        await reorderAssignmentsService({
+            deliveryBoyId,
+            id,
+            fromIndex,
+            toIndex
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order reordered and shifted successfully.");
+    } catch (error) {
+        logger.error(`[Reorder Assignments Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Update assignment status by delivery boy
+ * @route   PUT /api/delivery/orders/:assignmentId/status
+ * @access  Private (Delivery Boy)
+ */
+export const updateMyAssignmentStatus = async (req, res) => {
+    try {
+        const { assignmentId } = req.params;
+        const { status, notes, note, deliveryNote } = req.body;
+        const deliveryBoyId = req.user.id;
+
+        const validStatuses = ['Pending', 'Assigned', 'Cancelled', 'Completed'];
+        if (status && !validStatuses.includes(status)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid status.");
+        }
+
+        const result = await updateMyAssignmentStatusService({
+            assignmentId,
+            deliveryBoyId,
+            status,
+            notes: notes || note || deliveryNote,
+            reqUser: req.user
+        });
+
+        if (!result) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment or Order not found.");
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Assignment status updated successfully.", result);
+    } catch (error) {
+        logger.error(`[Update Assignment Status Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Complete an order and settle multiple payments (current + past dues)
+ * @route   PUT /api/delivery/orders/:assignmentId/complete-settle
+ * @access  Private (Delivery Boy)
+ */
+export const completeOrderAndSettlePayment = async (req, res) => {
+    try {
+        const { assignmentId } = req.params;
+        const deliveryBoyId = req.user.id;
+
+        const result = await completeOrderAndSettlePaymentService({
+            assignmentId,
+            deliveryBoyId,
+            body: req.body,
+            reqUser: req.user
+        });
+
+        if (result.notFound) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Assignment not found.");
+        }
+
+        if (result.error) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, result.error);
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Order delivered and payments auto-adjusted successfully.");
+    } catch (error) {
+        logger.error(`[Complete Order Settle Error]: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+            debug: {
+                deliveryBoyId: req.user?.id,
+                userObject: req.user ? { id: req.user.id, name: req.user.fullname || req.user.name } : null,
+                assignmentId: req.params.assignmentId
+            }
+        });
+    }
+};
+
+/**
  * @desc    Settle a single or multiple specific orders by Order ID or UUID
  * @route   PUT /api/delivery/orders/settle-single
  * @access  Private (Delivery Boy)
  */
 export const settleSingleOrderPayment = async (req, res) => {
-    const t = await OrderAssignment.sequelize.transaction();
     try {
-        const {
-            orderId,
-            cashAmount = 0,
-            onlineAmount = 0,
-            creditAmount = 0,
-            salesReturnAmount = 0,
-            returnAmount = 0,
-            salesReturnItems,
-            returnItems,
-            onlineTransactionId,
-            notes,
-            note,
-            deliveryNote
-        } = req.body;
         const deliveryBoyId = req.user.id;
-        const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
 
-        if (!orderId) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "orderId is required.");
-        }
-
-        logger.info(`[Settle Single Order]: Settle request for order(s) ${JSON.stringify(orderId)}, delivery boy ${deliveryBoyId}`);
-
-        // Normalize orderId to array
-        let orderIds = [];
-        if (Array.isArray(orderId)) {
-            orderIds = orderId;
-        } else if (typeof orderId === 'string') {
-            orderIds = orderId.split(',').map(id => id.trim()).filter(Boolean);
-        }
-
-        // Separate UUIDs and non-UUIDs to avoid Postgres casting errors
-        const uuidIds = orderIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
-        const nonUuidIds = orderIds.filter(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
-
-        const orConditions = [];
-        if (uuidIds.length > 0) {
-            orConditions.push({ id: uuidIds });
-        }
-        if (nonUuidIds.length > 0) {
-            orConditions.push({ orderId: nonUuidIds });
-        }
-
-        if (orConditions.length === 0) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "No valid order ID provided.");
-        }
-
-        // Find all specified orders
-        const orders = await Order.findAll({
-            where: {
-                [Op.or]: orConditions
-            },
-            transaction: t
+        const result = await settleSingleOrderPaymentService({
+            deliveryBoyId,
+            body: req.body,
+            reqUser: req.user
         });
 
-        if (orders.length === 0) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `No orders found with ID(s) ${JSON.stringify(orderId)}`);
+        if (result.badRequest) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, result.badRequest);
         }
 
-        // Sort orders by oldest first for chronological auto-adjustment
-        orders.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-        const userId = orders[0].userId;
-        let user = null;
-        if (parseFloat(creditAmount) > 0) {
-            if (!userId) {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot use credit: User not associated with these orders.");
-            }
-            user = await User.findByPk(userId, { transaction: t });
-            if (!user) {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
-            }
-            if (parseFloat(user.creditline) < parseFloat(creditAmount)) {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit. Available: ${user.creditline}, Attempted: ${creditAmount}`);
-            }
-        } else if (userId) {
-            user = await User.findByPk(userId, { transaction: t });
+        if (result.notFound) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, result.notFound);
         }
 
-        let remainingCash = parseFloat(cashAmount) || 0;
-        let remainingOnline = parseFloat(onlineAmount) || 0;
-        let remainingCredit = parseFloat(creditAmount) || 0;
-        let remainingSalesReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
-
-        if (remainingSalesReturn === 0 && user) {
-            const unadjustedReturns = await SalesReturn.findAll({
-                where: {
-                    userId: user.id,
-                    creditProcessed: false,
-                    status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                },
-                transaction: t
-            });
-            remainingSalesReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
-        }
-
-        for (const order of orders) {
-            let due = parseFloat(order.dueAmount);
-            if (due <= 0) continue;
-
-            let orderNotes = [];
-            let paymentMethodsUsed = [];
-
-            // Handle direct Sales Return deduction if available
-
-            if (remainingSalesReturn > 0 && due > 0) {
-                const returnDeduction = Math.min(remainingSalesReturn, due);
-                remainingSalesReturn -= returnDeduction;
-                due -= returnDeduction;
-                order.paidAmount = parseFloat(order.paidAmount) + returnDeduction;
-                orderNotes.push(`Paid ₹${returnDeduction.toFixed(2)} via Sales Return`);
-                paymentMethodsUsed.push('SALES_RETURN');
-
-                logger.info(`[Settle Single]: Creating SALES_RETURN payment for order ${order.id}, amount ${returnDeduction}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: returnDeduction,
-                    paymentMethod: 'SALES_RETURN',
-                    notes: `Adjusted ₹${returnDeduction.toFixed(2)} from Sales Return (Bill: ₹${order.totalAmount})`
-                }, { transaction: t });
-
-                // Mark any unadjusted returns for this user as creditProcessed = true
-                if (user) {
-                    await SalesReturn.update(
-                        { creditProcessed: true },
-                        {
-                            where: {
-                                userId: user.id,
-                                creditProcessed: false,
-                                status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                            },
-                            transaction: t
-                        }
-                    );
-                }
-
-                // Create SalesReturn items if provided
-                const returnItemsList = salesReturnItems || returnItems;
-                if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
-                    for (const rItem of returnItemsList) {
-                        if (rItem.productId && Number(rItem.quantity) > 0) {
-                            const rPrice = parseFloat(rItem.price || 0);
-                            const rQty = Number(rItem.quantity);
-                            const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
-                            await SalesReturn.create({
-                                orderId: order.id,
-                                userId: order.userId,
-                                deliveryBoyId,
-                                productId: rItem.productId,
-                                variantId: rItem.variantId || null,
-                                volumeId: rItem.volumeId || null,
-                                quantity: rQty,
-                                price: rPrice,
-                                returnAmount: rAmt,
-                                reason: rItem.reason || 'Customer Return at Delivery',
-                                status: 'Pending',
-                                creditProcessed: true
-                            }, { transaction: t });
-                        }
-                    }
-                }
-            }
-
-            // Try Cash
-            if (remainingCash > 0 && due > 0) {
-                const deduction = Math.min(remainingCash, due);
-                remainingCash -= deduction;
-                due -= deduction;
-                order.paidAmount = parseFloat(order.paidAmount) + deduction;
-                orderNotes.push(`Paid ${deduction} via Cash`);
-                paymentMethodsUsed.push('CASH');
-
-                logger.info(`[Settle Single]: Creating CASH payment for order ${order.id}, amount ${deduction}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: deduction,
-                    paymentMethod: 'CASH',
-                    notes: 'Settle Single Payment (Cash)'
-                }, { transaction: t });
-
-                // Restore user's credit from this cash payment
-                await restoreUserCreditFromPayment(order.id, deduction, user, t);
-            }
-
-            // Try Online
-            if (remainingOnline > 0 && due > 0) {
-                const deduction = Math.min(remainingOnline, due);
-                remainingOnline -= deduction;
-                due -= deduction;
-                order.paidAmount = parseFloat(order.paidAmount) + deduction;
-                const txnIdStr = onlineTransactionId ? ` (Txn: ${onlineTransactionId})` : '';
-                orderNotes.push(`Paid ${deduction} via Online${txnIdStr}`);
-                paymentMethodsUsed.push('ONLINE');
-
-                logger.info(`[Settle Single]: Creating ONLINE payment for order ${order.id}, amount ${deduction}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: deduction,
-                    paymentMethod: 'ONLINE',
-                    transactionId: onlineTransactionId,
-                    notes: 'Settle Single Payment (Online)'
-                }, { transaction: t });
-
-                // Restore user's credit from this online payment
-                await restoreUserCreditFromPayment(order.id, deduction, user, t);
-            }
-
-            // Try Credit
-            if (remainingCredit > 0 && due > 0) {
-                const deduction = Math.min(remainingCredit, due);
-                remainingCredit -= deduction;
-                // Note: Credit payment represents giving goods on credit (baki), 
-                // so the order's dueAmount remains unchanged for the credit portion 
-                // and is still considered a pending due.
-                orderNotes.push(`Paid ${deduction} via Credit (Baki)`);
-                paymentMethodsUsed.push('CREDIT');
-
-                logger.info(`[Settle Single]: Creating CREDIT payment for order ${order.id}, amount ${deduction}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: deduction,
-                    paymentMethod: 'CREDIT',
-                    notes: 'Settle Single Payment (Credit - Baki)'
-                }, { transaction: t });
-
-                // Deduct from User's creditline and block their credit if credit limit fully utilized
-                if (user) {
-                    user.creditline = Math.max(0, parseFloat(user.creditline || 0) - deduction);
-                    if (user.creditline <= 0) {
-                        user.blockcredit = true;
-                    }
-                }
-            }
-
-            // Try Advance Jama Balance (only if remaining due exists and it was NOT explicitly kept on credit)
-            const currentJama = (user && user.balanceType === 'JAMA') ? Math.max(0, parseFloat(user.advanceJama || 0)) : 0;
-            if (currentJama > 0 && due > 0 && (!creditAmount || parseFloat(creditAmount) <= 0) && remainingCredit === 0) {
-                const jamaDeduction = Math.min(currentJama, due);
-                user.advanceJama = Math.max(0, currentJama - jamaDeduction);
-                if (user.advanceJama <= 0) {
-                    user.balanceType = 'CLEAR';
-                }
-                due -= jamaDeduction;
-                order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
-
-                const payMethod = 'JAMA_CREDIT';
-                const payNote = `Adjusted ₹${jamaDeduction.toFixed(2)} from Customer Advance Jama Balance`;
-
-                orderNotes.push(`Paid ${jamaDeduction.toFixed(2)} via ${payMethod}`);
-                paymentMethodsUsed.push(payMethod);
-
-                logger.info(`[Settle Single]: Deducted ${payMethod} ${jamaDeduction} for order ${order.id}`);
-                await OrderPayment.create({
-                    orderId: order.id,
-                    deliveryBoyId,
-                    amount: jamaDeduction,
-                    paymentMethod: payMethod,
-                    notes: payNote
-                }, { transaction: t });
-
-                await PartyBalanceLog.create({
-                    userId: user.id,
-                    orderId: order.id,
-                    type: 'ADJUSTMENT',
-                    amount: jamaDeduction,
-                    previousBalance: prevCredit,
-                    newBalance: newCredit,
-                    note: `Jama Balance used on Order #${order.orderId || order.id}: -₹${jamaDeduction.toFixed(2)} deducted from Jama Balance`,
-                    createdByName: 'Delivery Boy Settlement'
-                }, { transaction: t });
-            }
-
-            // Update order status/payment
-            let newPaymentStatus = 'Pending';
-            if (due <= 1e-7) {
-                newPaymentStatus = 'Paid';
-            } else if (parseFloat(order.paidAmount) > 0) {
-                newPaymentStatus = 'Partial';
-            }
-
-            let finalMethod = order.paymentMethod;
-            if (paymentMethodsUsed.length === 1) {
-                finalMethod = paymentMethodsUsed[0];
-            } else if (paymentMethodsUsed.length > 1) {
-                finalMethod = 'SPLIT';
-            }
-
-            await order.update({
-                paidAmount: order.paidAmount,
-                dueAmount: due,
-                paymentStatus: newPaymentStatus,
-                paymentMethod: finalMethod,
-                orderStatus: 'Payment Collect',
-                notes: customDeliveryNote || order.notes,
-                deliveryNotice: customDeliveryNote || order.deliveryNotice
-            }, { transaction: t });
-
-            if (customDeliveryNote && order.userId) {
-                await User.update({ deliveryNotice: customDeliveryNote }, { where: { id: order.userId }, transaction: t });
-            }
-
-            // Complete associated assignment if found
-            const assignment = await OrderAssignment.findOne({
-                where: { orderId: order.id, deliveryBoyId },
-                transaction: t
-            });
-            if (assignment) {
-                await assignment.update({
-                    status: 'Completed',
-                    notes: customDeliveryNote || assignment.notes
-                }, { transaction: t });
-            }
-        }
-
-        if (user) {
-            const excessCashOnline = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
-            const excessReturn = remainingSalesReturn > 0 ? remainingSalesReturn : 0;
-            const excessCollected = excessCashOnline + excessReturn;
-
-            if (excessCollected > 0) {
-                const prevCredit = parseFloat(user.creditline || 0);
-                user.creditline = prevCredit + excessCollected;
-                const newCredit = user.creditline;
-                logger.info(`[Settle Single Overpayment]: Added excess ${excessCollected} (Cash/Online: ${excessCashOnline}, Return: ${excessReturn}) to user ${user.id} creditline. New creditline: ${user.creditline}`);
-
-                const noteParts = [];
-                if (excessCashOnline > 0) noteParts.push(`Cash/Online Overpayment: +₹${excessCashOnline.toFixed(2)}`);
-                if (excessReturn > 0) noteParts.push(`Excess Sales Return: +₹${excessReturn.toFixed(2)}`);
-
-                const targetOrderId = orders[0]?.id || null;
-                await PartyBalanceLog.create({
-                    userId: user.id,
-                    orderId: targetOrderId,
-                    type: 'JAMA',
-                    amount: excessCollected,
-                    previousBalance: prevCredit,
-                    newBalance: newCredit,
-                    note: `Credit Jama on Order #${orders[0]?.orderId || targetOrderId}: +₹${excessCollected.toFixed(2)} (${noteParts.join(', ')})`,
-                    createdByName: 'Delivery Boy Settlement'
-                }, { transaction: t });
-
-                // Also update or create the OrderPayment record for this order to reflect full collected amount!
-                if (targetOrderId) {
-                    if (remainingCash > 0) {
-                        const existingCashPay = await OrderPayment.findOne({
-                            where: { orderId: targetOrderId, paymentMethod: 'CASH' },
-                            transaction: t
-                        });
-                        if (existingCashPay) {
-                            const newAmt = parseFloat(existingCashPay.amount) + remainingCash;
-                            await existingCashPay.update({
-                                amount: newAmt,
-                                notes: `Cash collected ₹${newAmt.toFixed(2)} (Bill: ₹${orders[0]?.totalAmount || '0'} + Advance Jama: +₹${remainingCash.toFixed(2)})`
-                            }, { transaction: t });
-                        } else {
-                            await OrderPayment.create({
-                                orderId: targetOrderId,
-                                deliveryBoyId,
-                                amount: remainingCash,
-                                paymentMethod: 'CASH',
-                                notes: `Advance Jama Credit Cash (+₹${remainingCash.toFixed(2)})`
-                            }, { transaction: t });
-                        }
-                    }
-                    if (remainingOnline > 0) {
-                        const existingOnlinePay = await OrderPayment.findOne({
-                            where: { orderId: targetOrderId, paymentMethod: 'ONLINE' },
-                            transaction: t
-                        });
-                        if (existingOnlinePay) {
-                            const newAmt = parseFloat(existingOnlinePay.amount) + remainingOnline;
-                            await existingOnlinePay.update({
-                                amount: newAmt,
-                                notes: `Online collected ₹${newAmt.toFixed(2)} (Bill: ₹${orders[0]?.totalAmount || '0'} + Advance Jama: +₹${remainingOnline.toFixed(2)})`
-                            }, { transaction: t });
-                        } else {
-                            await OrderPayment.create({
-                                orderId: targetOrderId,
-                                deliveryBoyId,
-                                amount: remainingOnline,
-                                paymentMethod: 'ONLINE',
-                                notes: `Advance Jama Credit Online (+₹${remainingOnline.toFixed(2)})`
-                            }, { transaction: t });
-                        }
-                    }
-                }
-            }
-            await user.save({ transaction: t });
-        }
-
-        await t.commit();
-
-        // Trigger Delivered Push Notification for each settled order
-        for (const order of orders) {
-            await sendDeliveredNotification(order.id);
-        }
-
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders settled successfully.", {
-            settledOrders: orders.map(o => ({
-                id: o.id,
-                orderId: o.orderId,
-                paidAmount: o.paidAmount,
-                dueAmount: o.dueAmount,
-                paymentStatus: o.paymentStatus,
-                paymentMethod: o.paymentMethod
-            }))
-        });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders settled successfully.", result);
     } catch (error) {
-        if (t) await t.rollback();
         logger.error(`[Settle Single Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
 
 /**
- * Helper to restore user's creditline when CASH or ONLINE payment is made towards an order that has CREDIT payments.
- */
-export const restoreUserCreditFromPayment = async (orderId, paymentAmount, user, transaction) => {
-    try {
-        if (!user || paymentAmount <= 0) return;
-
-        // 1. Get all CREDIT payments for this order
-        const creditPayments = await OrderPayment.findAll({
-            where: { orderId, paymentMethod: 'CREDIT' },
-            order: [['createdAt', 'ASC']],
-            transaction
-        });
-
-        let remainingRealPayment = paymentAmount;
-
-        for (const creditPayment of creditPayments) {
-            if (remainingRealPayment <= 0) break;
-
-            const creditAmt = parseFloat(creditPayment.amount || 0);
-            const reduction = Math.min(creditAmt, remainingRealPayment);
-
-            if (reduction > 0) {
-                const newAmount = creditAmt - reduction;
-                if (newAmount <= 1e-4) {
-                    // Fully cleared - delete the credit payment record!
-                    await creditPayment.destroy({ transaction });
-                } else {
-                    // Partially cleared - update the credit payment record with the reduced amount!
-                    await creditPayment.update({ amount: newAmount }, { transaction });
-                }
-                remainingRealPayment -= reduction;
-
-                // Restore user's creditline by the same reduction amount!
-                user.creditline = parseFloat(user.creditline) + reduction;
-                if (parseFloat(user.creditline) > 0) {
-                    user.blockcredit = false;
-                }
-                logger.info(`[Restore Credit]: Cleared ${reduction} of credit payment ${creditPayment.id}. Restored to user creditline.`);
-            }
-        }
-    } catch (error) {
-        logger.error(`[Restore Credit Error]: ${error.message}`);
-    }
-};
-
-/**
  * @desc    Delivery boy submits bank payment proof (screenshot) for an order
- * @route   POST /api/delivery/user/orders/:id/bank-payment
+ * @route   POST /api/delivery/orders/:id/bank-payment
  * @access  Private (Delivery Boy)
  */
 export const submitDeliveryBankPayment = async (req, res) => {
-    const t = await OrderAssignment.sequelize.transaction();
     try {
         const { id } = req.params;
-        const { bankSettingId, screenshot, transactionId, amount, notes, note, deliveryNote } = req.body;
-        const deliveryBoyId = req.user.id; // Authenticated delivery boy
-        const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
+        const deliveryBoyId = req.user.id;
 
-        // 1. Find the order (Support both UUID primary key and human-readable orderId e.g. '1006')
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-        const orderWhere = {};
-        if (isUUID) {
-            orderWhere.id = id;
-        } else {
-            orderWhere.orderId = id;
-        }
-
-        const order = await Order.findOne({
-            where: orderWhere,
-            transaction: t
+        const result = await submitDeliveryBankPaymentService({
+            orderIdOrUuid: id,
+            deliveryBoyId,
+            body: req.body,
+            files: req.files,
+            file: req.file
         });
 
-        if (!order) {
-            await t.rollback();
+        if (result.notFound) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
 
-        // 2. Validate bank account selection
-        if (!bankSettingId) {
-            await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Bank account selection is required.");
+        if (result.badRequest) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, result.badRequest);
         }
 
-        let finalScreenshot = screenshot || null;
-
-        // 3. Extract file if uploaded via multipart/form-data (req.files or req.file)
-        const file = req.files?.image?.[0] || req.files?.screenshot?.[0] || req.file;
-        if (file) {
-            const uploadResult = await uploadToS3(file.buffer, file.originalname, file.mimetype);
-            if (uploadResult.success) {
-                finalScreenshot = uploadResult.url;
-            } else {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to upload payment screenshot to S3.");
-            }
+        if (result.uploadError) {
+            return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, result.uploadError);
         }
 
-        // 4. Create the OrderPayment record (Screenshot is optional)
-        const paymentAmount = amount ? parseFloat(amount) : parseFloat(order.totalAmount);
-        
-        const payment = await OrderPayment.create({
-            orderId: order.id,
-            deliveryBoyId,
-            amount: paymentAmount,
-            paymentMethod: 'ONLINE',
-            onlineType: 'Bank Account',
-            bankSettingId,
-            screenshot: finalScreenshot || null,
-            transactionId: transactionId || null,
-            isSubmitted: false, // Unverified, waits for admin approval in the admin panel
-            notes: 'Submitted via Delivery Boy App'
-        }, { transaction: t });
-
-        // 5. Find the active assignment and complete it
-        const assignment = await OrderAssignment.findOne({
-            where: {
-                orderId: order.id,
-                deliveryBoyId,
-                status: { [Op.in]: ['Pending', 'Assigned'] }
-            },
-            transaction: t
-        });
-
-        if (assignment) {
-            await assignment.update({
-                status: 'Completed',
-                notes: customDeliveryNote || 'Settled via Direct Bank Transfer in Delivery Boy App'
-            }, { transaction: t });
-        }
-
-        // 7. Settle/Update the Order status to 'Payment Verify' since payment proof is submitted and needs verification
-        // Also set deliveredAt since the order has been delivered
-        await order.update({
-            orderStatus: 'Payment Verify',
-            deliveredAt: order.deliveredAt || new Date(),
-            notes: customDeliveryNote || order.notes,
-            deliveryNotice: customDeliveryNote || order.deliveryNotice
-        }, { transaction: t });
-
-        if (customDeliveryNote && order.userId) {
-            await User.update({ deliveryNotice: customDeliveryNote }, { where: { id: order.userId }, transaction: t });
-        }
-
-        await t.commit();
-
-        // 8. Trigger Delivered Push Notification
-        await sendDeliveredNotification(order.id);
-
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Payment proof submitted and order settled successfully. Waiting for admin verification.", payment);
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Payment proof submitted and order settled successfully. Waiting for admin verification.", result.payment);
     } catch (error) {
-        if (t) await t.rollback();
         logger.error(`[Delivery Submit Bank Payment Error]: ${error.message}`);
-        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
-    }
-};
-
-/**
- * @desc    Get user previous pending bills/orders with items for delivery boy payment settlement
- * @route   GET /api/delivery/orders/user-previous-bills/:userId
- * @access  Private (Delivery Boy)
- */
-export const getUserPreviousBills = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const currentOrdId = String(req.query.currentOrderId || req.query.excludeOrderId || req.query.orderId || req.query.excludeId || '').trim();
-
-        logger.info(`[Get User Previous Bills]: Fetching previous bills for user parameter ${userId}, excluding current order ${currentOrdId}`);
-
-        // 1. Find user by UUID or by phone number
-        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        let user = null;
-        if (uuidPattern.test(userId)) {
-            user = await User.findByPk(userId, {
-                attributes: ['id', 'fullname', 'number', 'creditline'],
-                include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
-            });
-        } else {
-            const cleanNum = String(userId).replace(/\D/g, '').slice(-10);
-            user = await User.findOne({
-                where: cleanNum ? { number: { [Op.like]: `%${cleanNum}` } } : { id: userId },
-                attributes: ['id', 'fullname', 'number', 'creditline'],
-                include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
-            });
-        }
-
-        if (!user) {
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
-        }
-
-        const userPhoneClean = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
-
-        // 2. Match by userId OR customerNumber (matching admin party order search)
-        const userOrConditions = [{ userId: user.id }];
-        if (userPhoneClean && userPhoneClean.length >= 7) {
-            userOrConditions.push({ customerNumber: { [Op.like]: `%${userPhoneClean}` } });
-        }
-
-        // Exclude cancelled orders
-        const statusCondition = {
-            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-        };
-
-        const andConditions = [
-            { [Op.or]: userOrConditions },
-            statusCondition
-        ];
-
-        // Exclude current order if provided
-        if (currentOrdId) {
-            const rawNum = currentOrdId.replace(/^ORD-?/i, '');
-            const possibleOrderIds = Array.from(new Set([
-                currentOrdId,
-                `ORD-${rawNum}`,
-                rawNum
-            ])).filter(Boolean);
-
-            if (uuidPattern.test(currentOrdId)) {
-                andConditions.push({ id: { [Op.ne]: currentOrdId } });
-            } else {
-                andConditions.push({
-                    orderId: { [Op.notIn]: possibleOrderIds },
-                    id: { [Op.ne]: currentOrdId }
-                });
-            }
-        }
-
-        // 3. Fetch candidate orders
-        const unpaidOrders = await Order.findAll({
-            where: { [Op.and]: andConditions },
-            include: [
-                {
-                    model: OrderPayment,
-                    as: 'payments',
-                    required: false,
-                    attributes: ['id', 'amount', 'paymentMethod']
-                }
-            ],
-            attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
-            order: [['createdAt', 'DESC']]
-        });
-
-        // 4. Fetch OrderItems for these orders
-        const orderIds = unpaidOrders.map(o => o.id);
-        let itemsMap = {};
-        if (orderIds.length > 0) {
-            const items = await OrderItem.findAll({
-                where: { orderId: orderIds },
-                include: [
-                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                    {
-                        model: ProductVariant,
-                        as: 'variant',
-                        include: [
-                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
-                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
-                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
-                        ]
-                    }
-                ]
-            });
-
-            items.forEach(it => {
-                if (!itemsMap[it.orderId]) itemsMap[it.orderId] = [];
-                const itemData = it.toJSON ? it.toJSON() : it;
-
-                let volumeName = '';
-                if (itemData.variantInfo && itemData.variantInfo.volume) {
-                    volumeName = typeof itemData.variantInfo.volume === 'object'
-                        ? Object.values(itemData.variantInfo.volume)[0] || ''
-                        : String(itemData.variantInfo.volume);
-                } else if (itemData.variant && itemData.variant.volumeRef) {
-                    volumeName = typeof itemData.variant.volumeRef.name === 'object' && itemData.variant.volumeRef.name !== null
-                        ? Object.values(itemData.variant.volumeRef.name)[0] || ''
-                        : String(itemData.variant.volumeRef.name || '');
-                }
-
-                itemsMap[it.orderId].push({
-                    id: itemData.id,
-                    productId: itemData.productId,
-                    variantId: itemData.variantId,
-                    productName: itemData.product?.name || 'Product',
-                    quantity: parseFloat(itemData.quantity || 0),
-                    sellUnit: itemData.sellUnit || 'Base',
-                    price: parseFloat(itemData.price || 0),
-                    variantInfo: itemData.variantInfo || null,
-                    variant: itemData.variant || null,
-                    product: itemData.product || null,
-                    volumeName: volumeName,
-                    itemTotal: Math.round(parseFloat(itemData.quantity || 0) * parseFloat(itemData.price || 0) * 100) / 100
-                });
-            });
-
-            // Enrich all items across all previous bills with product volumes for return sales
-            const allItemsFlat = Object.values(itemsMap).flat();
-            await enrichItemsWithProductVolumes(allItemsFlat);
-        }
-
-        // 5. Build previousBills array & totalPreviousDues using Centralized Financial Service
-        const allCandidateBills = [];
-        let totalPreviousDues = 0;
-
-        unpaidOrders.forEach(uo => {
-            const oStatus = String(uo.orderStatus || '');
-
-            if (oStatus.toLowerCase().includes('cancel')) {
-                return;
-            }
-
-            // Centralized financial calculation for previous bills
-            const fin = calculateOrderFinancials(uo, uo.payments);
-            const isFullyPaid = fin.paymentStatus === 'Paid' || parseFloat(fin.dueAmount) <= 0.01;
-            const due = isFullyPaid ? 0 : parseFloat(fin.dueAmount);
-            const realPaid = isFullyPaid ? fin.netPayable : parseFloat(fin.paidAmount);
-
-            // Accumulate active unpaid dues
-            if (due > 0) {
-                totalPreviousDues += due;
-            }
-
-            allCandidateBills.push({
-                orderDbId: uo.id,
-                billNo: uo.orderId,
-                date: uo.createdAt,
-                totalAmount: fin.totalAmount,
-                couponDiscount: fin.couponDiscount,
-                paidAmount: Math.round(realPaid * 100) / 100,
-                dueAmount: Math.round(due * 100) / 100,
-                paymentStatus: isFullyPaid ? 'Paid' : fin.paymentStatus,
-                orderStatus: uo.orderStatus,
-                items: itemsMap[uo.id] || []
-            });
-        });
-
-        // Sort explicitly: latest bill first (e.g. 100003, then 100002, then 100001)
-        allCandidateBills.sort((a, b) => {
-            const numA = parseInt(String(a.billNo || '').replace(/\D/g, ''), 10) || 0;
-            const numB = parseInt(String(b.billNo || '').replace(/\D/g, ''), 10) || 0;
-            if (numA > 0 && numB > 0 && numA !== numB) {
-                return numB - numA; // Higher/latest bill number first
-            }
-            return new Date(b.date).getTime() - new Date(a.date).getTime();
-        });
-
-        // Return latest 5 bills only, with newest bill on top
-        const previousBills = allCandidateBills.slice(0, 5);
-
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "User previous bills fetched successfully.", {
-            user: {
-                id: user.id,
-                fullname: user.fullname,
-                number: user.number,
-                shopName: user.businessProfile?.shopName || '',
-                creditline: parseFloat(user.creditline || 0)
-            },
-            totalPreviousDues: Math.round(totalPreviousDues * 100) / 100,
-            totalBillsCount: previousBills.length,
-            previousBills
-        });
-    } catch (error) {
-        logger.error(`[Get User Previous Bills Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
@@ -2292,207 +310,25 @@ export const getUserPreviousBills = async (req, res) => {
 export const scanAndAssignOrder = async (req, res) => {
     try {
         const { orderId, deliveryBoyId } = req.body;
-        // The deliveryBoyId can come from request body or from the authenticated token req.user.id
-        const targetBoyId = deliveryBoyId || req.user?.id;
-
-        if (!orderId) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "ઓર્ડર ID જરૂરી છે (Order ID is required).");
-        }
-
-        if (!targetBoyId) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "ડિલિવરી બોય ID જરૂરી છે (Delivery Boy ID is required).");
-        }
-
-        // Clean orderId (remove '#' and spaces)
-        const cleanId = String(orderId).replace(/^[#\s]+|[#\s]+$/g, '').trim();
-
-        // 1. Verify delivery boy exists and is active
-        const boy = await DeliveryBoy.findByPk(targetBoyId);
-        if (!boy) {
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "ડિલિવરી બોય મળ્યો નથી (Delivery boy not found).");
-        }
-        if (boy.status && boy.status !== 'Active') {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `આ ડિલિવરી બોય ખાતું ${boy.status} છે.`);
-        }
-
-        // 2. Find the order by orderId or id (only if cleanId is valid UUID)
-        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanId);
-        const orderWhere = isUuid
-            ? { [Op.or]: [{ id: cleanId }, { orderId: cleanId }] }
-            : { orderId: cleanId };
-
-        const order = await Order.findOne({
-            where: orderWhere,
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'fcmtoken'],
-                    include: [
-                        {
-                            model: BusinessProfile,
-                            as: 'businessProfile',
-                            attributes: ['shopName', 'shopNameAlt', 'shopAddress', 'city', 'area']
-                        }
-                    ]
-                }
-            ]
+        const result = await scanAndAssignOrderService({
+            orderId,
+            deliveryBoyId,
+            reqUser: req.user
         });
 
-        if (!order) {
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, `ઓર્ડર #${cleanId} સિસ્ટમમાં મળ્યો નથી.`);
+        if (result.badRequest) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, result.badRequest);
         }
 
-        const shopName = order.user?.businessProfile?.shopName || order.customerName || order.user?.fullname || '-';
-
-        // 3. Validation checks
-        if (['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'].includes(order.orderStatus)) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) કેન્સલ થયેલ છે, તેથી સોંપી શકાતો નથી.`);
+        if (result.notFound) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, result.notFound);
         }
 
-        if (['Delivered', 'Payment Collect', 'Payment Verify'].includes(order.orderStatus)) {
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ પૂર્ણ (${order.orderStatus}) થઈ ગયેલ છે.`);
+        if (result.conflict) {
+            return sendErrorResponse(res, HTTP_STATUS.CONFLICT, result.message, result.data);
         }
 
-        const now = new Date();
-
-        // 4. Check if order is already assigned to a delivery boy
-        let assignment = await OrderAssignment.findOne({
-            where: { orderId: order.id },
-            include: [
-                {
-                    model: DeliveryBoy,
-                    as: 'deliveryBoy',
-                    attributes: ['id', 'name', 'phone']
-                }
-            ]
-        });
-
-        if (assignment && assignment.deliveryBoyId && (assignment.status === 'Assigned' || order.orderStatus === 'Shipping')) {
-            const assignedBoyName = assignment.deliveryBoy?.name || 'અન્ય ડિલિવરી બોય';
-            const isSameBoy = String(assignment.deliveryBoyId) === String(boy.id);
-
-            if (isSameBoy) {
-                // Same delivery boy re-scanning their own order → return 409 Conflict (success: false) so mobile shows popup
-                return sendErrorResponse(
-                    res,
-                    HTTP_STATUS.CONFLICT,
-                    `ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ તમને (${boy.name}) સોંપાયેલ છે.`,
-                    {
-                        alreadyAssigned: true,
-                        orderId: order.orderId,
-                        id: order.id,
-                        orderStatus: order.orderStatus,
-                        shopName,
-                        customerNumber: order.customerNumber || order.user?.number,
-                        grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
-                        deliveryBoy: {
-                            id: boy.id,
-                            name: boy.name,
-                            phone: boy.phone
-                        },
-                        assignmentId: assignment.id,
-                        assignedAt: assignment.assignedAt
-                    }
-                );
-            }
-
-            // Different delivery boy trying to assign → return 409 Conflict
-            return sendErrorResponse(
-                res,
-                HTTP_STATUS.CONFLICT,
-                `આ ઓર્ડર #${order.orderId} (${shopName}) પહેલેથી જ ${assignedBoyName} ને સોંપાયેલ છે.`,
-                {
-                    alreadyAssigned: true,
-                    orderId: order.orderId,
-                    id: order.id,
-                    shopName,
-                    orderStatus: order.orderStatus,
-                    assignedDeliveryBoy: {
-                        id: assignment.deliveryBoyId,
-                        name: assignedBoyName,
-                        phone: assignment.deliveryBoy?.phone || ''
-                    },
-                    assignedAt: assignment.assignedAt
-                }
-            );
-        }
-
-        let isReassigned = false;
-        if (assignment) {
-            isReassigned = true;
-            await assignment.update({
-                deliveryBoyId: boy.id,
-                status: 'Assigned',
-                assignedAt: now
-            });
-        } else {
-            assignment = await OrderAssignment.create({
-                orderId: order.id,
-                deliveryBoyId: boy.id,
-                status: 'Assigned',
-                assignedAt: now
-            });
-        }
-
-        // 5. Update Order to Shipping
-        const previousStatus = order.orderStatus;
-        order.orderStatus = 'Shipping';
-        order.packagingAt = order.packagingAt || now;
-        order.packedAt = order.packedAt || now;
-        order.shippingAt = now;
-        order.deliveredAt = null;
-        await order.save();
-
-        try {
-            const freshOrder = await Order.findByPk(order.id, {
-                include: [
-                    { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId', 'deliveryNotice'] },
-                    { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
-                ]
-            });
-            broadcastOrderAssigned({
-                order: freshOrder || order,
-                assignment,
-                deliveryBoyId: boy.id,
-                routeCategoryId: freshOrder?.routeCategoryId || freshOrder?.user?.routeCategoryId
-            });
-            broadcastOrderStatusChanged({
-                order: freshOrder || order,
-                oldStatus: previousStatus,
-                newStatus: 'Shipping',
-                routeCategoryId: freshOrder?.routeCategoryId || freshOrder?.user?.routeCategoryId,
-                godownId: order.godownId,
-                deliveryBoyId: boy.id
-            });
-        } catch (sErr) {
-            logger.error(`[Socket Broadcast Error in scanAndAssignOrder]: ${sErr.message}`);
-        }
-
-        logger.info(`[Scan and Assign Order]: Order #${order.orderId} assigned to delivery boy ${boy.name} (${boy.id}). Prev status: ${previousStatus}`);
-
-        return sendSuccessResponse(
-            res,
-            HTTP_STATUS.OK,
-            `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક ${boy.name} ને સોંપાઈ ગયો છે અને રવાના (Shipping) થઈ ગયો છે.`,
-            {
-                orderId: order.orderId,
-                id: order.id,
-                orderStatus: order.orderStatus,
-                previousStatus,
-                shopName,
-                customerNumber: order.customerNumber || order.user?.number,
-                grandTotal: order.payableAmount || order.totalAmount || order.grandTotal,
-                deliveryBoy: {
-                    id: boy.id,
-                    name: boy.name,
-                    phone: boy.phone
-                },
-                assignmentId: assignment.id,
-                assignedAt: now,
-                isReassigned
-            }
-        );
+        return sendSuccessResponse(res, HTTP_STATUS.OK, result.message, result.data);
     } catch (error) {
         logger.error(`[Scan and Assign Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "ઓર્ડર સોંપવામાં ભૂલ આવી (Error assigning order).", error.message);
@@ -2517,20 +353,12 @@ export const resolveDeliveryNotice = async (req, res) => {
             const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(targetOrderId);
             const whereCond = isUuid ? { [Op.or]: [{ id: targetOrderId }, { orderId: targetOrderId }] } : { orderId: targetOrderId };
             ord = await Order.findOne({ where: whereCond });
-            
-            if (ord) {
-                if (ord.userId) targetUserId = ord.userId;
-                await Order.update({ deliveryNotice: null, notes: null }, { where: { id: ord.id } });
-                await OrderAssignment.update({ notes: null }, { where: { orderId: ord.id } });
-            }
+            if (ord && ord.userId) targetUserId = ord.userId;
         }
 
-        if (targetUserId) {
-            await User.update({ deliveryNotice: null }, { where: { id: targetUserId } });
-            await Order.update({ deliveryNotice: null, notes: null }, { where: { userId: targetUserId } });
-        }
+        await clearOrderDeliveryNotice({ orderId: ord ? ord.id : targetOrderId, userId: targetUserId });
 
-        logger.info(`[Delivery App Resolve Notice]: Notice resolved for orderId: ${targetOrderId}, userId: ${targetUserId} by delivery boy ${req.user?.id}`);
+        logger.info(`[Delivery App Resolve Notice]: Notice resolved centrally for orderId: ${targetOrderId}, userId: ${targetUserId} by delivery boy ${req.user?.id}`);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "નોંધ સફળતાપૂર્વક સોલ્વ થઈ ગઈ છે (Delivery notice resolved successfully).", {
             orderId: targetOrderId,
@@ -2564,7 +392,7 @@ export const declineDeliveryNotice = async (req, res) => {
         }
 
         const currentNotice = ord?.deliveryNotice || ord?.notes || note || notes || null;
-        logger.info(`[Delivery App Decline Notice]: Notice acknowledged/declined for orderId: ${targetOrderId} by delivery boy ${req.user?.id}`);
+        logger.info(`[Delivery App Decline Notice]: Notice acknowledged for orderId: ${targetOrderId} by delivery boy ${req.user?.id}`);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "નોંધ ધ્યાનમાં લેવાઈ છે (Notice acknowledged).", {
             orderId: targetOrderId,
@@ -2577,5 +405,3 @@ export const declineDeliveryNotice = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "નોંધ સ્વીકારવામાં ભૂલ આવી (Failed to process notice action).", err.message);
     }
 };
-
-
