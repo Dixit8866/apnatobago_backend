@@ -19,6 +19,8 @@ const safeGetIO = () => {
     }
 };
 
+import { isSystemOrAuditNotice } from './financialSettlement.service.js';
+
 /**
  * Dynamically resolve active delivery notice for an order if missing from the current payload
  */
@@ -26,60 +28,24 @@ export const resolveActiveNoticeForOrder = async (order) => {
     if (!order) return null;
     const plain = typeof order.toJSON === 'function' ? order.toJSON() : { ...order };
 
-    let notice = plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || null;
-    if (!notice && plain.notes) {
-        const clean = String(plain.notes).replace(/\[.*?\]\s*/g, '').trim();
-        if (clean && !clean.includes('Adjustments:')) notice = clean;
+    let raw = plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || null;
+    if (raw && !isSystemOrAuditNotice(raw)) {
+        return String(raw).replace(/^\[Delivery Note\]:\s*/i, '').trim();
     }
 
-    if (!notice) {
-        const uId = plain.userId || plain.user?.id;
-        const phone = plain.customerNumber || plain.user?.number;
-        const whereConditions = [];
-        if (uId) whereConditions.push({ userId: uId });
-        if (phone && String(phone).replace(/\D/g, '').length >= 7) {
-            whereConditions.push({ customerNumber: phone });
-        }
-
-        if (whereConditions.length > 0) {
-            try {
-                // First check User model
-                if (uId) {
-                    const u = await User.findByPk(uId, { attributes: ['id', 'deliveryNotice'] });
-                    if (u && u.deliveryNotice) {
-                        notice = u.deliveryNotice;
-                    }
-                }
-
-                // If still not found, check most recent non-cancelled order of this customer
-                if (!notice) {
-                    const pastOrder = await Order.findOne({
-                        where: {
-                            [Op.or]: whereConditions,
-                            [Op.or]: [
-                                { deliveryNotice: { [Op.ne]: null } },
-                                { notes: { [Op.ne]: null } }
-                            ],
-                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-                        },
-                        order: [['createdAt', 'DESC']],
-                        attributes: ['id', 'deliveryNotice', 'notes']
-                    });
-                    if (pastOrder) {
-                        notice = pastOrder.deliveryNotice || pastOrder.notes;
-                        if (notice) {
-                            notice = String(notice).replace(/\[.*?\]\s*/g, '').trim();
-                            if (notice.includes('Adjustments:')) notice = null;
-                        }
-                    }
-                }
-            } catch (err) {
-                logger.error(`[Error resolving active notice for socket]: ${err.message}`);
+    const uId = plain.userId || plain.user?.id;
+    if (uId) {
+        try {
+            const u = await User.findByPk(uId, { attributes: ['id', 'deliveryNotice'] });
+            if (u && u.deliveryNotice && !isSystemOrAuditNotice(u.deliveryNotice)) {
+                return String(u.deliveryNotice).replace(/^\[Delivery Note\]:\s*/i, '').trim();
             }
+        } catch (err) {
+            logger.error(`[Error resolving active notice for socket]: ${err.message}`);
         }
     }
 
-    return notice || null;
+    return null;
 };
 
 /**
@@ -90,7 +56,8 @@ export const formatOrderSocketPayload = (order) => {
     
     // Safely parse or handle nested sequelize objects
     const plain = typeof order.toJSON === 'function' ? order.toJSON() : { ...order };
-    const notice = plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || (plain.notes && !String(plain.notes).includes('Adjustments:') ? plain.notes : null) || null;
+    const rawNotice = plain.deliveryNotice || plain.user?.deliveryNotice || plain.partyActiveNotice || null;
+    const notice = (rawNotice && !isSystemOrAuditNotice(rawNotice)) ? String(rawNotice).replace(/^\[Delivery Note\]:\s*/i, '').trim() : null;
     
     return {
         id: plain.id,

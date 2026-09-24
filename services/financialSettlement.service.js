@@ -154,33 +154,55 @@ export const syncOrderFinancials = async (orderId, transaction = null) => {
  * @param {Object} [transaction] - Sequelize transaction
  * @returns {Promise<string|null>} Active notice or null
  */
+export const isSystemOrAuditNotice = (raw) => {
+    if (!raw || typeof raw !== 'string') return true;
+    const s = raw.trim();
+    if (!s) return true;
+    if (s.startsWith('[') && s.endsWith(']')) return true;
+    if (
+        s.includes('Due Cleared') || 
+        s.includes('Due adjusted') || 
+        s.includes('Adjustments:') || 
+        s.includes('Settled via') || 
+        s.includes('Single Settle') || 
+        s.includes('Verified & Settled') || 
+        s.includes('Advance Jama') ||
+        s.includes('Admin')
+    ) {
+        return true;
+    }
+    return false;
+};
+
+/**
+ * Synchronize delivery notice for a specific party/user.
+ * Checks active (non-cancelled, non-delivered) orders. If no active order
+ * has a valid delivery notice, clears User.deliveryNotice.
+ *
+ * @param {string} userId - User ID
+ * @param {Object} [transaction] - Sequelize transaction
+ * @returns {Promise<string|null>} Active notice or null
+ */
 export const syncPartyDeliveryNotice = async (userId, transaction = null) => {
     if (!userId) return null;
     try {
-        // Find any active order that has a delivery notice
+        // Find any active order that has an explicit manual delivery notice
         const activeOrderWithNotice = await Order.findOne({
             where: {
                 userId,
                 orderStatus: { [Op.notIn]: ['Delivered', 'Cancelled', 'Admin Cancel', 'Auto Cancelled', 'Rejected'] },
-                [Op.or]: [
-                    { deliveryNotice: { [Op.ne]: null } },
-                    { notes: { [Op.ne]: null } }
-                ]
+                deliveryNotice: { [Op.ne]: null }
             },
-            attributes: ['id', 'orderId', 'deliveryNotice', 'notes', 'orderStatus'],
+            attributes: ['id', 'orderId', 'deliveryNotice', 'orderStatus'],
             order: [['createdAt', 'DESC']],
             transaction
         });
 
         let validNotice = null;
-        if (activeOrderWithNotice) {
-            const raw = activeOrderWithNotice.deliveryNotice || activeOrderWithNotice.notes;
-            const clean = String(raw || '')
-                .replace(/^\[Delivery Note\]:\s*/i, '')
-                .replace(/\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Adjustments:[^\n]*/gi, '')
-                .trim();
-            if (clean && !clean.includes('Adjustments:') && !clean.includes('Settled via Direct Bank Transfer')) {
-                validNotice = clean;
+        if (activeOrderWithNotice && activeOrderWithNotice.deliveryNotice) {
+            const raw = activeOrderWithNotice.deliveryNotice;
+            if (!isSystemOrAuditNotice(raw)) {
+                validNotice = String(raw).replace(/^\[Delivery Note\]:\s*/i, '').trim();
             }
         }
 
@@ -205,12 +227,19 @@ export const syncPartyDeliveryNotice = async (userId, transaction = null) => {
 export const clearOrderDeliveryNotice = async ({ orderId, userId, transaction = null }) => {
     try {
         let targetUserId = userId;
+        let customerPhone = null;
 
         if (orderId) {
-            const ord = await Order.findByPk(orderId, { transaction });
+            const ord = await Order.findByPk(orderId, {
+                include: [{ model: User, as: 'user', attributes: ['id', 'number'] }],
+                transaction
+            });
             if (ord) {
                 if (ord.userId) targetUserId = ord.userId;
-                await Order.update({ deliveryNotice: null, notes: null }, { where: { id: ord.id }, transaction });
+                customerPhone = ord.user?.number || ord.customerNumber || null;
+                
+                // Clear on this specific order
+                await Order.update({ deliveryNotice: null }, { where: { id: ord.id }, transaction });
                 if (OrderAssignment) {
                     await OrderAssignment.update({ notes: null }, { where: { orderId: ord.id }, transaction });
                 }
@@ -218,8 +247,24 @@ export const clearOrderDeliveryNotice = async ({ orderId, userId, transaction = 
         }
 
         if (targetUserId) {
+            const u = await User.findByPk(targetUserId, { transaction });
+            if (u && u.number) customerPhone = u.number;
+
+            // Clear on all orders belonging to this user
+            await Order.update({ deliveryNotice: null }, { where: { userId: targetUserId }, transaction });
             await User.update({ deliveryNotice: null }, { where: { id: targetUserId }, transaction });
-            await syncPartyDeliveryNotice(targetUserId, transaction);
+        }
+
+        if (customerPhone && String(customerPhone).replace(/\D/g, '').length >= 7) {
+            const cleanPhone = String(customerPhone).replace(/\D/g, '').slice(-10);
+            await User.update(
+                { deliveryNotice: null }, 
+                { where: { number: { [Op.like]: `%${cleanPhone}%` } }, transaction }
+            );
+            await Order.update(
+                { deliveryNotice: null }, 
+                { where: { customerNumber: { [Op.like]: `%${cleanPhone}%` } }, transaction }
+            );
         }
 
         return { success: true };

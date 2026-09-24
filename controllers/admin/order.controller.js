@@ -29,11 +29,51 @@ const getStatusLabel = (status) => {
     }
 };
 // Import Centralized Financial Settlement & Notice Service (Single Source of Truth)
-import { adjustOrderResponse, calculateOrderFinancials, syncPartyDeliveryNotice, clearOrderDeliveryNotice } from '../../services/financialSettlement.service.js';
+import { adjustOrderResponse, calculateOrderFinancials, syncPartyDeliveryNotice, clearOrderDeliveryNotice, isSystemOrAuditNotice } from '../../services/financialSettlement.service.js';
 
 const adjustOrderPayments = (order) => {
     return adjustOrderResponse(order);
 };
+
+export const extractManualDeliveryNotice = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+    let s = raw.trim();
+    if (!s) return null;
+    if (isSystemOrAuditNotice(s)) return null;
+    s = s.replace(/^\[Delivery Note\]:\s*/i, '').trim();
+    return s && !isSystemOrAuditNotice(s) ? s : null;
+};
+
+// Automatic one-time cleanup to clear any system due cleared strings from deliveryNotice columns
+(async () => {
+    try {
+        await sequelize.query(`
+            UPDATE "Users" 
+            SET "deliveryNotice" = NULL 
+            WHERE "deliveryNotice" ILIKE '%Due Cleared%' 
+               OR "deliveryNotice" ILIKE '%Adjustments:%' 
+               OR "deliveryNotice" ILIKE '%Settled via%'
+               OR "deliveryNotice" ILIKE '[%';
+        `);
+        await sequelize.query(`
+            UPDATE "Orders" 
+            SET "deliveryNotice" = NULL 
+            WHERE "deliveryNotice" ILIKE '%Due Cleared%' 
+               OR "deliveryNotice" ILIKE '%Adjustments:%' 
+               OR "deliveryNotice" ILIKE '%Settled via%'
+               OR "deliveryNotice" ILIKE '[%';
+        `);
+        await sequelize.query(`
+            UPDATE "Orders" 
+            SET "notes" = NULL 
+            WHERE "notes" ILIKE '%[Due Cleared to ₹0 by Admin]%' 
+               OR "notes" ILIKE '%[Due Cleared by Advance Jama Credit]%'
+               OR "notes" ILIKE '%[Due Cleared by Admin Adjustment]%';
+        `);
+    } catch (e) {
+        logger.debug(`[Notice Cleanup Non-fatal]: ${e.message}`);
+    }
+})();
 
 
 /**
@@ -526,13 +566,13 @@ export const getAllOrders = async (req, res) => {
                     const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
                     const uName = String(uo.user?.fullname || uo.customerName || '').toLowerCase().trim();
 
-                    let pastNote = uo.deliveryNotice || uo.user?.deliveryNotice || '';
-                    if (!pastNote && uo.assignment?.notes && !uo.assignment.notes.includes('Settled via Direct Bank Transfer') && !uo.assignment.notes.includes('Cancelled by Delivery Boy')) {
-                        pastNote = String(uo.assignment.notes).replace(/^\[Delivery Note\]:\s*/i, '').trim();
-                    }
-                    if (!pastNote && uo.notes) {
-                        const clean = String(uo.notes).replace(/\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Adjustments:[^\n]*/gi, '').replace(/\[Delivery Note\]:\s*/gi, '').trim();
-                        if (clean && !clean.includes('Adjustments:')) pastNote = clean;
+                    let pastNote = null;
+                    if (uo.deliveryNotice && !isSystemOrAuditNotice(uo.deliveryNotice)) {
+                        pastNote = extractManualDeliveryNotice(uo.deliveryNotice);
+                    } else if (uo.user?.deliveryNotice && !isSystemOrAuditNotice(uo.user.deliveryNotice)) {
+                        pastNote = extractManualDeliveryNotice(uo.user.deliveryNotice);
+                    } else if (uo.assignment?.notes && !isSystemOrAuditNotice(uo.assignment.notes)) {
+                        pastNote = extractManualDeliveryNotice(uo.assignment.notes);
                     }
 
                     return {
@@ -601,29 +641,14 @@ export const getAllOrders = async (req, res) => {
                 const userAdvanceJama = parseFloat(order.user?.advanceJama || 0);
                 const userBalanceType = order.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditline > 0 ? 'DUE' : 'CLEAR'));
 
-                // Determine active delivery note/notice for this party (strictly from active orders, not stale records)
-                let activeDeliveryNotice = order.deliveryNotice || '';
-                if (!activeDeliveryNotice && order.assignment?.notes && !order.assignment.notes.includes('Settled via Direct Bank Transfer') && !order.assignment.notes.includes('Cancelled by Delivery Boy')) {
-                    activeDeliveryNotice = String(order.assignment.notes).replace(/^\[Delivery Note\]:\s*/i, '').trim();
-                }
-                if (!activeDeliveryNotice && order.notes) {
-                    const clean = String(order.notes).replace(/\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Adjustments:[^\n]*/gi, '').replace(/\[Delivery Note\]:\s*/gi, '').trim();
-                    if (clean && !clean.includes('Adjustments:') && !clean.includes('Settled via Direct Bank Transfer')) activeDeliveryNotice = clean;
-                }
-
-                // If this order itself didn't have notice, look up active unpaid/pending orders for this party
-                if (!activeDeliveryNotice) {
-                    const activePastWithNote = unpaidOrdersStore.find(uo => {
-                        let isSameCust = false;
-                        if (uId && uo.userId && String(uId) === String(uo.userId)) isSameCust = true;
-                        else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) isSameCust = true;
-                        else if (oShop && uo.shopName && oShop.length >= 3 && oShop === uo.shopName) isSameCust = true;
-                        else if (oName && uo.name && oName.length >= 3 && oName === uo.name) isSameCust = true;
-                        return isSameCust && Boolean(uo.pastNote);
-                    });
-                    if (activePastWithNote) {
-                        activeDeliveryNotice = activePastWithNote.pastNote;
-                    }
+                // Determine active delivery note/notice for this party (strictly manual notes, NEVER system logs)
+                let activeDeliveryNotice = null;
+                if (order.deliveryNotice && !isSystemOrAuditNotice(order.deliveryNotice)) {
+                    activeDeliveryNotice = extractManualDeliveryNotice(order.deliveryNotice);
+                } else if (order.user?.deliveryNotice && !isSystemOrAuditNotice(order.user.deliveryNotice)) {
+                    activeDeliveryNotice = extractManualDeliveryNotice(order.user.deliveryNotice);
+                } else if (order.assignment?.notes && !isSystemOrAuditNotice(order.assignment.notes)) {
+                    activeDeliveryNotice = extractManualDeliveryNotice(order.assignment.notes);
                 }
 
                 order.setDataValue('deliveryNotice', activeDeliveryNotice || null);
@@ -3632,7 +3657,7 @@ export const adjustPartyBalance = async (req, res) => {
                     creditAmount: 0,
                     paidAmount: tot,
                     paymentStatus: 'Paid',
-                    notes: ord.notes ? `${ord.notes}\n[Due Cleared to ₹0 by Admin]` : '[Due Cleared to ₹0 by Admin]'
+                    deliveryNotice: null
                 }, { transaction: t });
 
                 // Create audit payment record if unpaid difference exists
@@ -3695,7 +3720,7 @@ export const adjustPartyBalance = async (req, res) => {
                     creditAmount: 0,
                     paidAmount: tot,
                     paymentStatus: 'Paid',
-                    notes: ord.notes ? `${ord.notes}\n[Due Cleared by Advance Jama Credit]` : '[Due Cleared by Advance Jama Credit]'
+                    deliveryNotice: null
                 }, { transaction: t });
 
                 if (needed > 0.01) {
@@ -3755,7 +3780,7 @@ export const adjustPartyBalance = async (req, res) => {
                         creditAmount: assignDue,
                         paidAmount: assignPaid,
                         paymentStatus: assignDue === 0 ? 'Paid' : (assignPaid === 0 ? 'Pending' : 'Partial'),
-                        notes: ord.notes ? `${ord.notes}\n[Due adjusted to ₹${assignDue} by Admin]` : `[Due adjusted to ₹${assignDue} by Admin]`
+                        deliveryNotice: null
                     }, { transaction: t });
 
                     if (assignDue > 0) {
@@ -3788,7 +3813,7 @@ export const adjustPartyBalance = async (req, res) => {
                         creditAmount: 0,
                         paidAmount: tot,
                         paymentStatus: 'Paid',
-                        notes: ord.notes ? `${ord.notes}\n[Due Cleared by Admin Adjustment]` : '[Due Cleared by Admin Adjustment]'
+                        deliveryNotice: null
                     }, { transaction: t });
 
                     await OrderPayment.create({
