@@ -1198,44 +1198,61 @@ export const completeOrderAndSettlePayment = async (req, res) => {
             );
         }
 
+        // Determine how much cash and online were consumed by past dues:
+        const cashUsedForPastDue = Math.min(inputCash, pastDueSettled);
+        const onlineUsedForPastDue = Math.max(0, pastDueSettled - cashUsedForPastDue);
+
+        const currentOrderCash = Math.max(0, inputCash - cashUsedForPastDue);
+        const currentOrderOnline = Math.max(0, inputOnline - onlineUsedForPastDue);
+
         // 3. Record true payments ON CURRENT ASSIGNMENT ORDER:
         // Cash payment record
-        if (inputCash > 0) {
+        if (currentOrderCash > 0) {
             const existingCash = await OrderPayment.findOne({
                 where: { orderId: assignment.order.id, paymentMethod: 'CASH' },
                 transaction: t
             });
             if (existingCash) {
-                await existingCash.update({ amount: inputCash }, { transaction: t });
+                await existingCash.update({ amount: currentOrderCash }, { transaction: t });
             } else {
                 await OrderPayment.create({
                     orderId: assignment.order.id,
                     deliveryBoyId,
-                    amount: inputCash,
+                    amount: currentOrderCash,
                     paymentMethod: 'CASH',
                     notes: 'Cash collected during delivery'
                 }, { transaction: t });
             }
+        } else {
+            await OrderPayment.destroy({
+                where: { orderId: assignment.order.id, paymentMethod: 'CASH' },
+                transaction: t
+            });
         }
 
         // Online payment record
-        if (inputOnline > 0) {
+        if (currentOrderOnline > 0) {
             const existingOnline = await OrderPayment.findOne({
                 where: { orderId: assignment.order.id, paymentMethod: 'ONLINE' },
                 transaction: t
             });
             if (existingOnline) {
-                await existingOnline.update({ amount: inputOnline, transactionId: onlineTransactionId || existingOnline.transactionId }, { transaction: t });
+                await existingOnline.update({ amount: currentOrderOnline, transactionId: onlineTransactionId || existingOnline.transactionId }, { transaction: t });
             } else {
                 await OrderPayment.create({
                     orderId: assignment.order.id,
                     deliveryBoyId,
-                    amount: inputOnline,
+                    amount: currentOrderOnline,
                     paymentMethod: 'ONLINE',
                     transactionId: onlineTransactionId,
                     notes: 'Online payment during delivery'
                 }, { transaction: t });
             }
+        } else {
+            await OrderPayment.destroy({
+                where: { orderId: assignment.order.id, paymentMethod: 'ONLINE' },
+                transaction: t
+            });
         }
 
         // Sales return payment record
@@ -1255,6 +1272,11 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     notes: `Adjusted ₹${inputReturn} from Sales Return (Bill: ₹${assignment.order.totalAmount})`
                 }, { transaction: t });
             }
+        } else {
+            await OrderPayment.destroy({
+                where: { orderId: assignment.order.id, paymentMethod: 'SALES_RETURN' },
+                transaction: t
+            });
         }
 
         // Credit payment record
@@ -1281,6 +1303,11 @@ export const completeOrderAndSettlePayment = async (req, res) => {
                     user.blockcredit = true;
                 }
             }
+        } else {
+            await OrderPayment.destroy({
+                where: { orderId: assignment.order.id, paymentMethod: 'CREDIT' },
+                transaction: t
+            });
         }
 
         // Update current order balances:
@@ -1291,8 +1318,8 @@ export const completeOrderAndSettlePayment = async (req, res) => {
         assignment.order.paymentStatus = inputCredit <= 1e-7 ? 'Paid' : 'Partial';
 
         const paymentMethodsUsed = [];
-        if (inputCash > 0) paymentMethodsUsed.push('CASH');
-        if (inputOnline > 0) paymentMethodsUsed.push('ONLINE');
+        if (currentOrderCash > 0) paymentMethodsUsed.push('CASH');
+        if (currentOrderOnline > 0) paymentMethodsUsed.push('ONLINE');
         if (inputCredit > 0) paymentMethodsUsed.push('CREDIT');
         if (inputReturn > 0) paymentMethodsUsed.push('SALES_RETURN');
 
