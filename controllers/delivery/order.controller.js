@@ -2218,7 +2218,7 @@ export const getUserPreviousBills = async (req, res) => {
         }
 
         // 5. Build previousBills array & totalPreviousDues using Centralized Financial Service
-        const previousBills = [];
+        const allCandidateBills = [];
         let totalPreviousDues = 0;
 
         unpaidOrders.forEach(uo => {
@@ -2230,27 +2230,31 @@ export const getUserPreviousBills = async (req, res) => {
 
             // Centralized financial calculation for previous bills
             const fin = calculateOrderFinancials(uo, uo.payments);
-            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-            const realPaid = parseFloat(fin.paidAmount);
+            const isFullyPaid = fin.paymentStatus === 'Paid' || parseFloat(fin.dueAmount) <= 0.01;
+            const due = isFullyPaid ? 0 : parseFloat(fin.dueAmount);
+            const realPaid = isFullyPaid ? fin.netPayable : parseFloat(fin.paidAmount);
 
-            // Only include bills with active unpaid dues
+            // Accumulate active unpaid dues
             if (due > 0) {
                 totalPreviousDues += due;
-
-                previousBills.push({
-                    orderDbId: uo.id,
-                    billNo: uo.orderId,
-                    date: uo.createdAt,
-                    totalAmount: fin.totalAmount,
-                    couponDiscount: fin.couponDiscount,
-                    paidAmount: Math.round(realPaid * 100) / 100,
-                    dueAmount: Math.round(due * 100) / 100,
-                    paymentStatus: fin.paymentStatus,
-                    orderStatus: uo.orderStatus,
-                    items: itemsMap[uo.id] || []
-                });
             }
+
+            allCandidateBills.push({
+                orderDbId: uo.id,
+                billNo: uo.orderId,
+                date: uo.createdAt,
+                totalAmount: fin.totalAmount,
+                couponDiscount: fin.couponDiscount,
+                paidAmount: Math.round(realPaid * 100) / 100,
+                dueAmount: Math.round(due * 100) / 100,
+                paymentStatus: isFullyPaid ? 'Paid' : fin.paymentStatus,
+                orderStatus: uo.orderStatus,
+                items: itemsMap[uo.id] || []
+            });
         });
+
+        // Return latest 5 bills only, with newest bill on top
+        const previousBills = allCandidateBills.slice(0, 5);
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "User previous bills fetched successfully.", {
             user: {
