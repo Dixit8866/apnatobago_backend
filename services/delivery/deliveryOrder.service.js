@@ -701,15 +701,18 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             {
                 model: OrderItem,
                 as: 'items',
-                attributes: ['id', 'productId', 'quantity', 'price', 'sellUnit', 'variantInfo', 'hasCoupon', 'couponPoints', 'couponPrice'],
+                attributes: ['id', 'productId', 'variantId', 'quantity', 'price', 'sellUnit', 'variantInfo', 'hasCoupon', 'couponPoints', 'couponPrice'],
                 include: [
                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-
                     {
                         model: ProductVariant,
                         as: 'variant',
-                        attributes: ['id', 'volume', 'baseUnitsPerPack', 'sellingVolume'],
-                        include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
+                        attributes: ['id', 'volume', 'volumeId', 'baseUnitsPerPack', 'sellingVolume', 'purchasePrice'],
+                        include: [
+                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] }
+                        ]
                     }
                 ]
             }
@@ -717,7 +720,9 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
         order: [['createdAt', 'DESC']]
     });
 
-    const previousBills = orders.map(ord => {
+    const previousBills = [];
+
+    for (const ord of orders) {
         const ordData = ord.toJSON ? ord.toJSON() : ord;
         const fin = calculateOrderFinancials(ordData, ordData.payments);
 
@@ -728,7 +733,57 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
         const couponDiscNum = fin.couponDiscount;
         const couponPtsNum = Number(ordData.couponPoints || 0);
 
-        return {
+        if (ordData.items && ordData.items.length > 0) {
+            ordData.items.forEach(itemData => {
+                if (itemData.variantInfo) {
+                    if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
+                        itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
+                    }
+                    if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
+                    if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
+                }
+            });
+            await enrichItemsWithProductVolumes(ordData.items);
+        }
+
+        const formattedItems = (ordData.items || []).map(item => {
+            let pName = item.product?.name;
+            if (typeof pName === 'object' && pName !== null) {
+                pName = pName.en || Object.values(pName)[0] || 'Product';
+            }
+            const vol = item.variant?.volumeRef?.name || item.variant?.volume || item.variantInfo?.volume || 'Unit';
+            const volStr = typeof vol === 'object' ? (vol.en || Object.values(vol)[0] || 'Unit') : (vol || 'Unit');
+
+            return {
+                id: item.id,
+                orderId: ordData.id,
+                productId: item.productId,
+                variantId: item.variantId,
+                name: pName || item.productName || 'Product',
+                productName: pName || item.productName || 'Product',
+                product: item.product,
+                variant: item.variant,
+                variantInfo: item.variantInfo,
+                quantity: item.quantity,
+                price: item.price,
+                sellUnit: item.sellUnit || 'Box',
+                volume: volStr,
+                baseUnitsPerPack: item.baseUnitsPerPack || 1,
+                sellingVolume: item.sellingVolume || 1,
+                packUnits: item.packUnits || 1,
+                singleUnitPrice: item.singleUnitPrice || parseFloat(item.price || 0),
+                unitPrice: item.unitPrice || item.singleUnitPrice || parseFloat(item.price || 0),
+                totalUnits: item.totalUnits || item.quantity,
+                productVolumes: item.productVolumes || [],
+                image: item.product?.thumbnail || '',
+                thumbnail: item.product?.thumbnail || '',
+                hasCoupon: item.hasCoupon || false,
+                couponPoints: item.couponPoints || 0,
+                couponPrice: item.couponPrice || '0.00'
+            };
+        });
+
+        previousBills.push({
             id: ordData.id,
             orderId: ordData.orderId,
             billNo: ordData.orderId,
@@ -744,26 +799,10 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             dueAmount: displayDue,
             createdAt: ordData.createdAt,
             deliveredAt: ordData.deliveredAt || ordData.createdAt,
-            items: (ordData.items || []).map(item => {
-                let pName = item.product?.name;
-                if (typeof pName === 'object' && pName !== null) {
-                    pName = pName.en || Object.values(pName)[0] || 'Product';
-                }
-                const vol = item.variant?.volumeRef?.name || item.variant?.volume || item.variantInfo?.volume || 'Unit';
-                return {
-                    id: item.id,
-                    productId: item.productId,
-                    name: pName || item.productName || 'Product',
-                    productName: pName || item.productName || 'Product',
-                    quantity: item.quantity,
-                    price: item.price,
-                    sellUnit: item.sellUnit || 'Box',
-                    volume: typeof vol === 'object' ? (vol.en || Object.values(vol)[0] || 'Unit') : vol,
-                    image: item.product?.thumbnail || ''
-                };
-            })
-        };
-    });
+            items: formattedItems
+        });
+    }
+
 
     previousBills.sort((a, b) => {
         const dateDiff = new Date(b.createdAt) - new Date(a.createdAt);

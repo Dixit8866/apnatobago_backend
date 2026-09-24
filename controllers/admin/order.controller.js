@@ -1781,7 +1781,8 @@ export const verifyAndSettleOrder = async (req, res) => {
         }
 
         // Calculate Net Collection Required & Overpayment (Jama Credit)
-        const netRequiredBill = Math.max(0, parseFloat(order.totalAmount || 0) - totalReturnDeduction - parsedPrevReturn);
+        const orderCouponDisc = parsedCoupon > 0 ? parsedCoupon : (parseFloat(order.couponDiscount || 0));
+        const netRequiredBill = Math.max(0, parseFloat(order.totalAmount || 0) - orderCouponDisc - totalReturnDeduction - parsedPrevReturn);
         const totalPaidCashOnline = parsedCash + parsedOnline;
         const parsedJama = Math.max(0, totalPaidCashOnline - netRequiredBill);
         const parsedBaki = parsedCredit;
@@ -1809,7 +1810,7 @@ export const verifyAndSettleOrder = async (req, res) => {
         }
 
         const timestamp = new Date().toLocaleString();
-        let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}${parsedCoupon > 0 ? `, Coupon: ₹${parsedCoupon}` : ''}, Credit: ₹${parsedCredit}`;
+        let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}${orderCouponDisc > 0 ? `, Coupon: ₹${orderCouponDisc}` : ''}, Credit: ₹${parsedCredit}`;
         if (totalReturnDeduction > 0) {
             noteStr += `, In-Bill Return Deduction: ₹${totalReturnDeduction.toFixed(2)}`;
         }
@@ -1826,6 +1827,10 @@ export const verifyAndSettleOrder = async (req, res) => {
             noteStr += `\nNotes: ${note}`;
         }
         order.notes = order.notes ? `${order.notes}\n${noteStr}` : noteStr;
+
+        if (orderCouponDisc > 0) {
+            order.couponDiscount = orderCouponDisc.toFixed(2);
+        }
 
         await order.save({ transaction });
 
@@ -1864,11 +1869,11 @@ export const verifyAndSettleOrder = async (req, res) => {
             }, { transaction });
         }
 
-        if (parsedCoupon > 0) {
+        if (orderCouponDisc > 0) {
             await OrderPayment.create({
                 orderId: order.id,
                 userId: order.userId,
-                amount: parsedCoupon,
+                amount: orderCouponDisc,
                 paymentMethod: 'COUPON',
                 isSubmitted: true,
                 submittedAt: effectivePaymentDate,
@@ -1877,12 +1882,12 @@ export const verifyAndSettleOrder = async (req, res) => {
             }, { transaction });
         }
 
-        if (parsedCash === 0 && parsedOnline === 0 && parsedCoupon === 0) {
+        if (totalReturnDeduction > 0) {
             await OrderPayment.create({
                 orderId: order.id,
                 userId: order.userId,
-                amount: parsedCredit > 0 ? parsedCredit : (order.totalAmount || 0),
-                paymentMethod: parsedCredit > 0 ? 'CREDIT' : 'CASH',
+                amount: totalReturnDeduction,
+                paymentMethod: 'SALES_RETURN',
                 isSubmitted: true,
                 submittedAt: effectivePaymentDate,
                 createdAt: effectivePaymentDate,
@@ -1890,7 +1895,28 @@ export const verifyAndSettleOrder = async (req, res) => {
             }, { transaction });
         }
 
+        if (parsedCredit > 0) {
+            await OrderPayment.create({
+                orderId: order.id,
+                userId: order.userId,
+                amount: parsedCredit,
+                paymentMethod: 'CREDIT',
+                isSubmitted: true,
+                submittedAt: effectivePaymentDate,
+                createdAt: effectivePaymentDate,
+                updatedAt: new Date()
+            }, { transaction });
+        }
+
+
         await transaction.commit();
+
+        // Sync centralized delivery notice for the customer to prevent stale "900 baki" notices
+        if (order.userId) {
+            syncPartyDeliveryNotice(order.userId).catch(err => {
+                logger.warn(`[Sync Delivery Notice Error during Admin Settlement]: ${err.message}`);
+            });
+        }
 
         try {
             logActivity(req, {
