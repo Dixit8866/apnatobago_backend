@@ -2253,6 +2253,16 @@ export const getUserPreviousBills = async (req, res) => {
             });
         });
 
+        // Sort explicitly: latest bill first (e.g. 100003, then 100002, then 100001)
+        allCandidateBills.sort((a, b) => {
+            const numA = parseInt(String(a.billNo || '').replace(/\D/g, ''), 10) || 0;
+            const numB = parseInt(String(b.billNo || '').replace(/\D/g, ''), 10) || 0;
+            if (numA > 0 && numB > 0 && numA !== numB) {
+                return numB - numA; // Higher/latest bill number first
+            }
+            return new Date(b.date).getTime() - new Date(a.date).getTime();
+        });
+
         // Return latest 5 bills only, with newest bill on top
         const previousBills = allCandidateBills.slice(0, 5);
 
