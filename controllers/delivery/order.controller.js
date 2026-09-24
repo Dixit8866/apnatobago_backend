@@ -468,7 +468,7 @@ export const getAssignmentDetails = async (req, res) => {
                         attributes: ['id', 'amount', 'paymentMethod']
                     }
                 ],
-                attributes: ['id', 'orderId', 'totalAmount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+                attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
                 order: [['createdAt', 'DESC']]
             });
 
@@ -482,6 +482,8 @@ export const getAssignmentDetails = async (req, res) => {
                 if (!isEarlier) return;
 
                 const tot = parseFloat(uo.totalAmount || 0);
+                const couponDisc = parseFloat(uo.couponDiscount || 0);
+                const netBill = Math.max(0, tot - couponDisc);
                 const dueCol = parseFloat(uo.dueAmount || 0);
                 const paid = parseFloat(uo.paidAmount || 0);
                 const pStatus = String(uo.paymentStatus || '').toLowerCase();
@@ -497,9 +499,9 @@ export const getAssignmentDetails = async (req, res) => {
                 let due = 0;
                 if (pStatus !== 'paid') {
                     if (dueCol > 0) {
-                        due = Math.min(tot, dueCol);
-                    } else if (realPaid < tot - 0.01) {
-                        due = Math.max(0, tot - realPaid);
+                        due = Math.min(netBill, dueCol);
+                    } else if (realPaid < netBill - 0.01) {
+                        due = Math.max(0, netBill - realPaid);
                     }
                 }
 

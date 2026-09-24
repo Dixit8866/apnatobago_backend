@@ -28,121 +28,11 @@ const getStatusLabel = (status) => {
         default: return status;
     }
 };
-// ... (rest of imports)
+// Import Centralized Financial Settlement Service (Single Source of Truth)
+import { adjustOrderResponse, calculateOrderFinancials } from '../../services/financialSettlement.service.js';
 
 const adjustOrderPayments = (order) => {
-    if (!order) return order;
-
-    const rowData = order.toJSON ? order.toJSON() : order;
-
-    if (String(rowData.orderId) === '100081') {
-        rowData.dueAmount = '8000.00';
-        rowData.creditAmount = '8000.00';
-        rowData.paymentStatus = 'Partial';
-        rowData.pastDueCollected = 6000;
-        if (!Array.isArray(rowData.payments)) rowData.payments = [];
-        const hasCash = rowData.payments.some(p => String(p.paymentMethod).toUpperCase() === 'CASH');
-        if (!hasCash) {
-            rowData.payments.unshift({
-                id: 'cash_100081',
-                orderId: rowData.id,
-                amount: '5000.00',
-                paymentMethod: 'CASH',
-                notes: 'Cash collected during delivery'
-            });
-        } else {
-            const cPay = rowData.payments.find(p => String(p.paymentMethod).toUpperCase() === 'CASH');
-            if (cPay) cPay.amount = '5000.00';
-        }
-        const onlinePay = rowData.payments.find(p => String(p.paymentMethod).toUpperCase() === 'ONLINE');
-        if (onlinePay) onlinePay.amount = '5000.00';
-        const returnPay = rowData.payments.find(p => String(p.paymentMethod).toUpperCase() === 'SALES_RETURN');
-        if (returnPay) returnPay.amount = '866.00';
-        const creditPay = rowData.payments.find(p => String(p.paymentMethod).toUpperCase() === 'CREDIT');
-        if (creditPay) creditPay.amount = '8000.00';
-        return rowData;
-    } else if (String(rowData.orderId) === '100079') {
-        rowData.pastDueCollected = 200;
-        if (Array.isArray(rowData.payments)) {
-            const cashPay = rowData.payments.find(p => String(p.paymentMethod).toUpperCase() === 'CASH');
-            if (cashPay && parseFloat(cashPay.amount) === 1800) {
-                cashPay.amount = '2000.00';
-            }
-        }
-    }
-
-    const fullTotal = parseFloat(rowData.totalAmount || 0);
-    const couponDisc = parseFloat(rowData.couponDiscount || 0);
-    const couponPts = Number(rowData.couponPoints || 0);
-    const actualPaid = parseFloat(rowData.paidAmount || 0);
-    const payableAmt = Math.max(0, fullTotal - couponDisc);
-
-    const creditAmt = parseFloat(rowData.creditAmount || 0);
-    const dueAmt = parseFloat(rowData.dueAmount || 0);
-    let effectiveCredit = creditAmt > 0 ? creditAmt : dueAmt;
-
-    // Check if order is explicitly Paid
-    const isAlreadyPaid = String(rowData.paymentStatus || '').toLowerCase() === 'paid' || 
-                          (dueAmt <= 0 && actualPaid >= (payableAmt - 0.99));
-
-    if (isAlreadyPaid) {
-        rowData.payableAmount = payableAmt.toFixed(2);
-        rowData.dueAmount = '0.00';
-        rowData.creditAmount = '0.00';
-        rowData.paymentStatus = 'Paid';
-        rowData.couponPoints = couponPts;
-        rowData.couponDiscount = couponDisc.toFixed(2);
-        rowData.discountType = (couponPts > 0 || couponDisc > 0) ? (rowData.discountType || 'Coupon Discount') : null;
-        return rowData;
-    }
-
-    // Inspect payments array for any CREDIT payment entry or non-credit payment collections
-    let creditPaymentSum = 0;
-    let nonCreditPaid = 0;
-    if (Array.isArray(rowData.payments) && rowData.payments.length > 0) {
-        rowData.payments.forEach(p => {
-            const m = String(p.paymentMethod || '').toUpperCase();
-            const amt = parseFloat(p.amount || 0);
-            if (m === 'CREDIT') {
-                creditPaymentSum += amt;
-            } else {
-                nonCreditPaid += amt;
-            }
-        });
-    }
-
-    if (creditPaymentSum > 0 && effectiveCredit <= 0) {
-        effectiveCredit = creditPaymentSum;
-    }
-
-    if (effectiveCredit > 0) {
-        rowData.payableAmount = payableAmt.toFixed(2);
-        rowData.dueAmount = effectiveCredit.toFixed(2);
-        rowData.creditAmount = effectiveCredit.toFixed(2);
-        rowData.paymentStatus = 'Partial';
-    } else {
-        const effectivePaid = (nonCreditPaid > 0 && rowData.payments.length > 0) ? nonCreditPaid : actualPaid;
-        const currentDue = Math.max(0, payableAmt - effectivePaid);
-        rowData.payableAmount = payableAmt.toFixed(2);
-        rowData.dueAmount = currentDue.toFixed(2);
-        if (currentDue <= 1e-7) {
-            rowData.paymentStatus = 'Paid';
-        } else {
-            rowData.paymentStatus = 'Partial';
-        }
-    }
-
-    let pastDueCol = parseFloat(rowData.pastDueCollected || 0);
-    if (pastDueCol <= 0) {
-        const pastDueMatch = String(rowData.notes || '').match(/Past Due (?:Cleared|Settled|Collected|Paid):\s*₹?\s*(\d+(?:\.\d+)?)/i);
-        if (pastDueMatch) {
-            pastDueCol = parseFloat(pastDueMatch[1]);
-        }
-    }
-
-    rowData.pastDueCollected = pastDueCol;
-
-    return rowData;
+    return adjustOrderResponse(order);
 };
 
 /**
@@ -622,34 +512,14 @@ export const getAllOrders = async (req, res) => {
                             attributes: ['id', 'notes']
                         }
                     ],
-                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt', 'notes', 'deliveryNotice'],
+                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'couponDiscount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt', 'notes', 'deliveryNotice'],
                     order: [['createdAt', 'DESC']]
                 });
 
                 unpaidOrdersStore = unpaidOrdersList.map(uo => {
-                    const dueCol = parseFloat(uo.dueAmount || 0);
-                    const tot = parseFloat(uo.totalAmount || 0);
-                    const paid = parseFloat(uo.paidAmount || 0);
-                    const pStatus = String(uo.paymentStatus || '').toLowerCase();
-                    const oStatus = String(uo.orderStatus || '');
-
-                    let due = 0;
-                    // Any active non-cancelled order that is not paid is an unpaid bill
-                    if (!oStatus.toLowerCase().includes('cancel') && pStatus !== 'paid') {
-                        let realPaid = paid;
-                        if (Array.isArray(uo.payments) && uo.payments.length > 0) {
-                            realPaid = uo.payments.reduce((pSum, p) => {
-                                const m = String(p.paymentMethod || p.method || '').toUpperCase();
-                                return m !== 'CREDIT' ? pSum + parseFloat(p.amount || 0) : pSum;
-                            }, 0);
-                        }
-
-                        if (realPaid < tot - 0.99) {
-                            due = Math.max(dueCol, tot - realPaid);
-                        } else if (dueCol > 0) {
-                            due = dueCol;
-                        }
-                    }
+                    // Centralized financial calculation for unpaid orders
+                    const fin = calculateOrderFinancials(uo, uo.payments);
+                    const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
 
                     const uPhone = String(uo.user?.number || uo.customerNumber || uo.customerPhone || '').replace(/\D/g, '').slice(-10);
                     const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
