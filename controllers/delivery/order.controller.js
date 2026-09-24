@@ -2157,7 +2157,7 @@ export const getUserPreviousBills = async (req, res) => {
                     attributes: ['id', 'amount', 'paymentMethod']
                 }
             ],
-            attributes: ['id', 'orderId', 'totalAmount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+            attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
             order: [['createdAt', 'DESC']]
         });
 
@@ -2217,51 +2217,39 @@ export const getUserPreviousBills = async (req, res) => {
             await enrichItemsWithProductVolumes(allItemsFlat);
         }
 
-        // 5. Build previousBills array & totalPreviousDues
+        // 5. Build previousBills array & totalPreviousDues using Centralized Financial Service
         const previousBills = [];
         let totalPreviousDues = 0;
 
         unpaidOrders.forEach(uo => {
-            const tot = parseFloat(uo.totalAmount || 0);
-            const dueCol = parseFloat(uo.dueAmount || 0);
-            const paid = parseFloat(uo.paidAmount || 0);
-            const pStatus = String(uo.paymentStatus || '').toLowerCase();
             const oStatus = String(uo.orderStatus || '');
 
             if (oStatus.toLowerCase().includes('cancel')) {
                 return;
             }
 
-            let realPaid = paid;
-            if (Array.isArray(uo.payments) && uo.payments.length > 0) {
-                realPaid = uo.payments.reduce((pSum, p) => {
-                    const m = String(p.paymentMethod || p.method || '').toUpperCase();
-                    return m !== 'CREDIT' ? pSum + parseFloat(p.amount || 0) : pSum;
-                }, 0);
+            // Centralized financial calculation for previous bills
+            const fin = calculateOrderFinancials(uo, uo.payments);
+            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+            const realPaid = parseFloat(fin.paidAmount);
+
+            // Only include bills with active unpaid dues
+            if (due > 0) {
+                totalPreviousDues += due;
+
+                previousBills.push({
+                    orderDbId: uo.id,
+                    billNo: uo.orderId,
+                    date: uo.createdAt,
+                    totalAmount: fin.totalAmount,
+                    couponDiscount: fin.couponDiscount,
+                    paidAmount: Math.round(realPaid * 100) / 100,
+                    dueAmount: Math.round(due * 100) / 100,
+                    paymentStatus: fin.paymentStatus,
+                    orderStatus: uo.orderStatus,
+                    items: itemsMap[uo.id] || []
+                });
             }
-
-            let due = 0;
-            if (pStatus !== 'paid') {
-                if (dueCol > 0) {
-                    due = Math.min(tot, dueCol);
-                } else if (realPaid < tot - 0.01) {
-                    due = Math.max(0, tot - realPaid);
-                }
-            }
-
-            totalPreviousDues += due;
-
-            previousBills.push({
-                orderDbId: uo.id,
-                billNo: uo.orderId,
-                date: uo.createdAt,
-                totalAmount: tot,
-                paidAmount: Math.round(realPaid * 100) / 100,
-                dueAmount: Math.round(due * 100) / 100,
-                paymentStatus: uo.paymentStatus,
-                orderStatus: uo.orderStatus,
-                items: itemsMap[uo.id] || []
-            });
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "User previous bills fetched successfully.", {
