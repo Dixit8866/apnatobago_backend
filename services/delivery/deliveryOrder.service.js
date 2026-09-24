@@ -701,9 +701,10 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             {
                 model: OrderItem,
                 as: 'items',
-                attributes: ['id', 'productId', 'productName', 'quantity', 'price', 'sellUnit', 'variantInfo', 'hasCoupon', 'couponPoints', 'couponPrice'],
+                attributes: ['id', 'productId', 'quantity', 'price', 'sellUnit', 'variantInfo', 'hasCoupon', 'couponPoints', 'couponPrice'],
                 include: [
                     { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+
                     {
                         model: ProductVariant,
                         as: 'variant',
