@@ -9,6 +9,7 @@ import { roundTotal } from '../../utils/roundHelper.js';
 import { getTodayRangeIST } from './dashboard.controller.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
 import { broadcastOrderStatusChanged, broadcastOrderAssigned, broadcastOrderDelivered } from '../../services/socketEvent.service.js';
+import { calculateOrderFinancials } from '../../services/financialSettlement.service.js';
 
 const sendDeliveredNotification = async (orderId) => {
     try {
@@ -481,38 +482,20 @@ export const getAssignmentDetails = async (req, res) => {
 
                 if (!isEarlier) return;
 
-                const tot = parseFloat(uo.totalAmount || 0);
-                const couponDisc = parseFloat(uo.couponDiscount || 0);
-                const netBill = Math.max(0, tot - couponDisc);
-                const dueCol = parseFloat(uo.dueAmount || 0);
-                const paid = parseFloat(uo.paidAmount || 0);
-                const pStatus = String(uo.paymentStatus || '').toLowerCase();
-
-                let realPaid = paid;
-                if (Array.isArray(uo.payments) && uo.payments.length > 0) {
-                    realPaid = uo.payments.reduce((pSum, p) => {
-                        const m = String(p.paymentMethod || p.method || '').toUpperCase();
-                        return m !== 'CREDIT' ? pSum + parseFloat(p.amount || 0) : pSum;
-                    }, 0);
-                }
-
-                let due = 0;
-                if (pStatus !== 'paid') {
-                    if (dueCol > 0) {
-                        due = Math.min(netBill, dueCol);
-                    } else if (realPaid < netBill - 0.01) {
-                        due = Math.max(0, netBill - realPaid);
-                    }
-                }
+                // Centralized financial calculation for past unpaid bills
+                const fin = calculateOrderFinancials(uo, uo.payments);
+                const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
 
                 if (due > 0) {
                     unpaidOrdersSum += due;
                     pastDueOrders.push({
                         id: uo.id,
                         orderId: uo.orderId,
-                        totalAmount: tot,
+                        totalAmount: fin.totalAmount,
+                        couponDiscount: fin.couponDiscount,
+                        paidAmount: parseFloat(fin.paidAmount),
                         dueAmount: due,
-                        paymentStatus: uo.paymentStatus,
+                        paymentStatus: fin.paymentStatus,
                         orderStatus: uo.orderStatus,
                         createdAt: uo.createdAt
                     });
@@ -570,13 +553,14 @@ export const getAssignmentDetails = async (req, res) => {
             await enrichItemsWithProductVolumes(data.order.items);
         }
 
-        const isSettled = ['Delivered', 'Payment Collect', 'Payment Verify'].includes(assignment.order?.orderStatus);
-        const savedCouponPts = isSettled ? Number(assignment.order?.couponPoints || 0) : 0;
-        const savedCouponDisc = isSettled ? parseFloat(assignment.order?.couponDiscount || 0) : 0;
-        const fullTotal = parseFloat(assignment.order?.totalAmount || 0);
-        const paidAmount = parseFloat(assignment.order?.paidAmount || 0);
-        const payableAmt = Math.max(0, fullTotal - savedCouponDisc);
-        const calculatedDueAmt = Math.max(0, payableAmt - paidAmount);
+        // Centralized financial calculation for the current order
+        const currentFin = calculateOrderFinancials(assignment.order, assignment.order?.payments);
+        const fullTotal = currentFin.totalAmount;
+        const savedCouponDisc = currentFin.couponDiscount;
+        const payableAmt = currentFin.netPayable;
+        const paidAmount = parseFloat(currentFin.paidAmount);
+        const calculatedDueAmt = parseFloat(currentFin.dueAmount);
+        const savedCouponPts = Number(assignment.order?.couponPoints || 0);
 
         delete data.payableAmount; // Remove duplicate top-level field
 
@@ -641,11 +625,12 @@ export const getAssignmentDetails = async (req, res) => {
         const userBalanceType = assignment.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
         const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
 
+        // Total past due amount: prioritize actual unpaid bills total if present, otherwise opening balance creditline
         let totalPastDueAmount = 0;
-        if (userBalanceType === 'DUE') {
-            totalPastDueAmount = userCreditVal > 0 ? Math.max(userCreditVal, unpaidOrdersSum) : unpaidOrdersSum;
-        } else if (userBalanceType !== 'JAMA') {
+        if (unpaidOrdersSum > 0) {
             totalPastDueAmount = unpaidOrdersSum;
+        } else if (userBalanceType === 'DUE' && userCreditVal > 0) {
+            totalPastDueAmount = userCreditVal;
         }
 
         const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
