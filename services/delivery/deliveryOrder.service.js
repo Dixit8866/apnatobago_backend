@@ -116,6 +116,12 @@ export const enrichItemsWithProductVolumes = async (items) => {
         item.unitPrice = parseFloat(singleUnitPrice.toFixed(2));
         item.totalUnits = parseFloat((parseFloat(item.quantity || 0) * packUnits).toFixed(2));
 
+        const masterHasCoupon = item.product?.hasCoupon === true || item.product?.hasCoupon === 'true' || item.hasCoupon === true || item.hasCoupon === 'true';
+        const masterPts = Number(item.product?.couponPoints || item.couponPoints || 0);
+        const masterPrice = Number(item.product?.couponPrice || item.couponPrice || 0);
+        const singleUnitCouponPts = packUnits > 0 ? (masterPts / packUnits) : masterPts;
+        const singleUnitCouponPrice = packUnits > 0 ? (masterPrice / packUnits) : masterPrice;
+
         const pVariants = productVariantsMap[item.productId] || [];
         const volumeOptions = [];
 
@@ -129,6 +135,8 @@ export const enrichItemsWithProductVolumes = async (items) => {
             const vSellingVol = Number(v.sellingVolume || 1);
             const vPackUnits = (vBaseUnits * vSellingVol) > 0 ? (vBaseUnits * vSellingVol) : 1;
             const calculatedPrice = parseFloat((singleUnitPrice * vPackUnits).toFixed(2));
+            const vCouponPts = Math.round(singleUnitCouponPts * vPackUnits);
+            const vCouponPrice = parseFloat((singleUnitCouponPrice * vPackUnits).toFixed(2));
 
             volumeOptions.push({
                 id: v.id,
@@ -141,7 +149,12 @@ export const enrichItemsWithProductVolumes = async (items) => {
                 unitsPerPack: vPackUnits,
                 singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
                 price: calculatedPrice > 0 ? calculatedPrice : parseFloat(v.purchasePrice || 0),
-                purchasePrice: parseFloat(v.purchasePrice || 0)
+                purchasePrice: parseFloat(v.purchasePrice || 0),
+                hasCoupon: masterHasCoupon,
+                couponPoints: vCouponPts,
+                couponPrice: vCouponPrice.toFixed(2),
+                singleUnitCouponPoints: singleUnitCouponPts,
+                singleUnitCouponPrice: singleUnitCouponPrice.toFixed(2)
             });
         });
 
@@ -157,10 +170,15 @@ export const enrichItemsWithProductVolumes = async (items) => {
                 sellingVolume: sellingVolume,
                 unitsPerPack: packUnits,
                 singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
-                price: itemPrice
+                price: itemPrice,
+                hasCoupon: masterHasCoupon,
+                couponPoints: masterPts,
+                couponPrice: masterPrice.toFixed(2)
             });
 
             if (packUnits > 1) {
+                const singlePts = Math.round(singleUnitCouponPts);
+                const singlePrice = parseFloat(singleUnitCouponPrice.toFixed(2));
                 volumeOptions.push({
                     id: item.variantId,
                     variantId: item.variantId,
@@ -171,7 +189,10 @@ export const enrichItemsWithProductVolumes = async (items) => {
                     sellingVolume: 1,
                     unitsPerPack: 1,
                     singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
-                    price: parseFloat(singleUnitPrice.toFixed(2))
+                    price: parseFloat(singleUnitPrice.toFixed(2)),
+                    hasCoupon: masterHasCoupon,
+                    couponPoints: singlePts,
+                    couponPrice: singlePrice.toFixed(2)
                 });
             }
         }
@@ -705,7 +726,6 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
     if (data.order && data.order.items) {
         data.order.items.forEach(itemData => {
-            const p = itemData.product || {};
             const isItemCouponApplied = itemData.hasCoupon === true || itemData.hasCoupon === 'true';
             
             itemData.hasCoupon = isItemCouponApplied;
@@ -719,28 +739,52 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                 if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
                 if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
             }
+        });
 
-            const masterHasCoupon = p.hasCoupon === true || p.hasCoupon === 'true';
+        await enrichItemsWithProductVolumes(data.order.items);
+
+        data.order.items.forEach(itemData => {
+            const p = itemData.product || {};
+            const isItemCouponApplied = itemData.hasCoupon === true;
+            const masterHasCoupon = p.hasCoupon === true || p.hasCoupon === 'true' || isItemCouponApplied;
+
             if (masterHasCoupon) {
-                const masterPts = Number(p.couponPoints || 0);
-                const masterPrice = Number(p.couponPrice || 0);
+                const masterPts = Number(p.couponPoints || itemData.couponPoints || 0);
+                const masterPrice = Number(p.couponPrice || itemData.couponPrice || 0);
 
                 let pName = p.name;
                 if (typeof pName === 'object' && pName !== null) {
                     pName = pName.en || Object.values(pName)[0] || 'Product';
                 }
 
+                const volStr = typeof itemData.variantInfo?.volume === 'string' ? itemData.variantInfo.volume : (itemData.variant?.volumeRef?.name || itemData.variant?.volume || 'Unit');
+                const itemVolName = typeof volStr === 'object' ? (volStr.en || Object.values(volStr)[0] || 'Unit') : volStr;
+
                 couponProducts.push({
                     id: itemData.productId,
+                    productId: itemData.productId,
                     itemId: itemData.id,
+                    variantId: itemData.variantId,
                     name: pName || itemData.productName || 'Product',
-                    image: p.thumbnail || '',
-                    couponPoints: masterPts,
-                    couponPrice: masterPrice.toFixed(2)
+                    productName: pName || itemData.productName || 'Product',
+                    image: p.thumbnail || itemData.thumbnail || '',
+                    thumbnail: p.thumbnail || itemData.thumbnail || '',
+                    volume: itemVolName,
+                    volumeName: itemVolName,
+                    quantity: itemData.quantity,
+                    sellUnit: itemData.sellUnit || 'Base',
+                    baseUnitsPerPack: itemData.baseUnitsPerPack || 1,
+                    sellingVolume: itemData.sellingVolume || 1,
+                    packUnits: itemData.packUnits || 1,
+                    hasCoupon: isItemCouponApplied,
+                    couponPoints: isItemCouponApplied ? Number(itemData.couponPoints || masterPts) : masterPts,
+                    couponPrice: isItemCouponApplied ? parseFloat(itemData.couponPrice || masterPrice).toFixed(2) : masterPrice.toFixed(2),
+                    masterCouponPoints: masterPts,
+                    masterCouponPrice: masterPrice.toFixed(2),
+                    productVolumes: itemData.productVolumes || []
                 });
             }
         });
-        await enrichItemsWithProductVolumes(data.order.items);
     }
 
     const currentFin = calculateOrderFinancials(assignment.order, assignment.order?.payments);

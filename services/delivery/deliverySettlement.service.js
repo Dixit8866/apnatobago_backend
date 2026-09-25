@@ -109,24 +109,70 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             return { notFound: true };
         }
 
-        // 1. Handle product-wise coupon items
+        // 1. Handle product-wise & volume-wise coupon items
         if (Array.isArray(couponItems) && couponItems.length > 0) {
+            const existingOrderItems = await OrderItem.findAll({
+                where: { orderId: assignment.order.id },
+                transaction: t
+            });
+
+            const updatedItemIds = new Set();
+
             for (const cItem of couponItems) {
                 const itemPts = Number(cItem.couponPoints || cItem.points || 0);
                 const itemDisc = parseFloat(cItem.couponPrice || cItem.discount || cItem.price || 0);
 
-                const whereCond = { orderId: assignment.order.id };
-                if (cItem.itemId || cItem.id) whereCond.id = cItem.itemId || cItem.id;
-                else if (cItem.productId) whereCond.productId = cItem.productId;
+                let matchedItem = null;
+                const targetItemId = cItem.itemId || cItem.id;
+                if (targetItemId) {
+                    matchedItem = existingOrderItems.find(it => String(it.id) === String(targetItemId));
+                }
 
-                await OrderItem.update({
-                    hasCoupon: itemPts > 0 || itemDisc > 0,
-                    couponPoints: itemPts,
-                    couponPrice: itemDisc
-                }, {
-                    where: whereCond,
-                    transaction: t
-                });
+                if (!matchedItem && cItem.productId && cItem.variantId) {
+                    matchedItem = existingOrderItems.find(it => 
+                        !updatedItemIds.has(it.id) &&
+                        String(it.productId) === String(cItem.productId) && 
+                        String(it.variantId) === String(cItem.variantId)
+                    );
+                }
+
+                if (!matchedItem && cItem.productId && (cItem.volume || cItem.volumeName || cItem.volumeId)) {
+                    const cVol = String(cItem.volume || cItem.volumeName || '').toLowerCase().trim();
+                    matchedItem = existingOrderItems.find(it => {
+                        if (updatedItemIds.has(it.id)) return false;
+                        if (String(it.productId) !== String(cItem.productId)) return false;
+                        const itVol = String(it.variantInfo?.volume || it.variantInfo?.name || '').toLowerCase().trim();
+                        return itVol === cVol;
+                    });
+                }
+
+                if (!matchedItem && cItem.productId) {
+                    matchedItem = existingOrderItems.find(it => 
+                        !updatedItemIds.has(it.id) && 
+                        String(it.productId) === String(cItem.productId)
+                    );
+                }
+
+                if (matchedItem) {
+                    updatedItemIds.add(matchedItem.id);
+                    await matchedItem.update({
+                        hasCoupon: itemPts > 0 || itemDisc > 0,
+                        couponPoints: itemPts,
+                        couponPrice: itemDisc
+                    }, { transaction: t });
+                } else if (cItem.productId) {
+                    await OrderItem.update({
+                        hasCoupon: itemPts > 0 || itemDisc > 0,
+                        couponPoints: itemPts,
+                        couponPrice: itemDisc
+                    }, {
+                        where: {
+                            orderId: assignment.order.id,
+                            productId: cItem.productId
+                        },
+                        transaction: t
+                    });
+                }
             }
         }
 
