@@ -281,44 +281,289 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
 
     if (result.rows.length > 0) {
         const orderIds = result.rows.map(item => item.order?.id).filter(Boolean);
+        const userIds = Array.from(new Set(result.rows.map(item => item.order?.userId).filter(Boolean)));
+        const customerPhones = Array.from(new Set(result.rows.map(item => {
+            const p = item.order?.user?.number || item.order?.customerNumber;
+            return p ? String(p).replace(/\D/g, '').slice(-10) : '';
+        }).filter(p => p && p.length >= 7)));
+
+        let items = [];
+        let payments = [];
+        let returns = [];
+        let candidateOrders = [];
+        let unsettledPastReturns = [];
+
+        const fetchPromises = [];
 
         if (orderIds.length > 0) {
-            const items = await OrderItem.findAll({
-                where: { orderId: orderIds },
-                include: [
-                    { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
-                    {
-                        model: ProductVariant,
-                        as: 'variant',
-                        include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
-                    }
-                ]
-            });
-
-            const itemsMap = {};
-            items.forEach(item => {
-                if (!itemsMap[item.orderId]) itemsMap[item.orderId] = [];
-                itemsMap[item.orderId].push(item);
-            });
-
-            result.rows.forEach(item => {
-                if (item.order) {
-                    const rawItems = itemsMap[item.order.id] || [];
-                    const formattedItems = rawItems.map(it => {
-                        const itemData = it.toJSON ? it.toJSON() : it;
-                        if (itemData.variantInfo) {
-                            if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
-                                itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
-                            }
-                            if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
-                            if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
+            fetchPromises.push(
+                OrderItem.findAll({
+                    where: { orderId: orderIds },
+                    include: [
+                        { model: Product, as: 'product', attributes: ['id', 'name', 'thumbnail'] },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            include: [{ model: Volume, as: 'volumeRef', attributes: ['id', 'name'] }]
                         }
-                        return itemData;
-                    });
-                    item.order.setDataValue('items', formattedItems);
-                }
+                    ]
+                }).then(res => { items = res; }),
+
+                OrderPayment.findAll({
+                    where: { orderId: orderIds },
+                    attributes: ['id', 'orderId', 'amount', 'paymentMethod', 'notes', 'createdAt']
+                }).then(res => { payments = res; }),
+
+                SalesReturn.findAll({
+                    where: {
+                        orderId: orderIds,
+                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                    }
+                }).then(res => { returns = res; })
+            );
+        }
+
+        const userConditions = [];
+        if (userIds.length > 0) userConditions.push({ userId: { [Op.in]: userIds } });
+        if (customerPhones.length > 0) {
+            userConditions.push({
+                [Op.or]: customerPhones.map(cp => ({ customerNumber: { [Op.like]: `%${cp}` } }))
             });
         }
+
+        if (userConditions.length > 0) {
+            fetchPromises.push(
+                Order.findAll({
+                    where: {
+                        [Op.or]: userConditions,
+                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                    },
+                    include: [
+                        {
+                            model: OrderPayment,
+                            as: 'payments',
+                            required: false,
+                            attributes: ['id', 'orderId', 'amount', 'paymentMethod']
+                        }
+                    ],
+                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+                    order: [['createdAt', 'DESC']]
+                }).then(res => { candidateOrders = res; })
+            );
+
+            if (userIds.length > 0) {
+                fetchPromises.push(
+                    SalesReturn.findAll({
+                        where: {
+                            userId: { [Op.in]: userIds },
+                            creditProcessed: false,
+                            orderId: { [Op.notIn]: orderIds },
+                            status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                        }
+                    }).then(res => { unsettledPastReturns = res; })
+                );
+            }
+        }
+
+        await Promise.all(fetchPromises);
+
+        const itemsMap = {};
+        items.forEach(item => {
+            if (!itemsMap[item.orderId]) itemsMap[item.orderId] = [];
+            itemsMap[item.orderId].push(item);
+        });
+
+        const paymentsMap = {};
+        payments.forEach(p => {
+            if (!paymentsMap[p.orderId]) paymentsMap[p.orderId] = [];
+            paymentsMap[p.orderId].push(p);
+        });
+
+        const returnsMap = {};
+        returns.forEach(r => {
+            if (!returnsMap[r.orderId]) returnsMap[r.orderId] = [];
+            returnsMap[r.orderId].push(r);
+        });
+
+        const unsettledReturnsMap = {};
+        unsettledPastReturns.forEach(r => {
+            if (!unsettledReturnsMap[r.userId]) unsettledReturnsMap[r.userId] = 0;
+            unsettledReturnsMap[r.userId] += parseFloat(r.returnAmount || 0);
+        });
+
+        result.rows.forEach(item => {
+            if (item.order) {
+                const rawItems = itemsMap[item.order.id] || [];
+                const formattedItems = rawItems.map(it => {
+                    const itemData = it.toJSON ? it.toJSON() : it;
+                    if (itemData.variantInfo) {
+                        if (typeof itemData.variantInfo.volume === 'object' && itemData.variantInfo.volume !== null) {
+                            itemData.variantInfo.volume = Object.values(itemData.variantInfo.volume)[0] || '';
+                        }
+                        if (itemData.variantInfo.extra === undefined) itemData.variantInfo.extra = '';
+                        if (itemData.variantInfo.extraName === undefined) itemData.variantInfo.extraName = '';
+                    }
+                    return itemData;
+                });
+                item.order.setDataValue('items', formattedItems);
+                item.order.setDataValue('payments', paymentsMap[item.order.id] || []);
+                item.order.setDataValue('returns', returnsMap[item.order.id] || []);
+            }
+        });
+
+        let responseData;
+        if (query.paginate !== 'false') {
+            responseData = formatPaginatedResponse(result, page, limit);
+        } else {
+            responseData = {
+                totalRecords: result.count,
+                data: result.rows
+            };
+        }
+
+        if (responseData.data) {
+            responseData.data = responseData.data.map(item => {
+                const data = item.toJSON ? item.toJSON() : item;
+                if (data.order && data.order.orderStatus === 'Cancelled') {
+                    data.status = 'Cancelled';
+                }
+
+                const uId = data.order?.userId;
+                const userPhoneClean = data.order?.user?.number
+                    ? String(data.order.user.number).replace(/\D/g, '').slice(-10)
+                    : (data.order?.customerNumber ? String(data.order.customerNumber).replace(/\D/g, '').slice(-10) : '');
+                const currentOrderDbId = data.order?.id;
+                const currentOrderNum = parseInt(String(data.order?.orderId || '').replace(/\D/g, ''), 10) || 0;
+                const currentOrderCreated = data.order?.createdAt ? new Date(data.order.createdAt).getTime() : Date.now();
+
+                let pastDueOrders = [];
+                let unpaidOrdersSum = 0;
+
+                candidateOrders.forEach(uo => {
+                    if (String(uo.id) === String(currentOrderDbId)) return;
+
+                    let isMatch = false;
+                    if (uId && uo.userId && String(uId) === String(uo.userId)) {
+                        isMatch = true;
+                    } else if (userPhoneClean && userPhoneClean.length >= 7) {
+                        const uoPhone = String(uo.customerNumber || '').replace(/\D/g, '').slice(-10);
+                        if (uoPhone && uoPhone === userPhoneClean) isMatch = true;
+                    }
+
+                    if (!isMatch) return;
+
+                    const uoOrderNum = parseInt(String(uo.orderId || '').replace(/\D/g, ''), 10) || 0;
+                    const uoTime = new Date(uo.createdAt).getTime();
+                    const isEarlier = (uoOrderNum > 0 && currentOrderNum > 0)
+                        ? (uoOrderNum < currentOrderNum)
+                        : (uoTime <= currentOrderCreated);
+
+                    if (!isEarlier) return;
+
+                    const fin = calculateOrderFinancials(uo, uo.payments);
+                    const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+
+                    if (due > 0) {
+                        unpaidOrdersSum += due;
+                        pastDueOrders.push({
+                            id: uo.id,
+                            orderId: uo.orderId,
+                            totalAmount: fin.totalAmount,
+                            couponDiscount: fin.couponDiscount,
+                            paidAmount: parseFloat(fin.paidAmount),
+                            dueAmount: due,
+                            paymentStatus: fin.paymentStatus,
+                            orderStatus: uo.orderStatus,
+                            createdAt: uo.createdAt
+                        });
+                    }
+                });
+
+                const directReturns = (returnsMap[data.order?.id] || []).filter(r => r.status !== 'Rejected' && r.status !== 'Cancelled');
+                const directReturnAmount = directReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
+                const unsettledPastReturnAmount = uId ? (unsettledReturnsMap[uId] || 0) : 0;
+                const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
+
+                const userAdvanceJama = parseFloat(data.order?.user?.advanceJama || 0);
+                const userCreditVal = parseFloat(data.order?.user?.creditline || 0);
+                const userBalanceType = data.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
+                const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
+
+                let totalPastDueAmount = 0;
+                if (unpaidOrdersSum > 0) {
+                    totalPastDueAmount = unpaidOrdersSum;
+                } else if (userBalanceType === 'DUE' && userCreditVal > 0) {
+                    totalPastDueAmount = userCreditVal;
+                }
+
+                const currentPayments = paymentsMap[data.order?.id] || [];
+                const currentFin = calculateOrderFinancials(data.order, currentPayments);
+                const fullTotal = currentFin.totalAmount;
+                const savedCouponDisc = currentFin.couponDiscount;
+                const payableAmt = currentFin.netPayable;
+                const paidAmount = parseFloat(currentFin.paidAmount);
+                const calculatedDueAmt = parseFloat(currentFin.dueAmount);
+                const savedCouponPts = Number(data.order?.couponPoints || 0);
+
+                const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
+                const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
+                const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
+                const netPayableVal = Math.max(0, totalDueAmt);
+                const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(data.order?.orderStatus);
+
+                data.pastDueOrders = pastDueOrders;
+                data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
+                data.duePayment = totalPastDueAmount.toFixed(2);
+                data.pastDueAmount = totalPastDueAmount.toFixed(2);
+                data.previousUnpaidDue = totalPastDueAmount.toFixed(2);
+                data.dueAmount = isDelivered ? calculatedDueAmt.toFixed(2) : totalPastDueAmount.toFixed(2);
+                data.currentPayment = netOrderCollectible.toFixed(2);
+                data.netPayableAmount = netPayableVal.toFixed(2);
+                data.totalAmount = isDelivered ? payableAmt.toFixed(2) : netPayableVal.toFixed(2);
+                data.jamaAmount = jamaAmountVal.toFixed(2);
+                data.userCreditline = userCreditVal.toFixed(2);
+                data.advanceJama = userAdvanceJama.toFixed(2);
+                data.balanceType = userBalanceType;
+                data.salesReturnCalculation = {
+                    billAmount: roundedFullTotal,
+                    returnAmount: totalSalesReturnDeduction,
+                    netToCollect: netOrderCollectible
+                };
+
+                if (data.order) {
+                    data.order.couponPoints = savedCouponPts;
+                    data.order.couponDiscount = savedCouponDisc.toFixed(2);
+                    data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (data.order.discountType || 'Coupon Discount') : null;
+                    data.order.payableAmount = payableAmt.toFixed(2);
+                    data.order.paidAmount = paidAmount.toFixed(2);
+                    data.order.totalAmount = fullTotal.toFixed(2);
+                    data.order.paymentStatus = currentFin.paymentStatus;
+                    data.order.netPayableAmount = netOrderCollectible.toFixed(2);
+                    data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
+                    data.order.duePayment = totalPastDueAmount.toFixed(2);
+                    data.order.pastDueAmount = totalPastDueAmount.toFixed(2);
+                    data.order.previousUnpaidDue = totalPastDueAmount.toFixed(2);
+                    data.order.pendingDue = totalPastDueAmount.toFixed(2);
+                    data.order.dueAmount = isDelivered ? calculatedDueAmt.toFixed(2) : totalPastDueAmount.toFixed(2);
+                    data.order.salesReturnCalculation = data.salesReturnCalculation;
+
+                    if (data.order.user) {
+                        data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
+                        data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
+                        data.order.user.creditline = userCreditVal.toFixed(2);
+                        data.order.user.advanceJama = userAdvanceJama.toFixed(2);
+                        data.order.user.balanceType = userBalanceType;
+                        data.order.user.jamaAmount = jamaAmountVal.toFixed(2);
+                        data.order.user.totalPastDueAmount = totalPastDueAmount.toFixed(2);
+                        data.order.user.previousUnpaidDue = totalPastDueAmount.toFixed(2);
+                    }
+                }
+
+                return data;
+            });
+        }
+
+        return responseData;
     }
 
     let responseData;
@@ -330,28 +575,6 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
             data: result.rows
         };
     }
-
-    if (responseData.data) {
-        responseData.data = responseData.data.map(item => {
-            const data = item.toJSON ? item.toJSON() : item;
-            if (data.order && data.order.orderStatus === 'Cancelled') {
-                data.status = 'Cancelled';
-            }
-            if (data.order && data.order.user) {
-                data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
-                data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
-
-                const uCredit = parseFloat(data.order.user.creditline || 0);
-                const uJama = parseFloat(data.order.user.advanceJama || 0);
-                const bType = data.order.user.balanceType || (uJama > 0 ? 'JAMA' : (uCredit > 0 ? 'DUE' : 'CLEAR'));
-                data.order.user.balanceType = bType;
-                data.order.user.creditline = uCredit.toFixed(2);
-                data.order.user.advanceJama = uJama.toFixed(2);
-            }
-            return data;
-        });
-    }
-
     return responseData;
 };
 
