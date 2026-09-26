@@ -72,6 +72,7 @@ export const formatOrderSocketPayload = (order) => {
         deliveryDate: plain.deliveryDate,
         godownId: plain.godownId,
         routeCategoryId: plain.routeCategoryId || plain.user?.routeCategoryId,
+        billPrintTime: plain.billPrintTime || plain.user?.billPrintTime || null,
         deliveryNotice: notice,
         hasNotice: Boolean(notice),
         createdAt: plain.createdAt,
@@ -80,6 +81,7 @@ export const formatOrderSocketPayload = (order) => {
             fullname: plain.user.fullname,
             number: plain.user.number,
             city: plain.user.city,
+            billPrintTime: plain.user.billPrintTime || plain.billPrintTime || null,
             routeCategoryId: plain.user.routeCategoryId,
             deliveryNotice: plain.user.deliveryNotice || notice || null,
             businessProfile: plain.user.businessProfile ? {

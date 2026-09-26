@@ -106,7 +106,7 @@ export const getGodownOrders = async (req, res, next) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'billPrintTime'],
                     required: false,
                     include: [
                         {
