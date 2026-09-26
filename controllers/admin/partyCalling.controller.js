@@ -11,7 +11,20 @@ import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.uti
  */
 export const getDailyPartyCalls = async (req, res, next) => {
     try {
-        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, date, godownId } = req.query;
+        const { page = 1, limit = 50, search = '', status = 'All', routeCategoryId, deliveryRoundTiming, billPrintTime, date, godownId } = req.query;
+
+        const normalizeSlot = (val) => {
+            if (!val || val === 'none' || val === 'None' || val === 'null' || val === '') return '';
+            const clean = String(val).trim().toUpperCase();
+            const match = clean.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+            if (match) {
+                const hh = match[1].padStart(2, '0');
+                return `${hh}:${match[2]} ${match[3]}`;
+            }
+            return clean;
+        };
+
+        const normBillSlotFilter = normalizeSlot(billPrintTime);
 
         const appSettings = await AppSettings.findOne();
         const schedules = appSettings?.deliveryRoundSchedules || [];
@@ -189,7 +202,8 @@ export const getDailyPartyCalls = async (req, res, next) => {
         mappedUsers.forEach(u => {
             const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
             const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
-            if (matchRoute && matchTiming) {
+            const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
+            if (matchRoute && matchTiming && matchBillSlot) {
                 tabCounts.All++;
                 if (tabCounts[u.callingStatus] !== undefined) {
                     tabCounts[u.callingStatus]++;
@@ -197,36 +211,39 @@ export const getDailyPartyCalls = async (req, res, next) => {
             }
         });
 
-        // Compute route counts (filtered by status tab and deliveryRoundTiming, but NOT routeCategoryId)
+        // Compute route counts (filtered by status tab, deliveryRoundTiming, and billPrintTime, but NOT routeCategoryId)
         const routeCounts = {};
         mappedUsers.forEach(u => {
             const matchStatus = !status || status === 'All' || u.callingStatus === status;
             const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
-            if (matchStatus && matchTiming) {
+            const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
+            if (matchStatus && matchTiming && matchBillSlot) {
                 if (u.routeCategoryId) {
                     routeCounts[u.routeCategoryId] = (routeCounts[u.routeCategoryId] || 0) + 1;
                 }
             }
         });
 
-        // Compute timing counts (filtered by status tab and routeCategoryId, but NOT deliveryRoundTiming)
+        // Compute timing counts (filtered by status tab, routeCategoryId, and billPrintTime, but NOT deliveryRoundTiming)
         const timingCounts = {};
         mappedUsers.forEach(u => {
             const matchStatus = !status || status === 'All' || u.callingStatus === status;
             const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
-            if (matchStatus && matchRoute) {
+            const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
+            if (matchStatus && matchRoute && matchBillSlot) {
                 if (u.deliveryRoundTiming) {
                     timingCounts[u.deliveryRoundTiming] = (timingCounts[u.deliveryRoundTiming] || 0) + 1;
                 }
             }
         });
 
-        // Filter users to display (matching status, routeCategoryId, and deliveryRoundTiming)
+        // Filter users to display (matching status, routeCategoryId, deliveryRoundTiming, and billPrintTime)
         const filteredUsers = mappedUsers.filter(u => {
             const matchStatus = !status || status === 'All' || u.callingStatus === status;
             const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
             const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
-            return matchStatus && matchRoute && matchTiming;
+            const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
+            return matchStatus && matchRoute && matchTiming && matchBillSlot;
         });
 
         // Sort users: For 'Pending Call', order by lastOrderDate ASC (oldest last order date / most days without order first)
