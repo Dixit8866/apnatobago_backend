@@ -3858,13 +3858,15 @@ export const adjustPartyBalance = async (req, res) => {
 
         } else if (type === 'DUE') {
             // ── CUSTOMER DUE: Reconcile all orders to match exact target due ─────
-            finalCreditline = parsedAmount;
+            // IMPORTANT: Do NOT overwrite user.creditline (which is the BASE credit limit set by admin)
+            // Only update balanceType and clear any advance jama
+            finalCreditline = parseFloat(user?.creditline || 0); // preserve existing base limit
             finalDue = parsedAmount;
             for (const u of matchedUsers) {
-                await u.update({ creditline: parsedAmount, advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
+                await u.update({ advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
             }
             if (user && !matchedUsers.some(u => u.id === user.id)) {
-                await user.update({ creditline: parsedAmount, advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
+                await user.update({ advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
             }
 
             let remainingDue = parsedAmount;

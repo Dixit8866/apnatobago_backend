@@ -431,7 +431,9 @@ export const getProfile = async (req, res) => {
         userData.baseCreditLimit = baseCreditLimit;
         userData.availableCredit = availableCredit;
         userData.availableDue = availableCredit;
-        userData.creditline = availableCredit;
+        userData.userCreditline = availableCredit; // for mobile app display (available credit)
+        // NOTE: userData.creditline is intentionally kept as the BASE LIMIT (from DB)
+        // Admin form reads this to display and save the base credit limit setting
 
         // Populate CustomLevel (applevel)
         let rewardLevel = null;

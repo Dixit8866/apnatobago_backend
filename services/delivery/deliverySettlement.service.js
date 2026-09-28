@@ -76,6 +76,7 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             creditAmount = 0,
             salesReturnAmount = 0,
             returnAmount = 0,
+            jamaAmount = 0,
             salesReturnItems,
             returnItems,
             onlineTransactionId,
@@ -242,6 +243,12 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         const inputCredit = parseFloat(creditAmount) || 0;
         let inputReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
 
+        // Advance Jama: apply user's stored jama balance to reduce bill
+        const storedAdvanceJama = parseFloat(user?.advanceJama || 0);
+        const requestedJama = parseFloat(jamaAmount) || 0;
+        // Use whichever is smaller: what app says to use vs what user actually has
+        const inputJama = Math.min(requestedJama > 0 ? requestedJama : storedAdvanceJama, storedAdvanceJama);
+
         if (inputReturn === 0 && user) {
             const unadjustedReturns = await SalesReturn.findAll({
                 where: {
@@ -255,7 +262,7 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         }
 
         const currentBillTotal = parseFloat(assignment.order.totalAmount || 0);
-        const netBill = Math.max(0, currentBillTotal - finalCouponDisc);
+        const netBill = Math.max(0, currentBillTotal - finalCouponDisc - inputJama);
 
         const currentBillCashOnlineNeeded = Math.max(0, netBill - inputReturn - inputCredit);
         const totalCashOnlineCollected = inputCash + inputOnline;
@@ -473,6 +480,26 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         let remainingOnline = 0;
         let remainingSalesReturn = Math.max(0, inputReturn - netBill);
 
+        // Consume Advance Jama from user's balance
+        if (user && inputJama > 0) {
+            const prevJamaBal = parseFloat(user.advanceJama || 0);
+            const newJamaBal = Math.max(0, prevJamaBal - inputJama);
+            user.advanceJama = newJamaBal;
+            if (newJamaBal <= 0) {
+                user.balanceType = 'CLEAR';
+            }
+            await PartyBalanceLog.create({
+                userId: user.id,
+                orderId: assignment.orderId,
+                type: 'JAMA',
+                amount: -inputJama,
+                previousBalance: prevJamaBal,
+                newBalance: newJamaBal,
+                note: `Advance Jama used on Order #${assignment.order?.orderId || assignment.orderId}: -₹${inputJama.toFixed(2)}. Remaining Jama: ₹${newJamaBal.toFixed(2)}`,
+                createdByName: 'Delivery Settlement'
+            }, { transaction: t });
+        }
+
         if (user) {
             const excessCashOnline = (remainingCash > 0 ? remainingCash : 0) + (remainingOnline > 0 ? remainingOnline : 0);
             const excessReturn = remainingSalesReturn > 0 ? remainingSalesReturn : 0;
@@ -582,6 +609,7 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
             creditAmount = 0,
             salesReturnAmount = 0,
             returnAmount = 0,
+            jamaAmount = 0,
             salesReturnItems,
             returnItems,
             onlineTransactionId,
@@ -666,6 +694,12 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
         let remainingCredit = parseFloat(creditAmount) || 0;
         let remainingSalesReturn = Math.round(parseFloat(salesReturnAmount || returnAmount || 0));
 
+        // Advance Jama setup
+        const storedAdvanceJama = parseFloat(user?.advanceJama || 0);
+        const requestedJama = parseFloat(jamaAmount) || 0;
+        let remainingJama = Math.min(requestedJama > 0 ? requestedJama : storedAdvanceJama, storedAdvanceJama);
+        const totalJamaUsed = remainingJama; // track for log
+
         if (remainingSalesReturn === 0 && user) {
             const unadjustedReturns = await SalesReturn.findAll({
                 where: {
@@ -684,6 +718,26 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
 
             let orderNotes = [];
             let paymentMethodsUsed = [];
+
+            // Apply Advance Jama first
+            if (remainingJama > 0 && due > 0) {
+                const jamaDeduction = Math.min(remainingJama, due);
+                remainingJama -= jamaDeduction;
+                due -= jamaDeduction;
+                order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
+                orderNotes.push(`Paid ₹${jamaDeduction.toFixed(2)} via Advance Jama`);
+                paymentMethodsUsed.push('CASH'); // treat as cash for method tracking
+
+                await OrderPayment.create({
+                    orderId: order.id,
+                    deliveryBoyId,
+                    amount: jamaDeduction,
+                    paymentMethod: 'CASH',
+                    notes: `Advance Jama Applied: ₹${jamaDeduction.toFixed(2)}`
+                }, { transaction: t });
+
+                await restoreUserCreditFromPayment(order.id, jamaDeduction, user, t);
+            }
 
             if (remainingSalesReturn > 0 && due > 0) {
                 const returnDeduction = Math.min(remainingSalesReturn, due);
@@ -839,6 +893,24 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
         }
 
         if (user) {
+            // Consume jama used
+            if (totalJamaUsed > 0) {
+                const prevJamaBal = parseFloat(user.advanceJama || 0);
+                const newJamaBal = Math.max(0, prevJamaBal - totalJamaUsed);
+                user.advanceJama = newJamaBal;
+                if (newJamaBal <= 0) {
+                    user.balanceType = 'CLEAR';
+                }
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    type: 'JAMA',
+                    amount: -totalJamaUsed,
+                    previousBalance: prevJamaBal,
+                    newBalance: newJamaBal,
+                    note: `Advance Jama applied to settle order(s): -₹${totalJamaUsed.toFixed(2)}. Remaining Jama: ₹${newJamaBal.toFixed(2)}`,
+                    createdByName: 'Delivery Settlement'
+                }, { transaction: t });
+            }
             await user.save({ transaction: t });
         }
 
