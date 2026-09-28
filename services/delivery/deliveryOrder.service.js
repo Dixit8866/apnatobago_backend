@@ -19,7 +19,7 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { roundTotal } from '../../utils/roundHelper.js';
 import { sendToDevice } from '../notification.service.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered } from '../socketEvent.service.js';
-import { calculateOrderFinancials, syncPartyDeliveryNotice } from '../financialSettlement.service.js';
+import { calculateOrderFinancials, syncPartyDeliveryNotice, getCustomerCreditFinancials } from '../financialSettlement.service.js';
 import { getTodayRangeIST } from '../../controllers/delivery/dashboard.controller.js';
 
 /**
@@ -910,21 +910,20 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     const netPayableVal = Math.max(0, totalDueAmt);
     const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(assignment.order?.orderStatus);
 
-    // Centralized Customer Total Due and Available Credit Calculation
-    let totalCustomerDue = 0;
-    if (Array.isArray(candidateOrders)) {
-        candidateOrders.forEach(uo => {
-            const fin = calculateOrderFinancials(uo, uo.payments);
-            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-            if (due > 0) totalCustomerDue += due;
-        });
-    }
+    // Centralized Customer Total Due and Available Credit Calculation (Single Source of Truth)
+    const creditFinancials = await getCustomerCreditFinancials({ 
+        userId, 
+        userPhone: userPhoneClean, 
+        excludeOrderId: currentOrderDbId 
+    });
+
+    let totalCustomerDue = creditFinancials.usedCredit;
     if (isDelivered && calculatedDueAmt > 0) {
         totalCustomerDue += calculatedDueAmt;
     }
 
-    const baseCreditLimit = userCreditVal;
-    const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
+    const baseCreditLimit = creditFinancials.baseCreditLimit;
+    const availableCredit = Math.max(0, parseFloat((baseCreditLimit - totalCustomerDue).toFixed(2)));
 
     data.pastDueOrders = pastDueOrders;
     data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
@@ -1252,16 +1251,7 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
 
     const latest5Bills = previousBills.slice(0, 5);
 
-    let previousBillsDue = 0;
-    if (Array.isArray(orders)) {
-        orders.forEach(uo => {
-            const fin = calculateOrderFinancials(uo, uo.payments);
-            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-            if (due > 0) previousBillsDue += due;
-        });
-    }
-    const userBaseCredit = parseFloat(user?.creditline || 0);
-    const userAvailableCredit = Math.max(0, userBaseCredit - previousBillsDue);
+    const creditFinancials = await getCustomerCreditFinancials({ userId, userPhone: cleanPhone });
 
     return {
         user: {
@@ -1269,15 +1259,15 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             fullname: user?.fullname || 'Customer',
             shopName: user?.businessProfile?.shopName || '',
             number: user?.number || cleanPhone,
-            creditline: parseFloat(userAvailableCredit.toFixed(2)),
-            creditLimit: parseFloat(userAvailableCredit.toFixed(2)),
-            creditAmount: parseFloat(userAvailableCredit.toFixed(2)),
-            availableCredit: parseFloat(userAvailableCredit.toFixed(2)),
-            availableDue: parseFloat(userAvailableCredit.toFixed(2)),
-            baseCreditLimit: parseFloat(userBaseCredit.toFixed(2)),
-            usedCredit: parseFloat(previousBillsDue.toFixed(2)),
-            totalDue: parseFloat(previousBillsDue.toFixed(2)),
-            totalUnpaidDue: parseFloat(previousBillsDue.toFixed(2))
+            creditline: creditFinancials.availableCredit,
+            creditLimit: creditFinancials.availableCredit,
+            creditAmount: creditFinancials.availableCredit,
+            availableCredit: creditFinancials.availableCredit,
+            availableDue: creditFinancials.availableCredit,
+            baseCreditLimit: creditFinancials.baseCreditLimit,
+            usedCredit: creditFinancials.usedCredit,
+            totalDue: creditFinancials.totalDue,
+            totalUnpaidDue: creditFinancials.totalUnpaidDue
         },
         totalBillsCount: latest5Bills.length,
         previousBills: latest5Bills

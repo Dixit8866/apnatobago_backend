@@ -317,11 +317,172 @@ export const adjustOrderResponse = (order) => {
     return rowData;
 };
 
+/**
+ * ==============================================================================
+ * CENTRALIZED CUSTOMER CREDIT & DUE FINANCIAL SERVICE (Single Source of Truth)
+ * ==============================================================================
+ * Unifies Customer Credit Limit, Used Due, Past Due, and Available Credit calculations
+ * across Admin Panel, Delivery App, and Order Settlements.
+ *
+ * @param {Object} params
+ * @param {string} [params.userId] - User ID UUID
+ * @param {string} [params.userPhone] - Customer phone number for matching
+ * @param {string} [params.excludeOrderId] - Current order ID being processed (excluded from past due)
+ * @param {Object} [params.user] - Optional pre-fetched User instance or object
+ * @param {Object} [params.transaction] - Optional Sequelize transaction
+ * @returns {Promise<Object>}
+ */
+export const getCustomerCreditFinancials = async ({
+    userId = null,
+    userPhone = null,
+    excludeOrderId = null,
+    user = null,
+    transaction = null
+} = {}) => {
+    try {
+        let customerUser = user;
+        if (!customerUser && userId) {
+            customerUser = await User.findByPk(userId, {
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
+                transaction
+            });
+        }
+
+        const cleanPhone = (userPhone || customerUser?.number)
+            ? String(userPhone || customerUser?.number).replace(/\D/g, '').slice(-10)
+            : '';
+
+        if (!customerUser && cleanPhone && cleanPhone.length >= 7) {
+            customerUser = await User.findOne({
+                where: { number: { [Op.like]: `%${cleanPhone}` } },
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
+                transaction
+            });
+        }
+
+        const effectiveUserId = customerUser?.id || userId;
+        const baseCreditLimit = parseFloat(customerUser?.creditline || 0);
+        const userAdvanceJama = parseFloat(customerUser?.advanceJama || 0);
+
+        // Build where conditions to locate orders
+        const matchConditions = [];
+        if (effectiveUserId) {
+            matchConditions.push({ userId: effectiveUserId });
+        }
+        if (cleanPhone && cleanPhone.length >= 7) {
+            matchConditions.push({ customerNumber: { [Op.like]: `%${cleanPhone}` } });
+        }
+
+        let totalUnpaidDue = 0;
+        const pastDueOrders = [];
+
+        if (matchConditions.length > 0) {
+            const orderWhere = {
+                [Op.or]: matchConditions,
+                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel', 'Auto Cancelled', 'Rejected'] }
+            };
+
+            if (excludeOrderId) {
+                orderWhere.id = { [Op.ne]: excludeOrderId };
+            }
+
+            const candidateOrders = await Order.findAll({
+                where: orderWhere,
+                include: [
+                    {
+                        model: OrderPayment,
+                        as: 'payments',
+                        required: false,
+                        attributes: ['id', 'amount', 'paymentMethod', 'notes', 'createdAt']
+                    }
+                ],
+                attributes: ['id', 'orderId', 'userId', 'customerNumber', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+                order: [['createdAt', 'DESC']],
+                transaction
+            });
+
+            candidateOrders.forEach(ord => {
+                // Determine if this order constitutes an unpaid due / used credit:
+                // An order counts as past due ONLY if:
+                // 1) It has been delivered/settled (Delivered, Payment Collect, Payment Verify, Completed)
+                // OR
+                // 2) It has an explicit CREDIT payment record
+                // OR
+                // 3) dueAmount > 0 and paidAmount > 0 (partial settlement happened)
+                const isDeliveredOrSettled = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(ord.orderStatus);
+                const payments = ord.payments || [];
+                const hasCreditPayment = payments.some(p => String(p.paymentMethod || '').toUpperCase() === 'CREDIT' && parseFloat(p.amount || 0) > 0);
+                const hasPartialSettlement = parseFloat(ord.paidAmount || 0) > 0 && parseFloat(ord.dueAmount || 0) > 0;
+
+                // If the order is un-delivered (Pending, Packaging, Packed, Assigned) and has no credit payment,
+                // it is an in-transit order, NOT past used credit!
+                if (!isDeliveredOrSettled && !hasCreditPayment && !hasPartialSettlement) {
+                    return;
+                }
+
+                const fin = calculateOrderFinancials(ord, payments);
+                const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+
+                if (due > 0.01) {
+                    totalUnpaidDue += due;
+                    pastDueOrders.push({
+                        id: ord.id,
+                        orderId: ord.orderId,
+                        totalAmount: fin.totalAmount,
+                        couponDiscount: fin.couponDiscount,
+                        paidAmount: parseFloat(fin.paidAmount),
+                        dueAmount: parseFloat(due.toFixed(2)),
+                        paymentStatus: fin.paymentStatus,
+                        orderStatus: ord.orderStatus,
+                        createdAt: ord.createdAt
+                    });
+                }
+            });
+        }
+
+        const roundedUsedDue = parseFloat(totalUnpaidDue.toFixed(2));
+        const availableCredit = Math.max(0, parseFloat((baseCreditLimit - roundedUsedDue).toFixed(2)));
+        const isBlocked = customerUser?.blockcredit ? true : false;
+
+        return {
+            userId: effectiveUserId,
+            baseCreditLimit,
+            usedCredit: roundedUsedDue,
+            totalDue: roundedUsedDue,
+            totalUnpaidDue: roundedUsedDue,
+            availableCredit,
+            creditLimit: availableCredit,    // Returns available credit so delivery app and components show available balance!
+            creditAmount: availableCredit,   // Returns available credit so delivery app showing Credit Amount shows available balance!
+            creditline: availableCredit,     // Available credit
+            blockcredit: (isBlocked && availableCredit <= 0),
+            pastDueOrders,
+            advanceJama: userAdvanceJama
+        };
+    } catch (error) {
+        logger.error(`[getCustomerCreditFinancials Error]: ${error.message}`);
+        return {
+            userId,
+            baseCreditLimit: 0,
+            usedCredit: 0,
+            totalDue: 0,
+            totalUnpaidDue: 0,
+            availableCredit: 0,
+            creditLimit: 0,
+            creditAmount: 0,
+            creditline: 0,
+            blockcredit: false,
+            pastDueOrders: [],
+            advanceJama: 0
+        };
+    }
+};
+
 export default {
     calculateOrderFinancials,
     syncOrderFinancials,
     adjustOrderResponse,
     syncPartyDeliveryNotice,
     clearOrderDeliveryNotice,
+    getCustomerCreditFinancials,
 };
 

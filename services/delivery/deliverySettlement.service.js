@@ -12,7 +12,7 @@ import {
 import logger from '../../logger/apiLogger.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
 import { broadcastOrderStatusChanged, broadcastUserUpdated } from '../socketEvent.service.js';
-import { syncPartyDeliveryNotice, calculateOrderFinancials } from '../financialSettlement.service.js';
+import { syncPartyDeliveryNotice, calculateOrderFinancials, getCustomerCreditFinancials } from '../financialSettlement.service.js';
 import { sendDeliveredNotification } from './deliveryOrder.service.js';
 
 /**
@@ -208,36 +208,13 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             user = await User.findByPk(userId, { transaction: t });
         }
 
-        // Fetch past due orders
-        let pastDueOrders = [];
-        if (userId) {
-            pastDueOrders = await Order.findAll({
-                where: {
-                    userId,
-                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
-                    id: { [Op.ne]: assignment.orderId }
-                },
-                include: [
-                    {
-                        model: OrderPayment,
-                        as: 'payments',
-                        required: false,
-                        attributes: ['id', 'amount', 'paymentMethod']
-                    }
-                ],
-                order: [['createdAt', 'ASC']],
-                transaction: t
-            });
-        }
-
-        let totalPastDue = 0;
-        pastDueOrders.forEach(o => {
-            const fin = calculateOrderFinancials(o, o.payments);
-            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-            if (due > 0) totalPastDue += due;
+        // Centralized calculation of past due and available credit (Single Source of Truth)
+        const creditFinancials = await getCustomerCreditFinancials({
+            userId,
+            excludeOrderId: assignment.orderId,
+            transaction: t
         });
-        const creditLimit = parseFloat(user?.creditline || 0);
-        const availableCredit = Math.max(0, creditLimit - totalPastDue);
+        const availableCredit = creditFinancials.availableCredit;
 
         if (creditAmount > 0) {
             if (!user) {
@@ -680,30 +657,11 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                 await t.rollback();
                 return { notFound: "User not found." };
             }
-            const userOrders = await Order.findAll({
-                where: {
-                    userId,
-                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-                },
-                include: [
-                    {
-                        model: OrderPayment,
-                        as: 'payments',
-                        required: false,
-                        attributes: ['id', 'amount', 'paymentMethod']
-                    }
-                ],
-                attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+            const creditFinancials = await getCustomerCreditFinancials({
+                userId,
                 transaction: t
             });
-            let totalDue = 0;
-            userOrders.forEach(uo => {
-                const fin = calculateOrderFinancials(uo, uo.payments);
-                const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-                if (due > 0) totalDue += due;
-            });
-            const userCreditLimit = parseFloat(user.creditline || 0);
-            const userAvailableCredit = Math.max(0, userCreditLimit - totalDue);
+            const userAvailableCredit = creditFinancials.availableCredit;
 
             if (userAvailableCredit < parseFloat(creditAmount)) {
                 await t.rollback();

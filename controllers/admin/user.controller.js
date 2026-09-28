@@ -7,6 +7,7 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
+import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
 
 const SAFE_ATTRIBUTES = { exclude: ['password', 'logintoken', 'fcmtoken'] };
 
@@ -546,57 +547,36 @@ export const getUserById = async (req, res, next) => {
         });
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
-        // Live centralized calculation of customer's unpaid due and available credit
-        // Fetch all active non-cancelled orders WITH their payments to compute real dues
-        const activeOrders = await Order.findAll({
-            where: {
-                userId: user.id,
-                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-            },
-            attributes: ['id', 'totalAmount', 'dueAmount', 'paidAmount', 'paymentStatus', 'couponDiscount'],
-            include: [{
-                model: OrderPayment,
-                as: 'payments',
-                attributes: ['amount', 'paymentMethod'],
-                required: false
-            }]
-        });
-
-        // For each order, compute actual due by reading real payments
-        let totalUnpaidDue = 0;
-        for (const ord of activeOrders) {
-            const orderTotal = parseFloat(ord.totalAmount || 0);
-            const couponDisc = parseFloat(ord.couponDiscount || 0);
-            const netBill = Math.max(0, orderTotal - couponDisc);
-
-            // Sum all non-credit payments (cash + online + sales_return)
-            const payments = ord.payments || [];
-            const totalPaid = payments
-                .filter(p => p.paymentMethod !== 'CREDIT')
-                .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-            const salesReturnPaid = payments
-                .filter(p => p.paymentMethod === 'SALES_RETURN')
-                .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-
-            // Real due = net bill - (cash paid + online paid + sales return)
-            const realDue = Math.max(0, netBill - totalPaid);
-            totalUnpaidDue += realDue;
-        }
-
-        const baseCreditLimit = parseFloat(user.creditline || 0);
-        const availableCredit = Math.max(0, baseCreditLimit - totalUnpaidDue);
+        // Centralized calculation of customer's unpaid due and available credit (Single Source of Truth)
+        const creditData = await getCustomerCreditFinancials({ userId: user.id, user });
 
         const userData = user.toJSON ? user.toJSON() : user;
-        userData.creditLimit = parseFloat(baseCreditLimit.toFixed(2));
-        userData.baseCreditLimit = parseFloat(baseCreditLimit.toFixed(2));
-        userData.totalUnpaidDue = parseFloat(totalUnpaidDue.toFixed(2));
-        userData.usedCredit = parseFloat(totalUnpaidDue.toFixed(2));
-        userData.totalDue = parseFloat(totalUnpaidDue.toFixed(2));
-        userData.availableCredit = parseFloat(availableCredit.toFixed(2));
-        userData.availableDue = parseFloat(availableCredit.toFixed(2));
-        userData.creditline = parseFloat(baseCreditLimit.toFixed(2));
+        userData.baseCreditLimit = creditData.baseCreditLimit;
+        userData.creditLimit = creditData.baseCreditLimit;
+        userData.creditline = creditData.baseCreditLimit;
+        userData.usedCredit = creditData.usedCredit;
+        userData.totalUnpaidDue = creditData.totalUnpaidDue;
+        userData.totalDue = creditData.totalDue;
+        userData.availableCredit = creditData.availableCredit;
+        userData.availableDue = creditData.availableCredit;
+        userData.creditAmount = creditData.availableCredit;
+        userData.pastDueOrders = creditData.pastDueOrders;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', userData);
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Dedicated API to fetch live customer credit info
+ * GET /api/admin/users/:id/credit
+ */
+export const getUserCreditInfo = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const creditData = await getCustomerCreditFinancials({ userId: id });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Customer credit info fetched successfully.', creditData);
     } catch (error) {
         next(error);
     }

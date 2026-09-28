@@ -3,7 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.uti
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
 import { Order, User, OrderPayment } from '../../models/index.js';
-import { clearOrderDeliveryNotice, calculateOrderFinancials } from '../../services/financialSettlement.service.js';
+import { clearOrderDeliveryNotice, calculateOrderFinancials, getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
 import {
     getMyAssignedOrdersService,
     getAssignmentDetailsService,
@@ -117,60 +117,21 @@ export const getUserCreditDetails = async (req, res) => {
         const { userId } = req.params;
         logger.info(`[Get User Credit]: Fetching credit info for user ${userId}`);
 
-        const user = await User.findByPk(userId, {
-            attributes: ['id', 'fullname', 'number', 'creditline', 'blockcredit']
-        });
-
-        if (!user) {
-            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
-        }
-
-        const cleanPhone = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
-        const userOrConditions = [{ userId: user.id }];
-        if (cleanPhone && cleanPhone.length >= 7) {
-            userOrConditions.push({ customerNumber: { [Op.like]: `%${cleanPhone}` } });
-        }
-
-        const candidateOrders = await Order.findAll({
-            where: {
-                [Op.or]: userOrConditions,
-                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-            },
-            include: [
-                {
-                    model: OrderPayment,
-                    as: 'payments',
-                    required: false,
-                    attributes: ['id', 'amount', 'paymentMethod']
-                }
-            ],
-            attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt']
-        });
-
-        let totalUnpaidDue = 0;
-        candidateOrders.forEach(uo => {
-            const fin = calculateOrderFinancials(uo, uo.payments);
-            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-            if (due > 0) {
-                totalUnpaidDue += due;
-            }
-        });
-
-        const baseCreditLimit = parseFloat(user.creditline || 0);
-        const availableCredit = Math.max(0, baseCreditLimit - totalUnpaidDue);
+        const creditData = await getCustomerCreditFinancials({ userId });
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "User credit details fetched.", {
-            id: user.id,
-            creditLimit: parseFloat(availableCredit.toFixed(2)),
-            creditAmount: parseFloat(availableCredit.toFixed(2)),
-            baseCreditLimit: parseFloat(baseCreditLimit.toFixed(2)),
-            creditline: parseFloat(availableCredit.toFixed(2)),
-            availableCredit: parseFloat(availableCredit.toFixed(2)),
-            availableDue: parseFloat(availableCredit.toFixed(2)),
-            usedCredit: parseFloat(totalUnpaidDue.toFixed(2)),
-            totalDue: parseFloat(totalUnpaidDue.toFixed(2)),
-            totalUnpaidDue: parseFloat(totalUnpaidDue.toFixed(2)),
-            blockcredit: (user.blockcredit && availableCredit <= 0) ? true : false
+            id: creditData.userId || userId,
+            creditLimit: creditData.availableCredit,
+            creditAmount: creditData.availableCredit,
+            baseCreditLimit: creditData.baseCreditLimit,
+            creditline: creditData.availableCredit,
+            availableCredit: creditData.availableCredit,
+            availableDue: creditData.availableCredit,
+            usedCredit: creditData.usedCredit,
+            totalDue: creditData.totalDue,
+            totalUnpaidDue: creditData.totalUnpaidDue,
+            blockcredit: creditData.blockcredit,
+            pastDueOrders: creditData.pastDueOrders
         });
     } catch (error) {
         logger.error(`[Get User Credit Error]: ${error.message}`);
