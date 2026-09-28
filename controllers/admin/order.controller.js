@@ -638,18 +638,23 @@ export const getAllOrders = async (req, res) => {
                 }, 0);
 
                 let totalCustomerDue = 0;
-                userAllOrders.forEach(uo => {
-                    let isMatch = false;
-                    if (uId && uo.userId && String(uId) === String(uo.userId)) {
-                        isMatch = true;
-                    } else if (userPhoneClean && userPhoneClean.length >= 7) {
-                        const uoPhone = String(uo.customerNumber || '').replace(/\D/g, '').slice(-10);
-                        if (uoPhone && uoPhone === userPhoneClean) isMatch = true;
-                    }
-                    if (isMatch && uo.due > 0) {
-                        totalCustomerDue += uo.due;
-                    }
-                });
+                if (Array.isArray(unpaidOrdersStore)) {
+                    unpaidOrdersStore.forEach(uo => {
+                        let isSameCustomer = false;
+                        if (uId && uo.userId && String(uId) === String(uo.userId)) {
+                            isSameCustomer = true;
+                        } else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) {
+                            isSameCustomer = true;
+                        } else if (oShop && uo.shopName && oShop.length >= 3 && oShop === uo.shopName) {
+                            isSameCustomer = true;
+                        } else if (oName && uo.name && oName.length >= 3 && oName === uo.name) {
+                            isSameCustomer = true;
+                        }
+                        if (isSameCustomer && uo.due > 0) {
+                            totalCustomerDue += uo.due;
+                        }
+                    });
+                }
 
                 const baseCreditLimit = parseFloat(order.user?.creditline || 0);
                 const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
