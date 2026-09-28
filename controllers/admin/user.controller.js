@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile, RouteCategory, RouteSection, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown, PartyBalanceLog } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory, RouteSection, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown, PartyBalanceLog, OrderPayment } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -547,16 +547,42 @@ export const getUserById = async (req, res, next) => {
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
         // Live centralized calculation of customer's unpaid due and available credit
-        const unpaidOrders = await Order.findAll({
+        // Fetch all active non-cancelled orders WITH their payments to compute real dues
+        const activeOrders = await Order.findAll({
             where: {
                 userId: user.id,
-                dueAmount: { [Op.gt]: 0 },
                 orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
             },
-            attributes: ['id', 'dueAmount']
+            attributes: ['id', 'totalAmount', 'dueAmount', 'paidAmount', 'paymentStatus', 'couponDiscount'],
+            include: [{
+                model: OrderPayment,
+                as: 'payments',
+                attributes: ['amount', 'paymentMethod'],
+                required: false
+            }]
         });
 
-        const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+        // For each order, compute actual due by reading real payments
+        let totalUnpaidDue = 0;
+        for (const ord of activeOrders) {
+            const orderTotal = parseFloat(ord.totalAmount || 0);
+            const couponDisc = parseFloat(ord.couponDiscount || 0);
+            const netBill = Math.max(0, orderTotal - couponDisc);
+
+            // Sum all non-credit payments (cash + online + sales_return)
+            const payments = ord.payments || [];
+            const totalPaid = payments
+                .filter(p => p.paymentMethod !== 'CREDIT')
+                .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+            const salesReturnPaid = payments
+                .filter(p => p.paymentMethod === 'SALES_RETURN')
+                .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+
+            // Real due = net bill - (cash paid + online paid + sales return)
+            const realDue = Math.max(0, netBill - totalPaid);
+            totalUnpaidDue += realDue;
+        }
+
         const baseCreditLimit = parseFloat(user.creditline || 0);
         const availableCredit = Math.max(0, baseCreditLimit - totalUnpaidDue);
 
