@@ -1211,11 +1211,25 @@ export const updateMyAssignmentStatusService = async ({ assignmentId, deliveryBo
 
             if (order.userId) await syncPartyDeliveryNotice(order.userId);
         } else if (status === 'Completed') {
+            const prevStatus = order.orderStatus || 'Shipping';
             order.orderStatus = 'Delivered';
             order.deliveredAt = order.deliveredAt || new Date();
             await order.save();
             await sendDeliveredNotification(order.id);
             if (order.userId) await syncPartyDeliveryNotice(order.userId);
+            try {
+                const deliveredOrder = await Order.findByPk(order.id, {
+                    include: [
+                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
+                        { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
+                    ]
+                });
+                if (deliveredOrder) {
+                    broadcastOrderDelivered({ order: deliveredOrder, deliveryBoyId, oldStatus: prevStatus });
+                }
+            } catch (sErr) {
+                logger.error(`[Socket Broadcast Error in updateMyAssignmentStatusService]: ${sErr.message}`);
+            }
         }
 
         return { order };

@@ -827,6 +827,26 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
 
         for (const order of orders) {
             await sendDeliveredNotification(order.id);
+            try {
+                const deliveredOrder = await Order.findByPk(order.id, {
+                    include: [
+                        { model: User, as: 'user', attributes: ['id', 'fullname', 'number', 'city', 'routeCategoryId'] },
+                        { model: OrderAssignment, as: 'assignment', include: [{ model: DeliveryBoy, as: 'deliveryBoy' }] }
+                    ]
+                });
+                if (deliveredOrder) {
+                    broadcastOrderStatusChanged({
+                        order: deliveredOrder,
+                        oldStatus: 'Shipping',
+                        newStatus: deliveredOrder.orderStatus || 'Payment Collect',
+                        routeCategoryId: deliveredOrder.routeCategoryId || deliveredOrder.user?.routeCategoryId,
+                        godownId: deliveredOrder.godownId,
+                        deliveryBoyId
+                    });
+                }
+            } catch (sErr) {
+                logger.error(`[Socket Broadcast Error in settleSingleOrderPayment]: ${sErr.message}`);
+            }
         }
 
         return {
