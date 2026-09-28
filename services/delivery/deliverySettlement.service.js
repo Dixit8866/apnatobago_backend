@@ -479,9 +479,10 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             const excessCollected = excessCashOnline + excessReturn;
 
             if (excessCollected > 0) {
-                const prevCredit = parseFloat(user.creditline || 0);
-                user.creditline = prevCredit + excessCollected;
-                const newCredit = user.creditline;
+                const prevJama = parseFloat(user.advanceJama || 0);
+                user.advanceJama = prevJama + excessCollected;
+                user.balanceType = 'JAMA';
+                const newJama = user.advanceJama;
                 
                 const noteParts = [];
                 if (excessCashOnline > 0) noteParts.push(`Cash/Online Overpayment: +₹${excessCashOnline.toFixed(2)}`);
@@ -492,9 +493,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                     orderId: assignment.orderId,
                     type: 'JAMA',
                     amount: excessCollected,
-                    previousBalance: prevCredit,
-                    newBalance: newCredit,
-                    note: `Credit Jama on Order #${assignment.order?.orderId || assignment.orderId}: +₹${excessCollected.toFixed(2)} (${noteParts.join(', ')})`,
+                    previousBalance: prevJama,
+                    newBalance: newJama,
+                    note: `Advance Jama on Order #${assignment.order?.orderId || assignment.orderId}: +₹${excessCollected.toFixed(2)} (${noteParts.join(', ')})`,
                     createdByName: 'Delivery Boy Settlement'
                 }, { transaction: t });
 

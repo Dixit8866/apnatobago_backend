@@ -140,9 +140,13 @@ export const getUserCreditDetails = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "User credit details fetched.", {
             id: user.id,
             creditLimit,
+            baseCreditLimit: creditLimit,
             creditline: availableCredit,
             availableCredit,
+            availableDue: availableCredit,
+            usedCredit: parseFloat(totalUnpaidDue.toFixed(2)),
             totalDue: parseFloat(totalUnpaidDue.toFixed(2)),
+            totalUnpaidDue: parseFloat(totalUnpaidDue.toFixed(2)),
             blockcredit: (user.blockcredit && availableCredit <= 0) ? true : false
         });
     } catch (error) {

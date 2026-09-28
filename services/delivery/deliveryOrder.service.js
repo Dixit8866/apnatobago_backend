@@ -527,6 +527,38 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 const netPayableVal = Math.max(0, totalDueAmt);
                 const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(data.order?.orderStatus);
 
+                // Centralized Customer Total Due and Available Credit Calculation
+                let totalCustomerDue = 0;
+                candidateOrders.forEach(uo => {
+                    let isMatch = false;
+                    if (uId && uo.userId && String(uId) === String(uo.userId)) {
+                        isMatch = true;
+                    } else if (userPhoneClean && userPhoneClean.length >= 7) {
+                        const uoPhone = String(uo.customerNumber || '').replace(/\D/g, '').slice(-10);
+                        if (uoPhone && uoPhone === userPhoneClean) isMatch = true;
+                    }
+                    if (!isMatch) return;
+
+                    if (String(uo.id) === String(currentOrderDbId)) {
+                        if (isDelivered && calculatedDueAmt > 0) {
+                            totalCustomerDue += calculatedDueAmt;
+                        }
+                    } else {
+                        const fin = calculateOrderFinancials(uo, uo.payments);
+                        const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+                        if (due > 0) {
+                            totalCustomerDue += due;
+                        }
+                    }
+                });
+
+                if (isDelivered && calculatedDueAmt > 0 && !candidateOrders.some(uo => String(uo.id) === String(currentOrderDbId))) {
+                    totalCustomerDue += calculatedDueAmt;
+                }
+
+                const baseCreditLimit = userCreditVal;
+                const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
+
                 data.pastDueOrders = pastDueOrders;
                 data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
                 data.duePayment = totalPastDueAmount.toFixed(2);
@@ -537,7 +569,15 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 data.netPayableAmount = netPayableVal.toFixed(2);
                 data.totalAmount = isDelivered ? payableAmt.toFixed(2) : netPayableVal.toFixed(2);
                 data.jamaAmount = jamaAmountVal.toFixed(2);
-                data.userCreditline = userCreditVal.toFixed(2);
+                data.userCreditline = availableCredit.toFixed(2);
+                data.availableCredit = availableCredit.toFixed(2);
+                data.availableDue = availableCredit.toFixed(2);
+                data.creditLimit = baseCreditLimit.toFixed(2);
+                data.baseCreditLimit = baseCreditLimit.toFixed(2);
+                data.usedCredit = totalCustomerDue.toFixed(2);
+                data.totalDue = totalCustomerDue.toFixed(2);
+                data.totalUnpaidDue = totalCustomerDue.toFixed(2);
+                data.totalCustomerDue = totalCustomerDue.toFixed(2);
                 data.advanceJama = userAdvanceJama.toFixed(2);
                 data.balanceType = userBalanceType;
                 data.salesReturnCalculation = {
@@ -566,7 +606,14 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     if (data.order.user) {
                         data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
                         data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
-                        data.order.user.creditline = userCreditVal.toFixed(2);
+                        data.order.user.creditline = availableCredit.toFixed(2);
+                        data.order.user.availableCredit = availableCredit.toFixed(2);
+                        data.order.user.availableDue = availableCredit.toFixed(2);
+                        data.order.user.creditLimit = baseCreditLimit.toFixed(2);
+                        data.order.user.baseCreditLimit = baseCreditLimit.toFixed(2);
+                        data.order.user.usedCredit = totalCustomerDue.toFixed(2);
+                        data.order.user.totalDue = totalCustomerDue.toFixed(2);
+                        data.order.user.totalUnpaidDue = totalCustomerDue.toFixed(2);
                         data.order.user.advanceJama = userAdvanceJama.toFixed(2);
                         data.order.user.balanceType = userBalanceType;
                         data.order.user.jamaAmount = jamaAmountVal.toFixed(2);
@@ -655,6 +702,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
     let pastDueOrders = [];
     let unpaidOrdersSum = 0;
+    let candidateOrders = [];
 
     if (userId || userPhoneClean) {
         const userOrConditions = [];
@@ -663,7 +711,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
             userOrConditions.push({ customerNumber: { [Op.like]: `%${userPhoneClean}` } });
         }
 
-        const candidateOrders = await Order.findAll({
+        candidateOrders = await Order.findAll({
             where: {
                 [Op.or]: userOrConditions,
                 id: { [Op.ne]: currentOrderDbId },
@@ -854,6 +902,23 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
     const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
     const netPayableVal = Math.max(0, totalDueAmt);
+    const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(assignment.order?.orderStatus);
+
+    // Centralized Customer Total Due and Available Credit Calculation
+    let totalCustomerDue = 0;
+    if (Array.isArray(candidateOrders)) {
+        candidateOrders.forEach(uo => {
+            const fin = calculateOrderFinancials(uo, uo.payments);
+            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+            if (due > 0) totalCustomerDue += due;
+        });
+    }
+    if (isDelivered && calculatedDueAmt > 0) {
+        totalCustomerDue += calculatedDueAmt;
+    }
+
+    const baseCreditLimit = userCreditVal;
+    const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
 
     data.pastDueOrders = pastDueOrders;
     data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
@@ -863,7 +928,15 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     data.netPayableAmount = netPayableVal.toFixed(2);
     data.totalAmount = netPayableVal.toFixed(2);
     data.jamaAmount = jamaAmountVal.toFixed(2);
-    data.userCreditline = userCreditVal.toFixed(2);
+    data.userCreditline = availableCredit.toFixed(2);
+    data.availableCredit = availableCredit.toFixed(2);
+    data.availableDue = availableCredit.toFixed(2);
+    data.creditLimit = baseCreditLimit.toFixed(2);
+    data.baseCreditLimit = baseCreditLimit.toFixed(2);
+    data.usedCredit = totalCustomerDue.toFixed(2);
+    data.totalDue = totalCustomerDue.toFixed(2);
+    data.totalUnpaidDue = totalCustomerDue.toFixed(2);
+    data.totalCustomerDue = totalCustomerDue.toFixed(2);
     data.advanceJama = userAdvanceJama.toFixed(2);
     data.balanceType = userBalanceType;
     data.salesReturnCalculation = {
@@ -882,7 +955,14 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     }
 
     if (data.order && data.order.user) {
-        data.order.user.creditline = userCreditVal.toFixed(2);
+        data.order.user.creditline = availableCredit.toFixed(2);
+        data.order.user.availableCredit = availableCredit.toFixed(2);
+        data.order.user.availableDue = availableCredit.toFixed(2);
+        data.order.user.creditLimit = baseCreditLimit.toFixed(2);
+        data.order.user.baseCreditLimit = baseCreditLimit.toFixed(2);
+        data.order.user.usedCredit = totalCustomerDue.toFixed(2);
+        data.order.user.totalDue = totalCustomerDue.toFixed(2);
+        data.order.user.totalUnpaidDue = totalCustomerDue.toFixed(2);
         data.order.user.advanceJama = userAdvanceJama.toFixed(2);
         data.order.user.balanceType = userBalanceType;
         data.order.user.jamaAmount = jamaAmountVal.toFixed(2);

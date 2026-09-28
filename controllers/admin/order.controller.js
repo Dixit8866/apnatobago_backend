@@ -637,9 +637,24 @@ export const getAllOrders = async (req, res) => {
                     return sum;
                 }, 0);
 
-                const userCreditline = parseFloat(order.user?.creditline || 0);
+                let totalCustomerDue = 0;
+                userAllOrders.forEach(uo => {
+                    let isMatch = false;
+                    if (uId && uo.userId && String(uId) === String(uo.userId)) {
+                        isMatch = true;
+                    } else if (userPhoneClean && userPhoneClean.length >= 7) {
+                        const uoPhone = String(uo.customerNumber || '').replace(/\D/g, '').slice(-10);
+                        if (uoPhone && uoPhone === userPhoneClean) isMatch = true;
+                    }
+                    if (isMatch && uo.due > 0) {
+                        totalCustomerDue += uo.due;
+                    }
+                });
+
+                const baseCreditLimit = parseFloat(order.user?.creditline || 0);
+                const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
                 const userAdvanceJama = parseFloat(order.user?.advanceJama || 0);
-                const userBalanceType = order.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditline > 0 ? 'DUE' : 'CLEAR'));
+                const userBalanceType = order.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (baseCreditLimit > 0 ? 'DUE' : 'CLEAR'));
 
                 // Determine active delivery note/notice for this party (strictly manual notes, NEVER system logs)
                 let activeDeliveryNotice = null;
@@ -657,7 +672,13 @@ export const getAllOrders = async (req, res) => {
                     order.user.setDataValue ? order.user.setDataValue('deliveryNotice', activeDeliveryNotice || null) : (order.user.deliveryNotice = activeDeliveryNotice || null);
                 }
 
-                order.setDataValue('userCreditline', userCreditline);
+                order.setDataValue('userCreditline', availableCredit);
+                order.setDataValue('availableCredit', availableCredit);
+                order.setDataValue('availableDue', availableCredit);
+                order.setDataValue('creditLimit', baseCreditLimit);
+                order.setDataValue('baseCreditLimit', baseCreditLimit);
+                order.setDataValue('usedCredit', totalCustomerDue);
+                order.setDataValue('totalCustomerDue', totalCustomerDue);
                 order.setDataValue('userAdvanceJama', userAdvanceJama);
                 order.setDataValue('userBalanceType', userBalanceType);
                 order.setDataValue('previousUnpaidDue', prevUnpaidDue);
@@ -665,19 +686,32 @@ export const getAllOrders = async (req, res) => {
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
 
-
                 const adjusted = adjustOrderPayments(order);
                 if (adjusted) {
                     adjusted.deliveryNotice = activeDeliveryNotice || null;
                     adjusted.partyActiveNotice = activeDeliveryNotice || null;
                     adjusted.previousUnpaidDue = prevUnpaidDue;
-                    adjusted.userCreditline = userCreditline;
+                    adjusted.userCreditline = availableCredit;
+                    adjusted.availableCredit = availableCredit;
+                    adjusted.availableDue = availableCredit;
+                    adjusted.creditLimit = baseCreditLimit;
+                    adjusted.baseCreditLimit = baseCreditLimit;
+                    adjusted.usedCredit = totalCustomerDue;
+                    adjusted.totalCustomerDue = totalCustomerDue;
                     adjusted.userAdvanceJama = userAdvanceJama;
                     adjusted.userBalanceType = userBalanceType;
                     if (adjusted.user) {
                         adjusted.user.deliveryNotice = activeDeliveryNotice || null;
                         adjusted.user.previousUnpaidDue = prevUnpaidDue;
-                        adjusted.user.creditline = userCreditline;
+                        adjusted.user.creditline = availableCredit;
+                        adjusted.user.availableCredit = availableCredit;
+                        adjusted.user.availableDue = availableCredit;
+                        adjusted.user.creditLimit = baseCreditLimit;
+                        adjusted.user.baseCreditLimit = baseCreditLimit;
+                        adjusted.user.usedCredit = totalCustomerDue;
+                        adjusted.user.totalDue = totalCustomerDue;
+                        adjusted.user.totalUnpaidDue = totalCustomerDue;
+                        adjusted.user.totalCustomerDue = totalCustomerDue;
                         adjusted.user.advanceJama = userAdvanceJama;
                         adjusted.user.balanceType = userBalanceType;
                     }
@@ -1812,13 +1846,14 @@ export const verifyAndSettleOrder = async (req, res) => {
         const parsedJama = Math.max(0, totalPaidCashOnline - netRequiredBill);
         const parsedBaki = parsedCredit;
 
-        // If excess payment was collected, credit it to user's Jama balance (creditline)
+        // If excess payment was collected, credit it to user's Advance Jama balance
         if (parsedJama > 0 && order.userId) {
             const user = await User.findByPk(order.userId, { transaction });
             if (user) {
-                const prevCredit = parseFloat(user.creditline || 0);
-                user.creditline = prevCredit + parsedJama;
-                const newCredit = user.creditline;
+                const prevJama = parseFloat(user.advanceJama || 0);
+                user.advanceJama = prevJama + parsedJama;
+                user.balanceType = 'JAMA';
+                const newJama = user.advanceJama;
                 await user.save({ transaction });
 
                 await PartyBalanceLog.create({
@@ -1826,9 +1861,9 @@ export const verifyAndSettleOrder = async (req, res) => {
                     orderId: order.id,
                     type: 'JAMA',
                     amount: parsedJama,
-                    previousBalance: prevCredit,
-                    newBalance: newCredit,
-                    note: `Overpayment on Order #${order.orderId || order.id}: +₹${parsedJama.toFixed(2)} added to Jama Balance (Admin Settlement)`,
+                    previousBalance: prevJama,
+                    newBalance: newJama,
+                    note: `Overpayment on Order #${order.orderId || order.id}: +₹${parsedJama.toFixed(2)} added to Advance Jama Balance (Admin Settlement)`,
                     createdByName: req.admin?.name || req.user?.name || 'Admin Settlement'
                 }, { transaction });
             }
@@ -2211,6 +2246,38 @@ export const getOrderDetails = async (req, res) => {
         }
 
         const adjustedOrder = adjustOrderPayments(order);
+        if (adjustedOrder && adjustedOrder.user) {
+            const uId = adjustedOrder.userId || adjustedOrder.user?.id;
+            let totalCustomerDue = 0;
+            if (uId) {
+                const uOrders = await Order.findAll({
+                    where: {
+                        userId: uId,
+                        dueAmount: { [Op.gt]: 0 },
+                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                    },
+                    attributes: ['id', 'dueAmount']
+                });
+                totalCustomerDue = uOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+            }
+            const baseCreditLimit = parseFloat(adjustedOrder.user.creditline || 0);
+            const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
+
+            adjustedOrder.user.creditLimit = baseCreditLimit.toFixed(2);
+            adjustedOrder.user.baseCreditLimit = baseCreditLimit.toFixed(2);
+            adjustedOrder.user.usedCredit = totalCustomerDue.toFixed(2);
+            adjustedOrder.user.totalDue = totalCustomerDue.toFixed(2);
+            adjustedOrder.user.totalUnpaidDue = totalCustomerDue.toFixed(2);
+            adjustedOrder.user.availableCredit = availableCredit.toFixed(2);
+            adjustedOrder.user.availableDue = availableCredit.toFixed(2);
+            adjustedOrder.user.creditline = availableCredit.toFixed(2);
+            adjustedOrder.userCreditline = availableCredit.toFixed(2);
+            adjustedOrder.availableCredit = availableCredit.toFixed(2);
+            adjustedOrder.availableDue = availableCredit.toFixed(2);
+            adjustedOrder.creditLimit = baseCreditLimit.toFixed(2);
+            adjustedOrder.baseCreditLimit = baseCreditLimit.toFixed(2);
+            adjustedOrder.usedCredit = totalCustomerDue.toFixed(2);
+        }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Order details fetched successfully.", adjustedOrder);
     } catch (error) {

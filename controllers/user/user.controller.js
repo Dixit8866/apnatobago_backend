@@ -413,13 +413,25 @@ export const getProfile = async (req, res) => {
         const totalDueAmount = await Order.sum('dueAmount', {
             where: {
                 userId: req.user.id,
-                orderStatus: { [Op.ne]: 'Cancelled' }
+                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
             }
         }) || 0;
 
-        // Nest totalDueAmount directly inside the user object (with both casings to avoid client mismatch)
-        userData.totalDueAmount = parseFloat(totalDueAmount);
-        userData.totaldueamount = parseFloat(totalDueAmount);
+        const baseCreditLimit = parseFloat(userData.creditline || 0);
+        const unpaidDue = parseFloat(totalDueAmount || 0);
+        const availableCredit = Math.max(0, baseCreditLimit - unpaidDue);
+
+        // Nest totalDueAmount and central credit fields directly inside the user object
+        userData.totalDueAmount = unpaidDue;
+        userData.totaldueamount = unpaidDue;
+        userData.totalDue = unpaidDue;
+        userData.totalUnpaidDue = unpaidDue;
+        userData.usedCredit = unpaidDue;
+        userData.creditLimit = baseCreditLimit;
+        userData.baseCreditLimit = baseCreditLimit;
+        userData.availableCredit = availableCredit;
+        userData.availableDue = availableCredit;
+        userData.creditline = availableCredit;
 
         // Populate CustomLevel (applevel)
         let rewardLevel = null;

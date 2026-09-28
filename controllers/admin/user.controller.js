@@ -564,7 +564,10 @@ export const getUserById = async (req, res, next) => {
         userData.creditLimit = parseFloat(baseCreditLimit.toFixed(2));
         userData.baseCreditLimit = parseFloat(baseCreditLimit.toFixed(2));
         userData.totalUnpaidDue = parseFloat(totalUnpaidDue.toFixed(2));
+        userData.usedCredit = parseFloat(totalUnpaidDue.toFixed(2));
+        userData.totalDue = parseFloat(totalUnpaidDue.toFixed(2));
         userData.availableCredit = parseFloat(availableCredit.toFixed(2));
+        userData.availableDue = parseFloat(availableCredit.toFixed(2));
         userData.creditline = parseFloat(baseCreditLimit.toFixed(2));
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', userData);
