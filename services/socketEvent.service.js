@@ -324,3 +324,18 @@ export const broadcastOrderDelivered = async ({ order, deliveryBoyId, oldStatus 
     }
 };
 
+/**
+ * Broadcast user update to admin panels
+ */
+export const broadcastUserUpdated = (user) => {
+    const io = safeGetIO();
+    if (!io || !user) return;
+    try {
+        const plainUser = typeof user.toJSON === 'function' ? user.toJSON() : { ...user };
+        io.emit('user:updated', plainUser);
+        logger.info(`[Socket Broadcast] user:updated emitted for User ID: ${plainUser.id}`);
+    } catch (err) {
+        logger.error(`[Socket Broadcast Error] broadcastUserUpdated: ${err.message}`);
+    }
+};
+

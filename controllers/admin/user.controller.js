@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
 import User from '../../models/user/User.js';
 import CustomLevel from '../../models/superadmin-models/CustomLevel.js';
-import { Order, OrderItem, Product, BusinessProfile, RouteCategory, RouteSection, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown } from '../../models/index.js';
+import { Order, OrderItem, Product, BusinessProfile, RouteCategory, RouteSection, AppSettings, Cart, Wishlist, PartyCalling, HelpSupport, SalesReturn, Godown, PartyBalanceLog } from '../../models/index.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -557,13 +557,55 @@ export const getUserById = async (req, res, next) => {
         });
 
         const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
-        const creditLimit = parseFloat(user.creditline || 0);
-        const availableCredit = Math.max(0, creditLimit - totalUnpaidDue);
+        let creditLimit = parseFloat(user.creditline || 0);
+
+        // Check which unpaid orders were already deducted from user.creditline in PartyBalanceLog
+        const orderIds = unpaidOrders.map(o => o.id);
+        const loggedDues = orderIds.length > 0 ? await PartyBalanceLog.findAll({
+            where: {
+                userId: user.id,
+                orderId: { [Op.in]: orderIds },
+                type: 'DUE'
+            },
+            attributes: ['orderId', 'amount']
+        }) : [];
+
+        const loggedOrderIds = new Set(loggedDues.map(l => l.orderId));
+        const unloggedOrders = unpaidOrders.filter(o => !loggedOrderIds.has(o.id));
+        const unloggedDue = unloggedOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+
+        let availableCredit = Math.max(0, creditLimit - unloggedDue);
+        let baseCreditLimit = creditLimit + (totalUnpaidDue - unloggedDue);
+        if (baseCreditLimit < creditLimit) baseCreditLimit = creditLimit;
+
+        // Auto-sync user.creditline in DB and PartyBalanceLog if legacy order dues were unlogged
+        if (unloggedDue > 0) {
+            user.creditline = availableCredit;
+            if (availableCredit <= 0) {
+                user.blockcredit = true;
+            }
+            await user.save();
+
+            for (const unloggedOrder of unloggedOrders) {
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: unloggedOrder.id,
+                    type: 'DUE',
+                    amount: parseFloat(unloggedOrder.dueAmount || 0),
+                    previousBalance: creditLimit,
+                    newBalance: availableCredit,
+                    note: `Sync Credit (Baki) on Order: ₹${parseFloat(unloggedOrder.dueAmount || 0).toFixed(2)}. Remaining Credit: ₹${availableCredit.toFixed(2)}`,
+                    createdByName: 'System Due Sync'
+                });
+            }
+        }
 
         const userData = user.toJSON ? user.toJSON() : user;
-        userData.creditLimit = creditLimit;
+        userData.creditLimit = parseFloat(baseCreditLimit.toFixed(2));
         userData.totalUnpaidDue = parseFloat(totalUnpaidDue.toFixed(2));
         userData.availableCredit = parseFloat(availableCredit.toFixed(2));
+        // Return available credit as creditline so that the profile input box displays the available credit (e.g. 10000 - 4000 = 6000)
+        userData.creditline = parseFloat(availableCredit.toFixed(2));
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', userData);
     } catch (error) {

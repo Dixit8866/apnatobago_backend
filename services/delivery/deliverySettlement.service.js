@@ -11,7 +11,7 @@ import {
 } from '../../models/index.js';
 import logger from '../../logger/apiLogger.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
-import { broadcastOrderStatusChanged } from '../socketEvent.service.js';
+import { broadcastOrderStatusChanged, broadcastUserUpdated } from '../socketEvent.service.js';
 import { syncPartyDeliveryNotice } from '../financialSettlement.service.js';
 import { sendDeliveredNotification } from './deliveryOrder.service.js';
 
@@ -426,10 +426,21 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             }
 
             if (user) {
-                const remainingAvail = Math.max(0, availableCredit - inputCredit);
-                if (remainingAvail <= 0) {
+                const prevCredit = parseFloat(user.creditline || 0);
+                user.creditline = Math.max(0, prevCredit - inputCredit);
+                if (user.creditline <= 0) {
                     user.blockcredit = true;
                 }
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: assignment.order.id,
+                    type: 'DUE',
+                    amount: inputCredit,
+                    previousBalance: prevCredit,
+                    newBalance: user.creditline,
+                    note: `Credit (Baki) on Order #${assignment.order?.orderId || assignment.order.id}: ₹${inputCredit.toFixed(2)}. Remaining Credit: ₹${user.creditline.toFixed(2)}`,
+                    createdByName: 'Delivery Settlement'
+                }, { transaction: t });
             }
         } else {
             await OrderPayment.destroy({
@@ -550,6 +561,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                     godownId: deliveredOrder.godownId,
                     deliveryBoyId
                 });
+            }
+            if (user) {
+                broadcastUserUpdated(user);
             }
         } catch (sErr) {
             logger.error(`[Socket Broadcast Error in completeOrderAndSettlePaymentService]: ${sErr.message}`);

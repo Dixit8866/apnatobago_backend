@@ -11,7 +11,7 @@ import { roundTotal } from '../../utils/roundHelper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
 import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
-import { broadcastOrderStatusChanged, broadcastOrderDelivered } from '../../services/socketEvent.service.js';
+import { broadcastOrderStatusChanged, broadcastOrderDelivered, broadcastUserUpdated } from '../../services/socketEvent.service.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -1834,6 +1834,30 @@ export const verifyAndSettleOrder = async (req, res) => {
             }
         }
 
+        // If unpaid credit (baki) was kept, deduct it from user's creditline
+        if (parsedCredit > 0 && order.userId) {
+            const user = await User.findByPk(order.userId, { transaction });
+            if (user) {
+                const prevCredit = parseFloat(user.creditline || 0);
+                user.creditline = Math.max(0, prevCredit - parsedCredit);
+                if (user.creditline <= 0) {
+                    user.blockcredit = true;
+                }
+                await user.save({ transaction });
+
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    type: 'DUE',
+                    amount: parsedCredit,
+                    previousBalance: prevCredit,
+                    newBalance: user.creditline,
+                    note: `Credit (Baki) on Order #${order.orderId || order.id}: ₹${parsedCredit.toFixed(2)}. Remaining Credit: ₹${user.creditline.toFixed(2)}`,
+                    createdByName: req.admin?.name || req.user?.name || 'Admin Settlement'
+                }, { transaction });
+            }
+        }
+
         const timestamp = new Date().toLocaleString();
         let noteStr = `[Verified & Settled on ${timestamp}] Cash: ₹${parsedCash}, Online: ₹${parsedOnline}${orderCouponDisc > 0 ? `, Coupon: ₹${orderCouponDisc}` : ''}, Credit: ₹${parsedCredit}`;
         if (totalReturnDeduction > 0) {
@@ -1941,6 +1965,9 @@ export const verifyAndSettleOrder = async (req, res) => {
             syncPartyDeliveryNotice(order.userId).catch(err => {
                 logger.warn(`[Sync Delivery Notice Error during Admin Settlement]: ${err.message}`);
             });
+            User.findByPk(order.userId).then(u => {
+                if (u) broadcastUserUpdated(u);
+            }).catch(() => {});
         }
 
         try {
