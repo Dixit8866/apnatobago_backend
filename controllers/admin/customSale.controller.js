@@ -447,12 +447,20 @@ export const createCustomSale = async (req, res) => {
                     : dueAmount;
 
                 if (creditUsed > 0) {
-                    const prevCred = parseFloat(user.creditline || 0);
-                    user.creditline = Math.max(0, prevCred - creditUsed);
-                    if (user.creditline <= 0) {
-                        user.blockcredit = true;
-                    }
-                    await user.save({ transaction: t });
+                    const unpaidOrders = await Order.findAll({
+                        where: {
+                            userId: user.id,
+                            dueAmount: { [Op.gt]: 0 },
+                            id: { [Op.ne]: newSale.id },
+                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                        },
+                        attributes: ['dueAmount'],
+                        transaction: t
+                    });
+                    const prevDues = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+                    const baseCredit = parseFloat(user.creditline || 0);
+                    const prevAvail = Math.max(0, baseCredit - prevDues);
+                    const newAvail = Math.max(0, prevAvail - creditUsed);
 
                     const PartyBalanceLog = User.sequelize.models.PartyBalanceLog;
                     if (PartyBalanceLog) {
@@ -461,9 +469,9 @@ export const createCustomSale = async (req, res) => {
                             orderId: newSale.id,
                             type: 'DUE',
                             amount: creditUsed,
-                            previousBalance: prevCred,
-                            newBalance: user.creditline,
-                            note: `Custom Sale #${newSale.orderId} placed on Credit: -₹${creditUsed.toFixed(2)}. Available Credit: ₹${user.creditline.toFixed(2)}`,
+                            previousBalance: prevAvail,
+                            newBalance: newAvail,
+                            note: `Custom Sale #${newSale.orderId} placed on Credit: -₹${creditUsed.toFixed(2)}. Remaining Available Credit: ₹${newAvail.toFixed(2)}`,
                             createdByName: req.user?.fullname || 'Admin'
                         }, { transaction: t });
                     }

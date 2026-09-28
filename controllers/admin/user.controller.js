@@ -557,54 +557,15 @@ export const getUserById = async (req, res, next) => {
         });
 
         const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
-        let creditLimit = parseFloat(user.creditline || 0);
-
-        // Check which unpaid orders were already deducted from user.creditline in PartyBalanceLog
-        const orderIds = unpaidOrders.map(o => o.id);
-        const loggedDues = orderIds.length > 0 ? await PartyBalanceLog.findAll({
-            where: {
-                userId: user.id,
-                orderId: { [Op.in]: orderIds },
-                type: 'DUE'
-            },
-            attributes: ['orderId', 'amount']
-        }) : [];
-
-        const loggedOrderIds = new Set(loggedDues.map(l => l.orderId));
-        const unloggedOrders = unpaidOrders.filter(o => !loggedOrderIds.has(o.id));
-        const unloggedDue = unloggedOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
-
-        let availableCredit = Math.max(0, creditLimit - unloggedDue);
-        let baseCreditLimit = creditLimit + (totalUnpaidDue - unloggedDue);
-        if (baseCreditLimit < creditLimit) baseCreditLimit = creditLimit;
-
-        // Auto-sync user.creditline in DB and PartyBalanceLog if legacy order dues were unlogged
-        if (unloggedDue > 0) {
-            user.creditline = availableCredit;
-            if (availableCredit <= 0) {
-                user.blockcredit = true;
-            }
-            await user.save();
-
-            for (const unloggedOrder of unloggedOrders) {
-                await PartyBalanceLog.create({
-                    userId: user.id,
-                    orderId: unloggedOrder.id,
-                    type: 'DUE',
-                    amount: parseFloat(unloggedOrder.dueAmount || 0),
-                    previousBalance: creditLimit,
-                    newBalance: availableCredit,
-                    note: `Sync Credit (Baki) on Order: ₹${parseFloat(unloggedOrder.dueAmount || 0).toFixed(2)}. Remaining Credit: ₹${availableCredit.toFixed(2)}`,
-                    createdByName: 'System Due Sync'
-                });
-            }
-        }
+        const baseCreditLimit = parseFloat(user.creditline || 0);
+        const availableCredit = Math.max(0, baseCreditLimit - totalUnpaidDue);
 
         const userData = user.toJSON ? user.toJSON() : user;
         userData.creditLimit = parseFloat(baseCreditLimit.toFixed(2));
+        userData.baseCreditLimit = parseFloat(baseCreditLimit.toFixed(2));
         userData.totalUnpaidDue = parseFloat(totalUnpaidDue.toFixed(2));
         userData.availableCredit = parseFloat(availableCredit.toFixed(2));
-        // Return available credit as creditline so that the profile input box displays the available credit (e.g. 10000 - 4000 = 6000)
+        // Return available credit as creditline so that the profile input box displays the available credit (e.g. 5000 - 300 = 4700)
         userData.creditline = parseFloat(availableCredit.toFixed(2));
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', userData);
@@ -663,6 +624,22 @@ export const updateUser = async (req, res, next) => {
             }
         }
 
+        let targetCreditline = user.creditline;
+        if (creditline !== undefined) {
+            const unpaidOrders = await Order.findAll({
+                where: {
+                    userId: user.id,
+                    dueAmount: { [Op.gt]: 0 },
+                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                },
+                attributes: ['dueAmount']
+            });
+            const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+            const inputAvailableCredit = parseFloat(creditline) || 0;
+            // Base credit limit = Input Available Credit + Active Unpaid Due
+            targetCreditline = Math.max(0, inputAvailableCredit + totalUnpaidDue);
+        }
+
         const updateData = {
             fullname: fullname ?? user.fullname,
             email: email ?? user.email,
@@ -671,8 +648,8 @@ export const updateUser = async (req, res, next) => {
             city: city ?? user.city,
             postcode: postcode ?? user.postcode,
             showtabacco: showtabacco !== undefined ? showtabacco : user.showtabacco,
-            creditline: creditline !== undefined ? creditline : user.creditline,
-            blockcredit: blockcredit !== undefined ? blockcredit : user.blockcredit,
+            creditline: targetCreditline,
+            blockcredit: blockcredit !== undefined ? blockcredit : ((targetCreditline > 0 && user.blockcredit) ? false : user.blockcredit),
             applevel: (applevel === '' || applevel === undefined) ? (applevel === '' ? null : user.applevel) : applevel,
             routeCategoryId: (routeCategoryId === '' || routeCategoryId === undefined || routeCategoryId === 'none') ? (routeCategoryId === '' || routeCategoryId === 'none' ? null : user.routeCategoryId) : routeCategoryId,
             routeSectionId: (routeSectionId === '' || routeSectionId === undefined || routeSectionId === 'none') ? (routeSectionId === '' || routeSectionId === 'none' ? null : user.routeSectionId) : routeSectionId,

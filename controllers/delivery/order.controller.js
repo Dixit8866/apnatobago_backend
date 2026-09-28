@@ -143,7 +143,7 @@ export const getUserCreditDetails = async (req, res) => {
             creditline: availableCredit,
             availableCredit,
             totalDue: parseFloat(totalUnpaidDue.toFixed(2)),
-            blockcredit: user.blockcredit || false
+            blockcredit: (user.blockcredit && availableCredit <= 0) ? true : false
         });
     } catch (error) {
         logger.error(`[Get User Credit Error]: ${error.message}`);

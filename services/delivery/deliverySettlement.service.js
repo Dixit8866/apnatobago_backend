@@ -56,12 +56,7 @@ export const restoreUserCreditFromPayment = async (orderId, paymentAmount, user,
                     await creditPayment.update({ amount: newAmount }, { transaction });
                 }
                 remainingRealPayment -= reduction;
-
-                user.creditline = parseFloat(user.creditline) + reduction;
-                if (parseFloat(user.creditline) > 0) {
-                    user.blockcredit = false;
-                }
-                logger.info(`[Restore Credit]: Cleared ${reduction} of credit payment ${creditPayment.id}. Restored to user creditline.`);
+                logger.info(`[Restore Credit]: Cleared ${reduction} of credit payment ${creditPayment.id}. Order due amount reduced.`);
             }
         }
     } catch (error) {
@@ -426,19 +421,16 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             }
 
             if (user) {
-                const prevCredit = parseFloat(user.creditline || 0);
-                user.creditline = Math.max(0, prevCredit - inputCredit);
-                if (user.creditline <= 0) {
-                    user.blockcredit = true;
-                }
+                const prevCredit = availableCredit;
+                const newAvailableCredit = Math.max(0, availableCredit - inputCredit);
                 await PartyBalanceLog.create({
                     userId: user.id,
                     orderId: assignment.order.id,
                     type: 'DUE',
                     amount: inputCredit,
                     previousBalance: prevCredit,
-                    newBalance: user.creditline,
-                    note: `Credit (Baki) on Order #${assignment.order?.orderId || assignment.order.id}: ₹${inputCredit.toFixed(2)}. Remaining Credit: ₹${user.creditline.toFixed(2)}`,
+                    newBalance: newAvailableCredit,
+                    note: `Credit (Baki) on Order #${assignment.order?.orderId || assignment.order.id}: ₹${inputCredit.toFixed(2)}. Remaining Available Credit: ₹${newAvailableCredit.toFixed(2)}`,
                     createdByName: 'Delivery Settlement'
                 }, { transaction: t });
             }
@@ -803,12 +795,6 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                     notes: 'Settle Single Payment (Credit - Baki)'
                 }, { transaction: t });
 
-                if (user) {
-                    user.creditline = Math.max(0, parseFloat(user.creditline || 0) - deduction);
-                    if (user.creditline <= 0) {
-                        user.blockcredit = true;
-                    }
-                }
             }
 
             let newPaymentStatus = 'Pending';

@@ -510,12 +510,7 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 const userBalanceType = data.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
                 const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
 
-                let totalPastDueAmount = 0;
-                if (unpaidOrdersSum > 0) {
-                    totalPastDueAmount = unpaidOrdersSum;
-                } else if (userBalanceType === 'DUE' && userCreditVal > 0) {
-                    totalPastDueAmount = userCreditVal;
-                }
+                let totalPastDueAmount = unpaidOrdersSum;
 
                 const currentPayments = paymentsMap[data.order?.id] || [];
                 const currentFin = calculateOrderFinancials(data.order, currentPayments);
@@ -853,12 +848,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     const userBalanceType = assignment.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
     const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
 
-    let totalPastDueAmount = 0;
-    if (unpaidOrdersSum > 0) {
-        totalPastDueAmount = unpaidOrdersSum;
-    } else if (userBalanceType === 'DUE' && userCreditVal > 0) {
-        totalPastDueAmount = userCreditVal;
-    }
+    let totalPastDueAmount = unpaidOrdersSum;
 
     const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
     const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
@@ -993,6 +983,13 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             orderId: { [Op.in]: orderIds },
             status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
         },
+        include: [
+            {
+                model: ProductVariant,
+                as: 'variant',
+                attributes: ['id', 'volume', 'baseUnitsPerPack', 'sellingVolume']
+            }
+        ],
         attributes: ['id', 'orderId', 'productId', 'variantId', 'volumeId', 'quantity', 'price', 'returnAmount', 'reason', 'status']
     }) : [];
 
@@ -1038,22 +1035,55 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             const vol = item.variant?.volumeRef?.name || item.variant?.volume || item.variantInfo?.volume || 'Unit';
             const volStr = typeof vol === 'object' ? (vol.en || Object.values(vol)[0] || 'Unit') : (vol || 'Unit');
 
-            const ordBaseUnits = Number(item.variant?.baseUnitsPerPack || 1);
-            const ordSellingVol = Number(item.variant?.sellingVolume || 1);
-            const ordPackUnits = (ordBaseUnits * ordSellingVol) > 0 ? (ordBaseUnits * ordSellingVol) : 1;
+            const itemPrice = parseFloat(item.price || 0);
             const originalOrderedQty = parseFloat(item.quantity || 0);
+            const itemTotalAmount = originalOrderedQty * itemPrice;
+
+            const ordBaseUnits = Number(item.variant?.baseUnitsPerPack || item.baseUnitsPerPack || 1);
+            const ordSellingVol = Number(item.variant?.sellingVolume || item.sellingVolume || 1);
+            const ordPackUnits = (ordBaseUnits * ordSellingVol) > 0 ? (ordBaseUnits * ordSellingVol) : 1;
             const totalOrderedBaseUnits = originalOrderedQty * ordPackUnits;
 
-            const itemReturns = ordReturns.filter(r => String(r.productId) === String(item.productId));
+            // Match returns: variant match first if both have variantId, else product match
+            const itemReturns = ordReturns.filter(r => {
+                if (r.variantId && item.variantId) {
+                    return String(r.productId) === String(item.productId) && String(r.variantId) === String(item.variantId);
+                }
+                return String(r.productId) === String(item.productId);
+            });
+
             let alreadyReturnedBaseUnits = 0;
+            let totalReturnAmountForItem = 0;
+
             for (const ret of itemReturns) {
+                const retQty = parseFloat(ret.quantity || 0);
+                const retPrice = parseFloat(ret.price || 0);
+                const retAmt = parseFloat(ret.returnAmount || (retQty * retPrice) || 0);
+                totalReturnAmountForItem += retAmt;
+
                 let rPackUnits = ordPackUnits;
-                if (ret.variantId && ret.variantId !== item.variantId && ret.variant) {
+                if (ret.variantId && item.variantId && String(ret.variantId) === String(item.variantId)) {
+                    if (itemPrice > 0 && retPrice > 0 && retPrice < (itemPrice * 0.9)) {
+                        // Fraction of item returned based on value (e.g. returning a 200 Rs pack from a 2000 Rs carton)
+                        rPackUnits = ordPackUnits * (retPrice / itemPrice);
+                    } else {
+                        rPackUnits = ordPackUnits;
+                    }
+                } else if (ret.variant) {
                     const rBUPP = Number(ret.variant.baseUnitsPerPack || 1);
                     const rSV = Number(ret.variant.sellingVolume || 1);
                     rPackUnits = (rBUPP * rSV) > 0 ? (rBUPP * rSV) : 1;
+                } else if (itemPrice > 0 && retAmt > 0 && retAmt < itemTotalAmount) {
+                    rPackUnits = ordPackUnits * (retAmt / itemTotalAmount);
                 }
-                alreadyReturnedBaseUnits += parseFloat(ret.quantity || 0) * rPackUnits;
+
+                alreadyReturnedBaseUnits += retQty * rPackUnits;
+            }
+
+            // Guard against accidental over-deduction if monetary return is less than total item value
+            if (itemTotalAmount > 0 && totalReturnAmountForItem < (itemTotalAmount - 0.5)) {
+                const maxReturnableBaseUnitsByValue = totalOrderedBaseUnits * (totalReturnAmountForItem / itemTotalAmount);
+                alreadyReturnedBaseUnits = Math.min(alreadyReturnedBaseUnits, maxReturnableBaseUnitsByValue);
             }
 
             const remainingBaseUnits = Math.max(0, totalOrderedBaseUnits - alreadyReturnedBaseUnits);

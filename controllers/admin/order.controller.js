@@ -1834,25 +1834,33 @@ export const verifyAndSettleOrder = async (req, res) => {
             }
         }
 
-        // If unpaid credit (baki) was kept, deduct it from user's creditline
+        // If unpaid credit (baki) was kept, record in balance log without mutating user.creditline base limit
         if (parsedCredit > 0 && order.userId) {
             const user = await User.findByPk(order.userId, { transaction });
             if (user) {
-                const prevCredit = parseFloat(user.creditline || 0);
-                user.creditline = Math.max(0, prevCredit - parsedCredit);
-                if (user.creditline <= 0) {
-                    user.blockcredit = true;
-                }
-                await user.save({ transaction });
+                const unpaidOrders = await Order.findAll({
+                    where: {
+                        userId: user.id,
+                        dueAmount: { [Op.gt]: 0 },
+                        id: { [Op.ne]: order.id },
+                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                    },
+                    attributes: ['dueAmount'],
+                    transaction
+                });
+                const prevDues = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+                const baseCredit = parseFloat(user.creditline || 0);
+                const prevAvail = Math.max(0, baseCredit - prevDues);
+                const newAvail = Math.max(0, prevAvail - parsedCredit);
 
                 await PartyBalanceLog.create({
                     userId: user.id,
                     orderId: order.id,
                     type: 'DUE',
                     amount: parsedCredit,
-                    previousBalance: prevCredit,
-                    newBalance: user.creditline,
-                    note: `Credit (Baki) on Order #${order.orderId || order.id}: ₹${parsedCredit.toFixed(2)}. Remaining Credit: ₹${user.creditline.toFixed(2)}`,
+                    previousBalance: prevAvail,
+                    newBalance: newAvail,
+                    note: `Credit (Baki) on Order #${order.orderId || order.id}: ₹${parsedCredit.toFixed(2)}. Remaining Available Credit: ₹${newAvail.toFixed(2)}`,
                     createdByName: req.admin?.name || req.user?.name || 'Admin Settlement'
                 }, { transaction });
             }

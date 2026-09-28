@@ -517,29 +517,34 @@ export const createOrder = async (req, res) => {
                 return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
             }
 
-            const currentCredit = parseFloat(user.creditline) || 0;
-            if (currentCredit < finalTotal) {
+            const unpaidOrders = await Order.findAll({
+                where: {
+                    userId: user.id,
+                    dueAmount: { [Op.gt]: 0 },
+                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                },
+                attributes: ['dueAmount'],
+                transaction: t
+            });
+            const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+            const baseCreditLimit = parseFloat(user.creditline || 0);
+            const availableCredit = Math.max(0, baseCreditLimit - totalUnpaidDue);
+
+            if ((user.blockcredit && availableCredit <= 0) || availableCredit < finalTotal) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ₹${currentCredit.toFixed(2)}, Required: ₹${finalTotal.toFixed(2)}`);
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient credit line. Available: ₹${availableCredit.toFixed(2)}, Required: ₹${finalTotal.toFixed(2)}`);
             }
 
-            // Deduct from customer's available credit line (e.g. 10000 - 600 = 9400)
-            user.creditline = Math.max(0, currentCredit - finalTotal);
-            if (user.creditline <= 0) {
-                user.blockcredit = true;
-            }
-            await user.save({ transaction: t });
-
-            // Record in Party Balance Log
+            // Record in Party Balance Log without mutating user.creditline base limit in DB
             const PartyBalanceLog = User.sequelize.models.PartyBalanceLog;
             if (PartyBalanceLog) {
                 await PartyBalanceLog.create({
                     userId: user.id,
                     type: 'DUE',
                     amount: finalTotal,
-                    previousBalance: currentCredit,
-                    newBalance: user.creditline,
-                    note: `Order placed on Credit: -₹${finalTotal.toFixed(2)}. Available Credit: ₹${user.creditline.toFixed(2)}`,
+                    previousBalance: availableCredit,
+                    newBalance: Math.max(0, availableCredit - finalTotal),
+                    note: `Order placed on Credit: -₹${finalTotal.toFixed(2)}. Available Credit: ₹${Math.max(0, availableCredit - finalTotal).toFixed(2)}`,
                     createdByName: 'Customer Order'
                 }, { transaction: t });
             }
