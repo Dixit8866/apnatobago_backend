@@ -565,8 +565,7 @@ export const getUserById = async (req, res, next) => {
         userData.baseCreditLimit = parseFloat(baseCreditLimit.toFixed(2));
         userData.totalUnpaidDue = parseFloat(totalUnpaidDue.toFixed(2));
         userData.availableCredit = parseFloat(availableCredit.toFixed(2));
-        // Return available credit as creditline so that the profile input box displays the available credit (e.g. 5000 - 300 = 4700)
-        userData.creditline = parseFloat(availableCredit.toFixed(2));
+        userData.creditline = parseFloat(baseCreditLimit.toFixed(2));
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', userData);
     } catch (error) {
@@ -626,18 +625,7 @@ export const updateUser = async (req, res, next) => {
 
         let targetCreditline = user.creditline;
         if (creditline !== undefined) {
-            const unpaidOrders = await Order.findAll({
-                where: {
-                    userId: user.id,
-                    dueAmount: { [Op.gt]: 0 },
-                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-                },
-                attributes: ['dueAmount']
-            });
-            const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
-            const inputAvailableCredit = parseFloat(creditline) || 0;
-            // Base credit limit = Input Available Credit + Active Unpaid Due
-            targetCreditline = Math.max(0, inputAvailableCredit + totalUnpaidDue);
+            targetCreditline = Math.max(0, parseFloat(creditline) || 0);
         }
 
         const updateData = {
