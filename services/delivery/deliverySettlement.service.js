@@ -215,6 +215,39 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             transaction: t
         });
         const availableCredit = creditFinancials.availableCredit;
+        const totalPastDue = creditFinancials.usedCredit || 0;
+
+        // Fetch past due order models for settling past due payments
+        let pastDueOrders = [];
+        if (userId) {
+            pastDueOrders = await Order.findAll({
+                where: {
+                    userId,
+                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel', 'Auto Cancelled', 'Rejected'] },
+                    id: { [Op.ne]: assignment.orderId }
+                },
+                include: [
+                    {
+                        model: OrderPayment,
+                        as: 'payments',
+                        required: false,
+                        attributes: ['id', 'amount', 'paymentMethod']
+                    }
+                ],
+                order: [['createdAt', 'ASC']],
+                transaction: t
+            });
+            // Filter to only delivered or credit orders that still have an unpaid due
+            pastDueOrders = pastDueOrders.filter(o => {
+                const isDeliveredOrSettled = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(o.orderStatus);
+                const payments = o.payments || [];
+                const hasCreditPayment = payments.some(p => String(p.paymentMethod || '').toUpperCase() === 'CREDIT' && parseFloat(p.amount || 0) > 0);
+                const hasPartial = parseFloat(o.paidAmount || 0) > 0 && parseFloat(o.dueAmount || 0) > 0;
+                if (!isDeliveredOrSettled && !hasCreditPayment && !hasPartial) return false;
+                const fin = calculateOrderFinancials(o, payments);
+                return fin.paymentStatus !== 'Paid' && parseFloat(fin.dueAmount) > 0.01;
+            });
+        }
 
         if (creditAmount > 0) {
             if (!user) {
