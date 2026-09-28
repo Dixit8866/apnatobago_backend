@@ -1266,7 +1266,9 @@ export const updateMyAssignmentStatusService = async ({ assignmentId, deliveryBo
         }
     } else if (status === 'Completed') {
         const order = await Order.findByPk(assignment.orderId);
+        let prevStatus = 'Shipping'; // Default fallback if order not found
         if (order) {
+            prevStatus = order.orderStatus; // Capture real status BEFORE updating to 'Delivered'
             await order.update({
                 orderStatus: 'Delivered',
                 deliveredAt: order.deliveredAt || new Date(),
@@ -1283,7 +1285,8 @@ export const updateMyAssignmentStatusService = async ({ assignmentId, deliveryBo
                 ]
             });
             if (deliveredOrder) {
-                broadcastOrderDelivered({ order: deliveredOrder, deliveryBoyId });
+                // Pass the real previous status (captured before DB update) for correct socket count decrement
+                broadcastOrderDelivered({ order: deliveredOrder, deliveryBoyId, oldStatus: prevStatus });
             }
         } catch (sErr) {
             logger.error(`[Socket Broadcast Error in updateMyAssignmentStatusService]: ${sErr.message}`);

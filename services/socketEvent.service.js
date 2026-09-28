@@ -293,7 +293,7 @@ export const broadcastOrderAssigned = async ({ order, assignment, deliveryBoyId,
 /**
  * 4. Broadcast Order Delivered & Payment Settled
  */
-export const broadcastOrderDelivered = async ({ order, deliveryBoyId }) => {
+export const broadcastOrderDelivered = async ({ order, deliveryBoyId, oldStatus }) => {
     const io = safeGetIO();
     if (!io) return;
 
@@ -303,7 +303,7 @@ export const broadcastOrderDelivered = async ({ order, deliveryBoyId }) => {
             type: 'ORDER_DELIVERED',
             orderId: payload.orderId,
             id: payload.id,
-            oldStatus: 'Shipping',
+            oldStatus: oldStatus || 'Shipping',   // Use real previous status, fallback to 'Shipping'
             newStatus: 'Delivered',
             deliveryBoyId,
             order: payload,
