@@ -572,7 +572,8 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 data.userCreditline = availableCredit.toFixed(2);
                 data.availableCredit = availableCredit.toFixed(2);
                 data.availableDue = availableCredit.toFixed(2);
-                data.creditLimit = baseCreditLimit.toFixed(2);
+                data.creditLimit = availableCredit.toFixed(2);
+                data.creditAmount = availableCredit.toFixed(2);
                 data.baseCreditLimit = baseCreditLimit.toFixed(2);
                 data.usedCredit = totalCustomerDue.toFixed(2);
                 data.totalDue = totalCustomerDue.toFixed(2);
@@ -602,6 +603,10 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     data.order.pendingDue = totalPastDueAmount.toFixed(2);
                     data.order.dueAmount = isDelivered ? calculatedDueAmt.toFixed(2) : totalPastDueAmount.toFixed(2);
                     data.order.salesReturnCalculation = data.salesReturnCalculation;
+                    data.order.creditLimit = availableCredit.toFixed(2);
+                    data.order.creditAmount = availableCredit.toFixed(2);
+                    data.order.availableCredit = availableCredit.toFixed(2);
+                    data.order.baseCreditLimit = baseCreditLimit.toFixed(2);
 
                     if (data.order.user) {
                         data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
@@ -609,7 +614,8 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                         data.order.user.creditline = availableCredit.toFixed(2);
                         data.order.user.availableCredit = availableCredit.toFixed(2);
                         data.order.user.availableDue = availableCredit.toFixed(2);
-                        data.order.user.creditLimit = baseCreditLimit.toFixed(2);
+                        data.order.user.creditLimit = availableCredit.toFixed(2);
+                        data.order.user.creditAmount = availableCredit.toFixed(2);
                         data.order.user.baseCreditLimit = baseCreditLimit.toFixed(2);
                         data.order.user.usedCredit = totalCustomerDue.toFixed(2);
                         data.order.user.totalDue = totalCustomerDue.toFixed(2);
@@ -931,7 +937,8 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     data.userCreditline = availableCredit.toFixed(2);
     data.availableCredit = availableCredit.toFixed(2);
     data.availableDue = availableCredit.toFixed(2);
-    data.creditLimit = baseCreditLimit.toFixed(2);
+    data.creditLimit = availableCredit.toFixed(2);
+    data.creditAmount = availableCredit.toFixed(2);
     data.baseCreditLimit = baseCreditLimit.toFixed(2);
     data.usedCredit = totalCustomerDue.toFixed(2);
     data.totalDue = totalCustomerDue.toFixed(2);
@@ -952,13 +959,18 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
         data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
         data.order.duePayment = totalPastDueAmount.toFixed(2);
         data.order.salesReturnCalculation = data.salesReturnCalculation;
+        data.order.creditLimit = availableCredit.toFixed(2);
+        data.order.creditAmount = availableCredit.toFixed(2);
+        data.order.availableCredit = availableCredit.toFixed(2);
+        data.order.baseCreditLimit = baseCreditLimit.toFixed(2);
     }
 
     if (data.order && data.order.user) {
         data.order.user.creditline = availableCredit.toFixed(2);
         data.order.user.availableCredit = availableCredit.toFixed(2);
         data.order.user.availableDue = availableCredit.toFixed(2);
-        data.order.user.creditLimit = baseCreditLimit.toFixed(2);
+        data.order.user.creditLimit = availableCredit.toFixed(2);
+        data.order.user.creditAmount = availableCredit.toFixed(2);
         data.order.user.baseCreditLimit = baseCreditLimit.toFixed(2);
         data.order.user.usedCredit = totalCustomerDue.toFixed(2);
         data.order.user.totalDue = totalCustomerDue.toFixed(2);
@@ -1240,13 +1252,32 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
 
     const latest5Bills = previousBills.slice(0, 5);
 
+    let previousBillsDue = 0;
+    if (Array.isArray(orders)) {
+        orders.forEach(uo => {
+            const fin = calculateOrderFinancials(uo, uo.payments);
+            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+            if (due > 0) previousBillsDue += due;
+        });
+    }
+    const userBaseCredit = parseFloat(user?.creditline || 0);
+    const userAvailableCredit = Math.max(0, userBaseCredit - previousBillsDue);
+
     return {
         user: {
             id: user?.id || userId,
             fullname: user?.fullname || 'Customer',
             shopName: user?.businessProfile?.shopName || '',
             number: user?.number || cleanPhone,
-            creditline: parseFloat(user?.creditline || 0)
+            creditline: parseFloat(userAvailableCredit.toFixed(2)),
+            creditLimit: parseFloat(userAvailableCredit.toFixed(2)),
+            creditAmount: parseFloat(userAvailableCredit.toFixed(2)),
+            availableCredit: parseFloat(userAvailableCredit.toFixed(2)),
+            availableDue: parseFloat(userAvailableCredit.toFixed(2)),
+            baseCreditLimit: parseFloat(userBaseCredit.toFixed(2)),
+            usedCredit: parseFloat(previousBillsDue.toFixed(2)),
+            totalDue: parseFloat(previousBillsDue.toFixed(2)),
+            totalUnpaidDue: parseFloat(previousBillsDue.toFixed(2))
         },
         totalBillsCount: latest5Bills.length,
         previousBills: latest5Bills
