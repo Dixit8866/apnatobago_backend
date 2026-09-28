@@ -212,17 +212,6 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             user = await User.findByPk(userId, { transaction: t });
         }
 
-        if (creditAmount > 0) {
-            if (!user) {
-                await t.rollback();
-                return { error: "Cannot use credit: User not associated with this order." };
-            }
-            if (parseFloat(user.creditline) < parseFloat(creditAmount)) {
-                await t.rollback();
-                return { error: `Insufficient credit. Available: ${user.creditline}, Attempted: ${creditAmount}` };
-            }
-        }
-
         // Fetch past due orders
         let pastDueOrders = [];
         if (userId) {
@@ -236,6 +225,21 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                 order: [['createdAt', 'ASC']],
                 transaction: t
             });
+        }
+
+        const totalPastDue = pastDueOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+        const creditLimit = parseFloat(user?.creditline || 0);
+        const availableCredit = Math.max(0, creditLimit - totalPastDue);
+
+        if (creditAmount > 0) {
+            if (!user) {
+                await t.rollback();
+                return { error: "Cannot use credit: User not associated with this order." };
+            }
+            if (availableCredit < parseFloat(creditAmount)) {
+                await t.rollback();
+                return { error: `Insufficient credit limit. Available: ₹${availableCredit.toFixed(2)}, Attempted: ₹${creditAmount}` };
+            }
         }
 
         const inputCash = parseFloat(cashAmount) || 0;
@@ -255,7 +259,6 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             inputReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
         }
 
-        const totalPastDue = pastDueOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
         const currentBillTotal = parseFloat(assignment.order.totalAmount || 0);
         const netBill = Math.max(0, currentBillTotal - finalCouponDisc);
 
@@ -423,8 +426,8 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             }
 
             if (user) {
-                user.creditline = Math.max(0, parseFloat(user.creditline || 0) - inputCredit);
-                if (user.creditline <= 0) {
+                const remainingAvail = Math.max(0, availableCredit - inputCredit);
+                if (remainingAvail <= 0) {
                     user.blockcredit = true;
                 }
             }
@@ -630,9 +633,22 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                 await t.rollback();
                 return { notFound: "User not found." };
             }
-            if (parseFloat(user.creditline) < parseFloat(creditAmount)) {
+            const userOrders = await Order.findAll({
+                where: {
+                    userId,
+                    dueAmount: { [Op.gt]: 0 },
+                    orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                },
+                attributes: ['dueAmount'],
+                transaction: t
+            });
+            const totalDue = userOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+            const userCreditLimit = parseFloat(user.creditline || 0);
+            const userAvailableCredit = Math.max(0, userCreditLimit - totalDue);
+
+            if (userAvailableCredit < parseFloat(creditAmount)) {
                 await t.rollback();
-                return { badRequest: `Insufficient credit. Available: ${user.creditline}, Attempted: ${creditAmount}` };
+                return { badRequest: `Insufficient credit limit. Available: ₹${userAvailableCredit.toFixed(2)}, Attempted: ₹${creditAmount}` };
             }
         } else if (userId) {
             user = await User.findByPk(userId, { transaction: t });

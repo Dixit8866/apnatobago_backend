@@ -545,7 +545,27 @@ export const getUserById = async (req, res, next) => {
             ]
         });
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
-        return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', user);
+
+        // Live centralized calculation of customer's unpaid due and available credit
+        const unpaidOrders = await Order.findAll({
+            where: {
+                userId: user.id,
+                dueAmount: { [Op.gt]: 0 },
+                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+            },
+            attributes: ['id', 'dueAmount']
+        });
+
+        const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+        const creditLimit = parseFloat(user.creditline || 0);
+        const availableCredit = Math.max(0, creditLimit - totalUnpaidDue);
+
+        const userData = user.toJSON ? user.toJSON() : user;
+        userData.creditLimit = creditLimit;
+        userData.totalUnpaidDue = parseFloat(totalUnpaidDue.toFixed(2));
+        userData.availableCredit = parseFloat(availableCredit.toFixed(2));
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', userData);
     } catch (error) {
         next(error);
     }

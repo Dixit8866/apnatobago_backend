@@ -125,9 +125,24 @@ export const getUserCreditDetails = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found.");
         }
 
+        const unpaidOrders = await Order.findAll({
+            where: {
+                userId: user.id,
+                dueAmount: { [Op.gt]: 0 },
+                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+            },
+            attributes: ['id', 'dueAmount']
+        });
+        const totalUnpaidDue = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+        const creditLimit = parseFloat(user.creditline || 0);
+        const availableCredit = Math.max(0, creditLimit - totalUnpaidDue);
+
         return sendSuccessResponse(res, HTTP_STATUS.OK, "User credit details fetched.", {
             id: user.id,
-            creditline: parseFloat(user.creditline || 0),
+            creditLimit,
+            creditline: availableCredit,
+            availableCredit,
+            totalDue: parseFloat(totalUnpaidDue.toFixed(2)),
             blockcredit: user.blockcredit || false
         });
     } catch (error) {
