@@ -987,6 +987,21 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
         order: [['createdAt', 'DESC']]
     });
 
+    const orderIds = orders.map(o => o.id);
+    const existingReturns = orderIds.length > 0 ? await SalesReturn.findAll({
+        where: {
+            orderId: { [Op.in]: orderIds },
+            status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
+        },
+        attributes: ['id', 'orderId', 'productId', 'variantId', 'volumeId', 'quantity', 'price', 'returnAmount', 'reason', 'status']
+    }) : [];
+
+    const returnsByOrder = {};
+    existingReturns.forEach(ret => {
+        if (!returnsByOrder[ret.orderId]) returnsByOrder[ret.orderId] = [];
+        returnsByOrder[ret.orderId].push(ret);
+    });
+
     const previousBills = [];
 
     for (const ord of orders) {
@@ -1013,6 +1028,8 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             await enrichItemsWithProductVolumes(ordData.items);
         }
 
+        const ordReturns = returnsByOrder[ordData.id] || [];
+
         const formattedItems = (ordData.items || []).map(item => {
             let pName = item.product?.name;
             if (typeof pName === 'object' && pName !== null) {
@@ -1020,6 +1037,28 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             }
             const vol = item.variant?.volumeRef?.name || item.variant?.volume || item.variantInfo?.volume || 'Unit';
             const volStr = typeof vol === 'object' ? (vol.en || Object.values(vol)[0] || 'Unit') : (vol || 'Unit');
+
+            const ordBaseUnits = Number(item.variant?.baseUnitsPerPack || 1);
+            const ordSellingVol = Number(item.variant?.sellingVolume || 1);
+            const ordPackUnits = (ordBaseUnits * ordSellingVol) > 0 ? (ordBaseUnits * ordSellingVol) : 1;
+            const originalOrderedQty = parseFloat(item.quantity || 0);
+            const totalOrderedBaseUnits = originalOrderedQty * ordPackUnits;
+
+            const itemReturns = ordReturns.filter(r => String(r.productId) === String(item.productId));
+            let alreadyReturnedBaseUnits = 0;
+            for (const ret of itemReturns) {
+                let rPackUnits = ordPackUnits;
+                if (ret.variantId && ret.variantId !== item.variantId && ret.variant) {
+                    const rBUPP = Number(ret.variant.baseUnitsPerPack || 1);
+                    const rSV = Number(ret.variant.sellingVolume || 1);
+                    rPackUnits = (rBUPP * rSV) > 0 ? (rBUPP * rSV) : 1;
+                }
+                alreadyReturnedBaseUnits += parseFloat(ret.quantity || 0) * rPackUnits;
+            }
+
+            const remainingBaseUnits = Math.max(0, totalOrderedBaseUnits - alreadyReturnedBaseUnits);
+            const remainingQty = parseFloat((remainingBaseUnits / ordPackUnits).toFixed(2));
+            const returnedQty = parseFloat((alreadyReturnedBaseUnits / ordPackUnits).toFixed(2));
 
             return {
                 id: item.id,
@@ -1031,7 +1070,11 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
                 product: item.product,
                 variant: item.variant,
                 variantInfo: item.variantInfo,
-                quantity: item.quantity,
+                quantity: remainingQty,
+                orderedQuantity: originalOrderedQty,
+                returnedQuantity: returnedQty,
+                returnableQuantity: remainingQty,
+                canReturn: remainingQty > 0,
                 price: item.price,
                 sellUnit: item.sellUnit || 'Box',
                 volume: volStr,
@@ -1040,7 +1083,7 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
                 packUnits: item.packUnits || 1,
                 singleUnitPrice: item.singleUnitPrice || parseFloat(item.price || 0),
                 unitPrice: item.unitPrice || item.singleUnitPrice || parseFloat(item.price || 0),
-                totalUnits: item.totalUnits || item.quantity,
+                totalUnits: remainingQty,
                 productVolumes: item.productVolumes || [],
                 image: item.product?.thumbnail || '',
                 thumbnail: item.product?.thumbnail || '',
@@ -1049,6 +1092,9 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
                 couponPrice: item.couponPrice || '0.00'
             };
         });
+
+        // Filter items that still have remaining returnable quantity > 0
+        const returnableItems = formattedItems.filter(item => item.quantity > 0);
 
         previousBills.push({
             id: ordData.id,
@@ -1066,7 +1112,10 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
             dueAmount: displayDue,
             createdAt: ordData.createdAt,
             deliveredAt: ordData.deliveredAt || ordData.createdAt,
-            items: formattedItems
+            items: returnableItems,
+            hasReturnableItems: returnableItems.length > 0,
+            isFullyReturned: (ordData.items && ordData.items.length > 0 && returnableItems.length === 0),
+            allOrderedItems: formattedItems
         });
     }
 

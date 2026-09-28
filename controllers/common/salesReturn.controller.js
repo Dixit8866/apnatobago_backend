@@ -172,9 +172,38 @@ export const createSalesReturn = async (req, res) => {
             const returnQty = parseFloat(quantity);
             const totalReturnUnits = returnQty * retPackUnits;
 
-            if (totalReturnUnits > (totalOrderedUnits + 0.001)) {
+            // Fetch previous returns for this order and product
+            const existingReturns = await SalesReturn.findAll({
+                where: {
+                    orderId: order.id,
+                    productId,
+                    status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
+                },
+                transaction: t
+            });
+
+            let alreadyReturnedBaseUnits = 0;
+            for (const r of existingReturns) {
+                let rVariant = (r.variantId && r.variantId === variant.id)
+                    ? variant
+                    : (r.variantId ? await ProductVariant.findByPk(r.variantId, { transaction: t }) : null);
+                const rBUPP = Number(rVariant?.baseUnitsPerPack || 1);
+                const rSV = Number(rVariant?.sellingVolume || 1);
+                const rUnits = (rBUPP * rSV) > 0 ? (rBUPP * rSV) : 1;
+                alreadyReturnedBaseUnits += parseFloat(r.quantity || 0) * rUnits;
+            }
+
+            const remainingReturnableUnits = Math.max(0, totalOrderedUnits - alreadyReturnedBaseUnits);
+
+            if (remainingReturnableUnits <= 0.001) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Returned quantity (${returnQty}) exceeds ordered quantity (${orderItem.quantity}) for Product ID ${productId}.`);
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `All units of this product have already been returned for Order #${order.orderId || order.id}.`);
+            }
+
+            if (totalReturnUnits > (remainingReturnableUnits + 0.001)) {
+                await t.rollback();
+                const maxAllowedReturn = parseFloat((remainingReturnableUnits / retPackUnits).toFixed(2));
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Returned quantity (${returnQty}) exceeds remaining returnable quantity (${maxAllowedReturn}) for Order #${order.orderId || order.id}.`);
             }
 
             // D. Calculate Return Amount for this item
@@ -653,7 +682,44 @@ export const getPartyOrdersForReturn = async (req, res) => {
             limit: 50
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Party orders fetched for sales return.", orders);
+        const orderIds = orders.map(o => o.id);
+        const existingReturns = orderIds.length > 0 ? await SalesReturn.findAll({
+            where: {
+                orderId: { [Op.in]: orderIds },
+                status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
+            },
+            attributes: ['id', 'orderId', 'productId', 'variantId', 'quantity']
+        }) : [];
+
+        const returnsByOrder = {};
+        existingReturns.forEach(ret => {
+            if (!returnsByOrder[ret.orderId]) returnsByOrder[ret.orderId] = [];
+            returnsByOrder[ret.orderId].push(ret);
+        });
+
+        // Deduct returned quantities from items so admin only sees remaining returnable qty
+        const formattedOrders = orders.map(ord => {
+            const ordJson = ord.toJSON ? ord.toJSON() : ord;
+            const ordReturns = returnsByOrder[ordJson.id] || [];
+            if (ordJson.items && ordJson.items.length > 0) {
+                ordJson.items = ordJson.items.map(item => {
+                    const itemReturns = ordReturns.filter(r => String(r.productId) === String(item.productId));
+                    let returnedQty = 0;
+                    itemReturns.forEach(r => { returnedQty += parseFloat(r.quantity || 0); });
+                    const originalQty = parseFloat(item.quantity || 0);
+                    const remainingQty = Math.max(0, originalQty - returnedQty);
+                    return {
+                        ...item,
+                        quantity: remainingQty,
+                        originalQuantity: originalQty,
+                        returnedQuantity: returnedQty
+                    };
+                }).filter(item => item.quantity > 0);
+            }
+            return ordJson;
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Party orders fetched for sales return.", formattedOrders);
     } catch (error) {
         logger.error(`[Get Party Orders For Return Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
@@ -735,9 +801,32 @@ export const createAdminSalesReturn = async (req, res) => {
             }
 
             const orderedQty = parseFloat(orderItem.quantity);
-            if (returnQty > orderedQty) {
+
+            // Fetch previous returns for this order & product
+            const existingAdminReturns = await SalesReturn.findAll({
+                where: {
+                    orderId: order.id,
+                    productId,
+                    status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
+                },
+                transaction: t
+            });
+
+            let alreadyReturnedQty = 0;
+            for (const r of existingAdminReturns) {
+                alreadyReturnedQty += parseFloat(r.quantity || 0);
+            }
+
+            const remainingAllowedQty = Math.max(0, orderedQty - alreadyReturnedQty);
+
+            if (remainingAllowedQty <= 0) {
                 await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Return quantity (${returnQty}) exceeds ordered quantity (${orderedQty}).`);
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `All units of this item have already been returned for Order #${order.orderId}.`);
+            }
+
+            if (returnQty > remainingAllowedQty) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Return quantity (${returnQty}) exceeds remaining returnable quantity (${remainingAllowedQty}) for Order #${order.orderId}.`);
             }
 
             const returnAmt = returnQty * itemPrice;

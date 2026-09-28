@@ -295,8 +295,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                     const rPrice = parseFloat(rItem.price || 0);
                     const rQty = Number(rItem.quantity);
                     const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
+                    const targetOrderId = rItem.orderId || assignment.order.id;
                     await SalesReturn.create({
-                        orderId: assignment.order.id,
+                        orderId: targetOrderId,
                         userId: assignment.order.userId,
                         deliveryBoyId,
                         productId: rItem.productId,
@@ -698,8 +699,9 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                             const rPrice = parseFloat(rItem.price || 0);
                             const rQty = Number(rItem.quantity);
                             const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
+                            const targetOrderId = rItem.orderId || order.id;
                             await SalesReturn.create({
-                                orderId: order.id,
+                                orderId: targetOrderId,
                                 userId: order.userId,
                                 deliveryBoyId,
                                 productId: rItem.productId,
