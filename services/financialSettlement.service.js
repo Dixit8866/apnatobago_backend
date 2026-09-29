@@ -343,7 +343,7 @@ export const getCustomerCreditFinancials = async ({
         let customerUser = user;
         if (!customerUser && userId) {
             customerUser = await User.findByPk(userId, {
-                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit'],
                 transaction
             });
         }
@@ -355,7 +355,7 @@ export const getCustomerCreditFinancials = async ({
         if (!customerUser && cleanPhone && cleanPhone.length >= 7) {
             customerUser = await User.findOne({
                 where: { number: { [Op.like]: `%${cleanPhone}` } },
-                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit'],
                 transaction
             });
         }
@@ -363,6 +363,7 @@ export const getCustomerCreditFinancials = async ({
         const effectiveUserId = customerUser?.id || userId;
         const baseCreditLimit = parseFloat(customerUser?.creditline || 0);
         const userAdvanceJama = parseFloat(customerUser?.advanceJama || 0);
+        const temporaryPendingDue = Math.max(0, parseFloat(customerUser?.temporaryPendingDue || 0) || 0);
 
         // Build where conditions to locate orders
         const matchConditions = [];
@@ -441,6 +442,7 @@ export const getCustomerCreditFinancials = async ({
         }
 
         const roundedUsedDue = parseFloat(totalUnpaidDue.toFixed(2));
+        const totalPendingDue = parseFloat((roundedUsedDue + temporaryPendingDue).toFixed(2));
         // Include advanceJama (excess overpayment by customer) in availableCredit
         // e.g. baseCreditLimit=5000, advanceJama=10 → availableCredit=5010
         const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - roundedUsedDue).toFixed(2)));
@@ -452,6 +454,8 @@ export const getCustomerCreditFinancials = async ({
             usedCredit: roundedUsedDue,
             totalDue: roundedUsedDue,
             totalUnpaidDue: roundedUsedDue,
+            temporaryPendingDue,
+            totalPendingDue,
             availableCredit,
             creditLimit: availableCredit,    // Returns available credit so delivery app and components show available balance!
             creditAmount: availableCredit,   // Returns available credit so delivery app showing Credit Amount shows available balance!
@@ -468,6 +472,8 @@ export const getCustomerCreditFinancials = async ({
             usedCredit: 0,
             totalDue: 0,
             totalUnpaidDue: 0,
+            temporaryPendingDue: 0,
+            totalPendingDue: 0,
             availableCredit: 0,
             creditLimit: 0,
             creditAmount: 0,

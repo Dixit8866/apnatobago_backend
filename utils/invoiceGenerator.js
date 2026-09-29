@@ -294,6 +294,7 @@ export const generateOrderInvoice = async (order) => {
             }
 
             const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
+            const accountPendingDue = Math.max(0, parseFloat(order.accountPendingDue || 0) || 0);
             if (deliveryCharge > 0) {
                 doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text('DELIVERY CHARGE: ', doc.page.width - 180, currentTotalY);
                 doc.fillColor('#334155').fontSize(8).font('Helvetica').text(`₹${deliveryCharge.toFixed(2)}`, doc.page.width - 85, currentTotalY - 1, { width: 60, align: 'right' });
@@ -305,6 +306,14 @@ export const generateOrderInvoice = async (order) => {
 
             doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text('GRAND TOTAL:', doc.page.width - 180, currentTotalY + 2);
             doc.fillColor('#0d9488').fontSize(12).font('Helvetica-Bold').text(`₹${Number(order.totalAmount).toFixed(2)}`, doc.page.width - 85, currentTotalY, { width: 60, align: 'right' });
+            if (accountPendingDue > 0) {
+                currentTotalY += 14;
+                doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text('TEMPORARY PENDING DUE:', doc.page.width - 180, currentTotalY + 2);
+                doc.fillColor('#334155').fontSize(8).font('Helvetica-Bold').text(`₹${accountPendingDue.toFixed(2)}`, doc.page.width - 85, currentTotalY, { width: 60, align: 'right' });
+                currentTotalY += 14;
+                doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text('TOTAL PAYABLE:', doc.page.width - 180, currentTotalY + 2);
+                doc.fillColor('#0d9488').fontSize(12).font('Helvetica-Bold').text(`₹${(Number(order.totalAmount || 0) + accountPendingDue).toFixed(2)}`, doc.page.width - 85, currentTotalY, { width: 60, align: 'right' });
+            }
 
             // Calculate cartoon/carton count robustly
             let cartonCount = 0;

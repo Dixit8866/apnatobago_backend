@@ -585,7 +585,7 @@ export const getUserCreditInfo = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
     try {
-        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, blockcredit, applevel, status, kycverification, routeCategoryId, routeSectionId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
+        const { fullname, email, dialcode, number, city, postcode, password, showtabacco, creditline, temporaryPendingDue, blockcredit, applevel, status, kycverification, routeCategoryId, routeSectionId, deliveryRoundId, latitude, longitude, godownId, billPrintTime, minimumOrderValue } = req.body;
         const user = await User.findByPk(req.params.id);
         if (!user) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'User not found.');
 
@@ -647,6 +647,9 @@ export const updateUser = async (req, res, next) => {
             postcode: postcode ?? user.postcode,
             showtabacco: showtabacco !== undefined ? showtabacco : user.showtabacco,
             creditline: targetCreditline,
+            temporaryPendingDue: temporaryPendingDue !== undefined
+                ? Math.max(0, Number.isFinite(parseFloat(temporaryPendingDue)) ? parseFloat(temporaryPendingDue) : 0)
+                : user.temporaryPendingDue,
             blockcredit: blockcredit !== undefined ? blockcredit : ((targetCreditline > 0 && user.blockcredit) ? false : user.blockcredit),
             applevel: (applevel === '' || applevel === undefined) ? (applevel === '' ? null : user.applevel) : applevel,
             routeCategoryId: (routeCategoryId === '' || routeCategoryId === undefined || routeCategoryId === 'none') ? (routeCategoryId === '' || routeCategoryId === 'none' ? null : user.routeCategoryId) : routeCategoryId,

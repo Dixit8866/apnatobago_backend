@@ -12,6 +12,7 @@ import { logActivity } from '../../helpers/activityLog.helper.js';
 import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered, broadcastUserUpdated } from '../../services/socketEvent.service.js';
+import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -386,7 +387,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'routeCategoryId', 'deliveryNotice', 'billPrintTime'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit', 'routeCategoryId', 'deliveryNotice', 'billPrintTime'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -2257,6 +2258,9 @@ export const getOrderDetails = async (req, res) => {
         const adjustedOrder = adjustOrderPayments(order);
         if (adjustedOrder && adjustedOrder.user) {
             const uId = adjustedOrder.userId || adjustedOrder.user?.id;
+            const creditFinancials = await getCustomerCreditFinancials({ userId: uId });
+            adjustedOrder.accountPendingDue = creditFinancials.temporaryPendingDue;
+            adjustedOrder.user.temporaryPendingDue = creditFinancials.temporaryPendingDue;
             let totalCustomerDue = 0;
             if (uId) {
                 const uOrders = await Order.findAll({
@@ -2336,6 +2340,9 @@ export const downloadInvoice = async (req, res) => {
         if (!order) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
+
+        const creditFinancials = await getCustomerCreditFinancials({ userId: order.userId || order.user?.id });
+        order.setDataValue('accountPendingDue', creditFinancials.temporaryPendingDue);
 
         const pdfBuffer = await generateOrderInvoice(order);
 

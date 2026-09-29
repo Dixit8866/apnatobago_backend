@@ -49,6 +49,10 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(12, 2),
         defaultValue: 0.00,
     },
+    temporaryPendingDue: {
+        type: DataTypes.DECIMAL(12, 2),
+        defaultValue: 0.00,
+    },
     balanceType: {
         type: DataTypes.STRING, // 'DUE' | 'JAMA' | 'CLEAR'
         defaultValue: 'DUE',

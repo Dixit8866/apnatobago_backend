@@ -522,6 +522,15 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                 note: `Advance Jama used on Order #${assignment.order?.orderId || assignment.orderId}: -₹${inputJama.toFixed(2)}. Remaining Jama: ₹${newJamaBal.toFixed(2)}`,
                 createdByName: 'Delivery Settlement'
             }, { transaction: t });
+
+            // Record explicit JAMA_CREDIT OrderPayment so order details and invoice clearly show advance jama used
+            await OrderPayment.create({
+                orderId: assignment.orderId,
+                deliveryBoyId,
+                amount: inputJama,
+                paymentMethod: 'JAMA_CREDIT',
+                notes: `Advance Jama deducted from bill (-₹${inputJama.toFixed(2)})`
+            }, { transaction: t });
         }
 
         if (user) {
