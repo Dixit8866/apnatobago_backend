@@ -1690,7 +1690,8 @@ export const verifyAndSettleOrder = async (req, res) => {
             previousReturnCredit = 0,
             previousReturnOrderId = null,
             previousSalesReturns = [],
-            roundOffAmount = 0
+            roundOffAmount = 0,
+            advanceJama = 0
         } = req.body;
 
         const order = await Order.findByPk(id, {
@@ -1849,8 +1850,9 @@ export const verifyAndSettleOrder = async (req, res) => {
         }
 
         // Calculate Net Collection Required & Overpayment (Jama Credit)
+        const parsedAdvanceJama = parseFloat(advanceJama) || 0;
         const orderCouponDisc = parsedCoupon > 0 ? parsedCoupon : (parseFloat(order.couponDiscount || 0));
-        const netRequiredBill = Math.max(0, parseFloat(order.totalAmount || 0) - orderCouponDisc - totalReturnDeduction - parsedPrevReturn);
+        const netRequiredBill = Math.max(0, parseFloat(order.totalAmount || 0) - orderCouponDisc - totalReturnDeduction - parsedPrevReturn - parsedAdvanceJama);
         const totalPaidCashOnline = parsedCash + parsedOnline;
         const parsedJama = Math.max(0, totalPaidCashOnline - netRequiredBill);
         const parsedBaki = parsedCredit;
@@ -1917,6 +1919,9 @@ export const verifyAndSettleOrder = async (req, res) => {
         }
         if (parsedPrevReturn > 0) {
             noteStr += `, Previous Order Return Credit: ₹${parsedPrevReturn.toFixed(2)}`;
+        }
+        if (parsedAdvanceJama > 0) {
+            noteStr += `, Advance Jama Applied: -₹${parsedAdvanceJama.toFixed(2)}`;
         }
         if (parsedJama > 0) {
             noteStr += `, Account Jama (+): ₹${parsedJama.toFixed(2)}`;
@@ -2008,6 +2013,44 @@ export const verifyAndSettleOrder = async (req, res) => {
                 createdAt: effectivePaymentDate,
                 updatedAt: new Date()
             }, { transaction });
+        }
+
+        // Record Advance Jama usage
+        if (parsedAdvanceJama > 0) {
+            await OrderPayment.create({
+                orderId: order.id,
+                userId: order.userId,
+                amount: parsedAdvanceJama,
+                paymentMethod: 'JAMA_CREDIT',
+                isSubmitted: true,
+                submittedAt: effectivePaymentDate,
+                createdAt: effectivePaymentDate,
+                updatedAt: new Date(),
+                notes: `Advance Jama deducted from bill (-₹${parsedAdvanceJama.toFixed(2)})`
+            }, { transaction });
+
+            // Deduct from user's advanceJama balance
+            if (order.userId) {
+                const jamaUser = await User.findByPk(order.userId, { transaction });
+                if (jamaUser) {
+                    const prevJama = parseFloat(jamaUser.advanceJama || 0);
+                    const newJama = Math.max(0, prevJama - parsedAdvanceJama);
+                    jamaUser.advanceJama = newJama;
+                    if (newJama <= 0) jamaUser.balanceType = 'CLEAR';
+                    await jamaUser.save({ transaction });
+
+                    await PartyBalanceLog.create({
+                        userId: jamaUser.id,
+                        orderId: order.id,
+                        type: 'JAMA',
+                        amount: -parsedAdvanceJama,
+                        previousBalance: prevJama,
+                        newBalance: newJama,
+                        note: `Advance Jama applied on Order #${order.orderId || order.id}: -₹${parsedAdvanceJama.toFixed(2)}. Remaining Jama: ₹${newJama.toFixed(2)} (Admin Settlement)`,
+                        createdByName: req.admin?.name || req.user?.name || 'Admin Settlement'
+                    }, { transaction });
+                }
+            }
         }
 
 
