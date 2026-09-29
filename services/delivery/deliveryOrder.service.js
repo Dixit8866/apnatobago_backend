@@ -522,10 +522,14 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 const savedCouponPts = Number(data.order?.couponPoints || 0);
 
                 const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
-                const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
+                const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(data.order?.orderStatus);
+                const hasJamaPayment = currentPayments.some(p => String(p.paymentMethod || '').toUpperCase() === 'JAMA_CREDIT');
+                const applicableJama = (!isDelivered && !hasJamaPayment && jamaAmountVal > 0)
+                    ? Math.min(jamaAmountVal, Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction))
+                    : 0;
+                const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction - applicableJama);
                 const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
                 const netPayableVal = Math.max(0, totalDueAmt);
-                const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(data.order?.orderStatus);
 
                 // Centralized Customer Total Due and Available Credit Calculation
                 let totalCustomerDue = 0;
@@ -905,10 +909,14 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     let totalPastDueAmount = unpaidOrdersSum;
 
     const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
-    const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction);
+    const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(assignment.order?.orderStatus);
+    const hasJamaPayment = (assignment.order?.payments || []).some(p => String(p.paymentMethod || '').toUpperCase() === 'JAMA_CREDIT');
+    const applicableJama = (!isDelivered && !hasJamaPayment && jamaAmountVal > 0)
+        ? Math.min(jamaAmountVal, Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction))
+        : 0;
+    const netOrderCollectible = Math.max(0, Math.round(calculatedDueAmt) - totalSalesReturnDeduction - applicableJama);
     const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
     const netPayableVal = Math.max(0, totalDueAmt);
-    const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(assignment.order?.orderStatus);
 
     // Centralized Customer Total Due and Available Credit Calculation (Single Source of Truth)
     const creditFinancials = await getCustomerCreditFinancials({ 
