@@ -561,6 +561,7 @@ export const getUserById = async (req, res, next) => {
         userData.availableDue = creditData.availableCredit;
         userData.creditAmount = creditData.availableCredit;
         userData.pastDueOrders = creditData.pastDueOrders;
+        userData.advanceJama = creditData.advanceJama;
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'User fetched.', userData);
     } catch (error) {
