@@ -40,6 +40,7 @@ import transferRoutes from './transfers.routes.js';
 import activityLogRoutes from '../admin/activityLog.routes.js';
 import dailyReconciliationRoutes from './dailyReconciliation.routes.js';
 import appNoticeRoutes from './appNotice.routes.js';
+import partyLedgerRoutes from './partyLedger.routes.js';
 
 const router = express.Router();
 
@@ -84,5 +85,6 @@ router.use('/transfers', transferRoutes);
 router.use('/activity-logs', activityLogRoutes);
 router.use('/daily-reconciliation', dailyReconciliationRoutes);
 router.use('/app-notice', appNoticeRoutes);
+router.use('/party-ledger', partyLedgerRoutes);
 
 export default router;

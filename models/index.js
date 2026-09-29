@@ -23,6 +23,7 @@ import User from './user/User.js';
 import OTP from './user/Otp.js';
 import PartyCalling from './user/PartyCalling.js';
 import PartyBalanceLog from './user/PartyBalanceLog.js';
+import PartyLedger from './user/PartyLedger.js';
 import Vendor from './superadmin-models/Vendor.js';
 import VendorOrder from './superadmin-models/VendorOrder.js';
 import PurchaseBill from './superadmin-models/PurchaseBill.js';
@@ -279,6 +280,12 @@ User.hasMany(PartyBalanceLog, { foreignKey: 'userId', as: 'partyBalanceLogs' });
 PartyBalanceLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 Order.hasMany(PartyBalanceLog, { foreignKey: 'orderId', as: 'partyBalanceLogs' });
 PartyBalanceLog.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
+
+// PartyLedger (Accounting Master Database) Associations
+User.hasMany(PartyLedger, { foreignKey: 'userId', as: 'partyLedgers' });
+PartyLedger.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Order.hasMany(PartyLedger, { foreignKey: 'orderId', as: 'partyLedgers' });
+PartyLedger.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 
 Product.hasMany(SalesReturn, { foreignKey: 'productId', as: 'returns' });
 SalesReturn.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
@@ -585,6 +592,10 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] PartyBalanceLog sync failed:', e.message); }
 
         try {
+            await PartyLedger.sync();
+        } catch (e) { console.log('[Migration Warning] PartyLedger sync failed:', e.message); }
+
+        try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(20) DEFAULT \'DUE\'');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "billPrintTime" VARCHAR(50) DEFAULT NULL');
@@ -748,6 +759,7 @@ export {
     OutletOrderItem,
     DailyReconciliation,
     PartyBalanceLog,
+    PartyLedger,
     AppNoticeSetting,
     runManualMigrations
 };
