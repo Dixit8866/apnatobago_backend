@@ -109,16 +109,29 @@ export const createOrder = async (req, res) => {
             attributes: ['id', 'orderDate', 'createdAt']
         });
 
-        const referenceDate = lastValidOrder ? (lastValidOrder.orderDate || lastValidOrder.createdAt) : req.user.createdAt;
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        // 1. If user has never placed an order before, they are a first-time customer.
+        // If admin has verified their KYC, allow them to place their first order!
+        // 2. If user had prior orders, check if they have been inactive for >= 30 days:
+        if (lastValidOrder) {
+            const lastOrderDate = lastValidOrder.orderDate || lastValidOrder.createdAt;
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-        if (referenceDate && new Date(referenceDate) < thirtyDaysAgo) {
-            await User.update({ kycverification: 'pending' }, { where: { id: req.user.id } });
-            return sendErrorResponse(
-                res,
-                HTTP_STATUS.FORBIDDEN,
-                "છેલ્લા ૩૦ દિવસથી કોઈ ઓર્ડર ન હોવાથી તમારું KYC ફરીથી વેરિફિકેશન (R-KYC) માટે પેન્ડિંગ કરવામાં આવ્યું છે. કૃપા કરીને એડમિનનો સંપર્ક કરો."
-            );
+            if (lastOrderDate && new Date(lastOrderDate) < thirtyDaysAgo) {
+                // Check if admin has recently verified or approved this user (7 days grace period, matching syncInactivePartiesReKYC cron)
+                const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                const hasRecentKycVerification = req.user?.kycVerifiedAt && new Date(req.user.kycVerifiedAt) > sevenDaysAgo;
+                const hasRecentAdminUpdate = req.user?.updatedAt && new Date(req.user.updatedAt) > sevenDaysAgo && new Date(req.user.updatedAt) > new Date(lastOrderDate);
+
+                // Only demote to pending and block if admin has NOT re-verified or updated the party recently
+                if (!hasRecentKycVerification && !hasRecentAdminUpdate) {
+                    await User.update({ kycverification: 'pending', kycVerifiedAt: null }, { where: { id: req.user.id } });
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.FORBIDDEN,
+                        "છેલ્લા ૩૦ દિવસથી કોઈ ઓર્ડર ન હોવાથી તમારું KYC ફરીથી વેરિફિકેશન (R-KYC) માટે પેન્ડિંગ કરવામાં આવ્યું છે. કૃપા કરીને એડમિનનો સંપર્ક કરો."
+                    );
+                }
+            }
         }
     } catch (rkycErr) {
         logger.error(`[R-KYC Check Error in createOrder]: ${rkycErr.message}`);

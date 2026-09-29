@@ -6,7 +6,7 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { logActivity } from '../../helpers/activityLog.helper.js';
 
 // Safe attributes list to match admin panel
-const SAFE_ATTRIBUTES = ['id', 'fullname', 'email', 'dialcode', 'number', 'city', 'postcode', 'showtabacco', 'creditline', 'blockcredit', 'applevel', 'status', 'kycverification', 'routeCategoryId', 'deliveryRoundId', 'deliveryRoundTiming', 'deviceType', 'version', 'latitude', 'longitude', 'createdAt', 'updatedAt'];
+const SAFE_ATTRIBUTES = ['id', 'fullname', 'email', 'dialcode', 'number', 'city', 'postcode', 'showtabacco', 'creditline', 'blockcredit', 'applevel', 'status', 'kycverification', 'kycVerifiedAt', 'routeCategoryId', 'deliveryRoundId', 'deliveryRoundTiming', 'deviceType', 'version', 'latitude', 'longitude', 'createdAt', 'updatedAt'];
 
 /**
  * @desc    Get parties assigned to this godown

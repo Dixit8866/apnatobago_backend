@@ -133,10 +133,12 @@ export const syncInactivePartiesReKYC = async () => {
         const CANCELLED_STATUSES = "'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'";
         const [results, metadata] = await sequelize.query(`
             UPDATE users
-            SET kycverification = 'pending'
+            SET kycverification = 'pending',
+                "kycVerifiedAt" = NULL
             WHERE kycverification = 'verified'
               AND status != 'Deleted'
               AND "updatedAt" < NOW() - INTERVAL '7 days'
+              AND ("kycVerifiedAt" IS NULL OR "kycVerifiedAt" < NOW() - INTERVAL '7 days')
               AND (
                   -- Has non-cancelled orders, but latest order is >= 30 days old
                   (
