@@ -250,7 +250,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     credit: logAmt,
                     paymentMethod: 'CASH',
                     bankName: null,
-                    orderId: log.orderId || null,
+                    orderId: null,
                     referenceId: `LOG-${log.id}`,
                     note: log.note || 'Manual Credit Balance Adjustment',
                     createdByName: log.createdByName || 'Admin',
@@ -267,7 +267,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     credit: 0,
                     paymentMethod: 'ADJUSTMENT',
                     bankName: null,
-                    orderId: log.orderId || null,
+                    orderId: null,
                     referenceId: `LOG-${log.id}`,
                     note: log.note || 'Manual Debit Balance Adjustment',
                     createdByName: log.createdByName || 'Admin',
@@ -279,6 +279,9 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Sort events chronologically
         timelineEvents.sort((a, b) => a.sortTime - b.sortTime);
 
+        // Pre-compute valid order IDs from actual user orders to protect DB foreign key
+        const validOrderIds = new Set((orders || []).map(o => o.id));
+
         // Compute running balance step-by-step
         let currentRunningBalance = 0;
         const processedEntries = timelineEvents.map(evt => {
@@ -288,7 +291,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
             return {
                 userId,
-                orderId: evt.orderId || null,
+                orderId: (evt.orderId && validOrderIds.has(evt.orderId)) ? evt.orderId : null,
                 voucherNo: evt.voucherNo,
                 voucherType: evt.type,
                 date: evt.date,

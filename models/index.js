@@ -284,8 +284,8 @@ PartyBalanceLog.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 // PartyLedger (Accounting Master Database) Associations
 User.hasMany(PartyLedger, { foreignKey: 'userId', as: 'partyLedgers' });
 PartyLedger.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-Order.hasMany(PartyLedger, { foreignKey: 'orderId', as: 'partyLedgers' });
-PartyLedger.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
+Order.hasMany(PartyLedger, { foreignKey: 'orderId', as: 'partyLedgers', constraints: false });
+PartyLedger.belongsTo(Order, { foreignKey: 'orderId', as: 'order', constraints: false });
 
 Product.hasMany(SalesReturn, { foreignKey: 'productId', as: 'returns' });
 SalesReturn.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
@@ -593,7 +593,9 @@ const runManualMigrations = async () => {
 
         try {
             await PartyLedger.sync();
-        } catch (e) { console.log('[Migration Warning] PartyLedger sync failed:', e.message); }
+            await sequelize.query('ALTER TABLE party_ledgers DROP CONSTRAINT IF EXISTS "party_ledgers_orderId_fkey";');
+            await sequelize.query('ALTER TABLE party_ledgers DROP CONSTRAINT IF EXISTS party_ledgers_orderId_fkey;');
+        } catch (e) { console.log('[Migration Warning] PartyLedger sync / constraint drop failed:', e.message); }
 
         try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(20) DEFAULT \'DUE\'');
