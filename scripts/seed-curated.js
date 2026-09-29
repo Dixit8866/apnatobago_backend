@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { Op } from 'sequelize';
 import sequelize from '../config/db.js';
 import './ensure-db.js';
 
