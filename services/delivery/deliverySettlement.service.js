@@ -556,10 +556,11 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                         transaction: t
                     });
                     if (existingCashPay) {
-                        const newAmt = parseFloat(existingCashPay.amount) + remainingCash;
+                        // currentOrderCash already includes remainingCash (excess) — only update notes to reflect breakdown clearly.
+                        // Do NOT add remainingCash to amount again (would double-count the advance jama).
+                        const existingAmt = parseFloat(existingCashPay.amount);
                         await existingCashPay.update({
-                            amount: newAmt,
-                            notes: `Cash collected ₹${newAmt.toFixed(2)} (Bill: ₹${assignment.order?.totalAmount || '0'} + Advance Jama: +₹${remainingCash.toFixed(2)})`
+                            notes: `Cash collected ₹${existingAmt.toFixed(2)} (Bill: ₹${assignment.order?.totalAmount || '0'} + Advance Jama: +₹${remainingCash.toFixed(2)})`
                         }, { transaction: t });
                     } else {
                         await OrderPayment.create({
