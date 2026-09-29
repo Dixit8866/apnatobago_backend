@@ -44,22 +44,17 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         // Fetch all non-cancelled orders for this party
         const orders = await Order.findAll({
-            where: {
-                userId,
-                orderStatus: {
-                    [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel', 'Auto Cancelled', 'Rejected']
-                }
-            },
+            where: { userId },
             include: [
                 {
                     model: OrderPayment,
                     as: 'payments',
                     required: false,
-                    include: [{ model: BankSetting, as: 'bankSetting', attributes: ['id', 'bankName', 'accountNumber'] }]
+                    include: [{ model: BankSetting, as: 'bankAccount', attributes: ['id', 'bankName', 'accountNumber'] }]
                 },
                 {
                     model: SalesReturn,
-                    as: 'salesReturns',
+                    as: 'returns',
                     required: false
                 }
             ],
@@ -79,6 +74,9 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         // 1. Process Orders & attached payments
         for (const ord of orders) {
+            const st = String(ord.orderStatus || '').toLowerCase();
+            if (st.includes('cancel') || st.includes('reject')) continue;
+
             const billNo = ord.orderId || String(ord.id).slice(0, 8);
             const fin = calculateOrderFinancials(ord, ord.payments);
             const orderDate = ord.createdAt || new Date();
@@ -121,7 +119,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             }
 
             // Sales Return on Order -> CREDIT (જમા)
-            const attachedReturns = ord.salesReturns || [];
+            const attachedReturns = ord.returns || ord.salesReturns || [];
             let totalReturnAmt = 0;
             attachedReturns.forEach((ret, rIdx) => {
                 const retAmt = parseFloat(ret.returnAmount || (ret.quantity * (ret.price || 0)) || 0);
@@ -151,7 +149,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 const pAmt = parseFloat(p.amount || 0);
                 const pCash = parseFloat(p.cashAmount || 0);
                 const pOnline = parseFloat(p.onlineAmount || 0);
-                const bank = p.bankSetting?.bankName || null;
+                const bank = p.bankAccount?.bankName || p.bankSetting?.bankName || null;
                 const pDate = p.createdAt || orderDate;
 
                 if (method === 'CREDIT') {
