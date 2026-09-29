@@ -84,6 +84,7 @@ export const createUser = async (req, res, next) => {
             deliveryRoundTiming: resolvedDeliveryRoundTiming,
             status: status || 'Active',
             kycverification: kycverification || 'pending',
+            kycVerifiedAt: (kycverification === 'verified') ? new Date() : null,
             orderReminder: true,
             reminderTime: '09:00 PM',
             latitude: (latitude === '' || latitude === undefined || latitude === null) ? null : parseFloat(latitude),
@@ -658,6 +659,9 @@ export const updateUser = async (req, res, next) => {
             deliveryRoundTiming: finalDeliveryRoundTiming !== undefined ? finalDeliveryRoundTiming : user.deliveryRoundTiming,
             status: status ?? user.status,
             kycverification: kycverification ?? user.kycverification,
+            kycVerifiedAt: (kycverification === 'verified') 
+                ? (user.kycverification === 'verified' && user.kycVerifiedAt ? user.kycVerifiedAt : new Date())
+                : (kycverification === 'pending' ? null : user.kycVerifiedAt),
             latitude: (latitude === '' || latitude === undefined) ? (latitude === '' ? null : user.latitude) : (latitude === null ? null : parseFloat(latitude)),
             longitude: (longitude === '' || longitude === undefined) ? (longitude === '' ? null : user.longitude) : (longitude === null ? null : parseFloat(longitude)),
             godownId: (godownId === '' || godownId === undefined) ? (godownId === '' ? null : user.godownId) : godownId,

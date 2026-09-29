@@ -323,10 +323,11 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Category tables update failed:', e.message); }
 
         try {
-            // Add blockcredit and walletBalance to users table if missing
+            // Add blockcredit, walletBalance and kycVerifiedAt to users table if missing
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "blockcredit" BOOLEAN DEFAULT false');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "walletBalance" DECIMAL(12, 2) DEFAULT 0.00');
-        } catch (e) { console.log('[Migration Warning] Users blockcredit/walletBalance update failed:', e.message); }
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "kycVerifiedAt" TIMESTAMP WITH TIME ZONE');
+        } catch (e) { console.log('[Migration Warning] Users blockcredit/walletBalance/kycVerifiedAt update failed:', e.message); }
 
         try {
             await sequelize.query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS "condition" VARCHAR(50) DEFAULT \'GOOD\'');

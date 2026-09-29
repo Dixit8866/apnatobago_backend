@@ -94,6 +94,10 @@ const User = sequelize.define('User', {
         type: DataTypes.STRING,
         defaultValue: 'pending', // pending | verified
     },
+    kycVerifiedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+    },
     orderReminder: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,

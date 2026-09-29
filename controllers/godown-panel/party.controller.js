@@ -204,7 +204,14 @@ export const updateGodownParty = async (req, res, next) => {
         const updates = {};
         if (showtabacco !== undefined) updates.showtabacco = showtabacco;
         if (blockcredit !== undefined) updates.blockcredit = blockcredit;
-        if (kycverification !== undefined) updates.kycverification = kycverification;
+        if (kycverification !== undefined) {
+            updates.kycverification = kycverification;
+            if (kycverification === 'verified') {
+                updates.kycVerifiedAt = new Date();
+            } else if (kycverification === 'pending') {
+                updates.kycVerifiedAt = null;
+            }
+        }
         if (status !== undefined) updates.status = status;
 
         await user.update(updates);
