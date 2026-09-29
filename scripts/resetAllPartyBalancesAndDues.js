@@ -59,7 +59,14 @@ import { Op } from 'sequelize';
 async function main() {
     try {
         const args = process.argv.slice(2);
-        const isExecute = args.includes('--execute') || args.includes('-e');
+        const isDryRun = args.includes('--dry-run') || args.includes('--preview');
+        const isExecute = !isDryRun && (
+            args.includes('--execute') || 
+            args.includes('-e') || 
+            args.includes('--all') || 
+            args.includes('--force') ||
+            args.includes('--commit')
+        );
         
         let targetPhone = null;
         let targetUserId = null;
@@ -76,7 +83,7 @@ async function main() {
         console.log('\n======================================================================');
         console.log('    RESET ALL PARTY BALANCES & PENDING DUES (જમા અને બાકી ક્લીનર)     ');
         console.log('======================================================================');
-        console.log(`Mode: ${isExecute ? '⚠️  EXECUTE / COMMIT (Database will be updated)' : 'ℹ️  DRY RUN (Preview only, no changes)'}`);
+        console.log(`Mode: ${isExecute ? '⚠️  EXECUTE / COMMIT (Database is being updated!)' : 'ℹ️  DRY RUN (Preview only, no changes made)'}`);
 
         await sequelize.authenticate();
         console.log('✅ Database connected successfully.\n');
