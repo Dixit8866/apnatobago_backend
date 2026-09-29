@@ -491,12 +491,12 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         if (customDeliveryNote) {
             assignment.order.notes = customDeliveryNote;
             assignment.order.deliveryNotice = customDeliveryNote;
-            await assignment.order.save({ transaction: t });
             if (user) {
                 user.deliveryNotice = customDeliveryNote;
                 await user.save({ transaction: t });
             }
         }
+        await assignment.order.save({ transaction: t });
 
         let remainingCash = Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded - pastDueSettled);
         let remainingOnline = 0;
@@ -574,7 +574,15 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         }
 
         await Order.update(
-            { orderStatus: 'Payment Collect', deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') },
+            { 
+                orderStatus: 'Payment Collect', 
+                dueAmount: inputCredit.toFixed(2),
+                paidAmount: actualPaidOnThisBill.toFixed(2),
+                pastDueCollected: pastDueSettled.toFixed(2),
+                paymentStatus: inputCredit <= 1e-7 ? 'Paid' : 'Partial',
+                paymentMethod: paymentMethodsUsed.length === 1 ? paymentMethodsUsed[0] : (paymentMethodsUsed.length > 1 ? 'SPLIT' : assignment.order.paymentMethod),
+                deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') 
+            },
             { where: { id: assignment.orderId }, transaction: t }
         );
 

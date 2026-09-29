@@ -89,10 +89,10 @@ export const calculateOrderFinancials = (order, payments = null) => {
     // Determine payment status
     let paymentStatus = 'Pending';
     const isExplicitlyPaid = String(order.paymentStatus || '').toLowerCase() === 'paid';
-    if (isExplicitlyPaid || dueAmt <= 0.01) {
+    if ((isExplicitlyPaid && creditPaymentSum <= 0.01 && nonCreditPaid >= netPayable - 0.01) || dueAmt <= 0.01) {
         paymentStatus = 'Paid';
         dueAmt = 0;
-    } else if (paidAmt > 0) {
+    } else if (paidAmt > 0 || dueAmt > 0) {
         paymentStatus = 'Partial';
     }
 
