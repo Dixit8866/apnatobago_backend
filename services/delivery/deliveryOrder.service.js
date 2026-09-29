@@ -923,7 +923,9 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     }
 
     const baseCreditLimit = creditFinancials.baseCreditLimit;
-    const availableCredit = Math.max(0, parseFloat((baseCreditLimit - totalCustomerDue).toFixed(2)));
+    const advanceJamaForCredit = parseFloat(creditFinancials.advanceJama || 0);
+    // Include advanceJama so delivery app shows: baseCreditLimit + advanceJama - usedDue
+    const availableCredit = Math.max(0, parseFloat((baseCreditLimit + advanceJamaForCredit - totalCustomerDue).toFixed(2)));
 
     data.pastDueOrders = pastDueOrders;
     data.totalPastDueAmount = totalPastDueAmount.toFixed(2);

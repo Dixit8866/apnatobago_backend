@@ -441,7 +441,9 @@ export const getCustomerCreditFinancials = async ({
         }
 
         const roundedUsedDue = parseFloat(totalUnpaidDue.toFixed(2));
-        const availableCredit = Math.max(0, parseFloat((baseCreditLimit - roundedUsedDue).toFixed(2)));
+        // Include advanceJama (excess overpayment by customer) in availableCredit
+        // e.g. baseCreditLimit=5000, advanceJama=10 → availableCredit=5010
+        const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - roundedUsedDue).toFixed(2)));
         const isBlocked = customerUser?.blockcredit ? true : false;
 
         return {
