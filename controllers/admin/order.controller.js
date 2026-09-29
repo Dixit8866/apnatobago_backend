@@ -1755,7 +1755,7 @@ export const verifyAndSettleOrder = async (req, res) => {
 
         // Process Previous Order / Cross-Bill Sales Returns if specified
         if (Array.isArray(previousSalesReturns) && previousSalesReturns.length > 0) {
-            const targetPrevOrderId = previousReturnOrderId || order.id;
+            const targetPrevOrderId = order.id;
             for (const prevRet of previousSalesReturns) {
                 const pQty = parseInt(prevRet.quantity, 10);
                 const pPrice = parseFloat(prevRet.price) || 0;
@@ -1799,6 +1799,9 @@ export const verifyAndSettleOrder = async (req, res) => {
         order.dueAmount = parsedCredit; // Credit Amount represents THIS order's unpaid bill due amount
         order.paymentStatus = parsedCredit > 0 ? 'Partial' : 'Paid';
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
+        if (req.body.pastDueCollected !== undefined && !isNaN(parseFloat(req.body.pastDueCollected))) {
+            order.pastDueCollected = parseFloat(req.body.pastDueCollected);
+        }
         // If Admin explicitly edited/overrode customer's previous pending dues, update unpaid previous orders
         if (req.body.overridePartyDue !== undefined && req.body.overridePartyDue !== null && !isNaN(parseFloat(req.body.overridePartyDue)) && order.userId) {
             const newTargetPrevDue = Math.max(0, parseFloat(req.body.overridePartyDue));
@@ -1979,11 +1982,12 @@ export const verifyAndSettleOrder = async (req, res) => {
             }, { transaction });
         }
 
-        if (totalReturnDeduction > 0) {
+        const totalReturnForPayment = totalReturnDeduction + parsedPrevReturn;
+        if (totalReturnForPayment > 0) {
             await OrderPayment.create({
                 orderId: order.id,
                 userId: order.userId,
-                amount: totalReturnDeduction,
+                amount: totalReturnForPayment,
                 paymentMethod: 'SALES_RETURN',
                 isSubmitted: true,
                 submittedAt: effectivePaymentDate,
