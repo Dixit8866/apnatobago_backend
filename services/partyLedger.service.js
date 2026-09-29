@@ -226,10 +226,25 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             }
         }
 
-        // 2. Process Independent Party Balance Logs (Adjustments / Standalone Payments not tied to orders)
+        // 2. Process Independent Party Balance Logs
+        // IMPORTANT: Skip any log that:
+        //  (a) Has an orderId that was already counted in orders above, OR
+        //  (b) Has orderId at all (delivery settlement auto-logs - already counted via Order payments), OR
+        //  (c) Is an auto-generated system note about overpayment/jama from delivery settlement
+        //  ONLY include pure manual admin-entered adjustments (no orderId, no auto-system notes)
         for (const log of balanceLogs) {
-            // If log has an orderId that is already processed in orders list, avoid double counting
-            if (log.orderId && orders.some(o => o.id === log.orderId)) {
+            // Skip if tied to ANY order (already processed via OrderPayment / order financials above)
+            if (log.orderId) continue;
+
+            // Skip auto-generated delivery settlement overpayment notes
+            const autoNote = String(log.note || '').toLowerCase();
+            if (
+                autoNote.includes('overpayment') ||
+                autoNote.includes('credit jama on order') ||
+                autoNote.includes('jama balance') ||
+                autoNote.includes('cash/online overpayment') ||
+                autoNote.includes('admin settlement')
+            ) {
                 continue;
             }
 
@@ -379,11 +394,9 @@ export const getPartyLedger = async (userId, query = {}) => {
     try {
         const { startDate, endDate, search, limit = 500, refresh = false } = query;
 
-        // Auto-sync if refresh requested or check if table has records
-        const existingCount = await PartyLedger.count({ where: { userId } });
-        if (existingCount === 0 || refresh === 'true' || refresh === true) {
-            await syncPartyLedger(userId, { forceRebuild: true });
-        }
+        // Always force-rebuild from real Orders every time to ensure 100% accuracy
+        // This ensures no stale/dummy data is served - ledger is always fresh from DB
+        await syncPartyLedger(userId, { forceRebuild: true });
 
         const user = await User.findByPk(userId, {
             include: [{ model: BusinessProfile, as: 'businessProfile' }]
