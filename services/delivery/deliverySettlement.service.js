@@ -322,7 +322,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                     const rPrice = parseFloat(rItem.price || 0);
                     const rQty = Number(rItem.quantity);
                     const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
-                    const targetOrderId = rItem.orderId || assignment.order.id;
+                    // Always attach return to current delivery order being settled so it reduces and appears on this bill
+                    const targetOrderId = assignment.order.id;
+                    const returnReason = rItem.reason || (rItem.orderId && String(rItem.orderId) !== String(assignment.order.id) ? `Return from previous bill (${rItem.orderNumber || rItem.orderId})` : 'Customer Return at Delivery');
                     await SalesReturn.create({
                         orderId: targetOrderId,
                         userId: assignment.order.userId,
@@ -333,7 +335,7 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                         quantity: rQty,
                         price: rPrice,
                         returnAmount: rAmt,
-                        reason: rItem.reason || 'Customer Return at Delivery',
+                        reason: returnReason,
                         status: 'Pending',
                         creditProcessed: true
                     }, { transaction: t });
@@ -799,7 +801,9 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                             const rPrice = parseFloat(rItem.price || 0);
                             const rQty = Number(rItem.quantity);
                             const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
-                            const targetOrderId = rItem.orderId || order.id;
+                            // Always attach return to current delivery order being settled so it reduces and appears on this bill
+                            const targetOrderId = order.id;
+                            const returnReason = rItem.reason || (rItem.orderId && String(rItem.orderId) !== String(order.id) ? `Return from previous bill (${rItem.orderNumber || rItem.orderId})` : 'Customer Return at Delivery');
                             await SalesReturn.create({
                                 orderId: targetOrderId,
                                 userId: order.userId,
@@ -810,7 +814,7 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                                 quantity: rQty,
                                 price: rPrice,
                                 returnAmount: rAmt,
-                                reason: rItem.reason || 'Customer Return at Delivery',
+                                reason: returnReason,
                                 status: 'Pending',
                                 creditProcessed: true
                             }, { transaction: t });

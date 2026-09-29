@@ -657,8 +657,8 @@ export const getAllOrders = async (req, res) => {
                 }
 
                 const baseCreditLimit = parseFloat(order.user?.creditline || 0);
-                const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
                 const userAdvanceJama = parseFloat(order.user?.advanceJama || 0);
+                const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - totalCustomerDue).toFixed(2)));
                 const userBalanceType = order.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (baseCreditLimit > 0 ? 'DUE' : 'CLEAR'));
 
                 // Determine active delivery note/notice for this party (strictly manual notes, NEVER system logs)
