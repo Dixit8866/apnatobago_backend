@@ -521,12 +521,23 @@ export const getAllOrders = async (req, res) => {
             }).filter(s => s && s.length > 2)));
 
             let unpaidOrdersStore = [];
-            try {
-                const unpaidOrdersList = await Order.findAll({
-                    where: {
-                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-                    },
-                    include: [
+            const customerDuesFilters = [];
+            if (userIds.length > 0) {
+                customerDuesFilters.push({ userId: { [Op.in]: userIds } });
+            }
+            if (phoneNumbers.length > 0) {
+                customerDuesFilters.push({ customerNumber: { [Op.in]: phoneNumbers } });
+                customerDuesFilters.push({ '$user.number$': { [Op.in]: phoneNumbers } });
+            }
+
+            if (customerDuesFilters.length > 0) {
+                try {
+                    const unpaidOrdersList = await Order.findAll({
+                        where: {
+                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+                            [Op.or]: customerDuesFilters
+                        },
+                        include: [
                         {
                             model: User,
                             as: 'user',
@@ -593,6 +604,7 @@ export const getAllOrders = async (req, res) => {
                 console.error(`[DEBUG DUES ERROR] Previous Unpaid Dues Calc Error: ${dueErr.message}`, dueErr);
                 logger.error(`[Previous Unpaid Dues Calc Error]: ${dueErr.message}`);
             }
+        }
 
             // Attach to Sequelize models using setDataValue so they are serialized correctly
             result.rows = result.rows.map(order => {

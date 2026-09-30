@@ -78,6 +78,10 @@ const OrderPayment = sequelize.define('OrderPayment', {
 }, {
     timestamps: true,
     tableName: 'order_payments',
+    indexes: [
+        { fields: ['orderId'] },
+        { fields: ['paymentMethod'] }
+    ]
 });
 
 export default OrderPayment;

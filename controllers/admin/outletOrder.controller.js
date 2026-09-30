@@ -381,16 +381,19 @@ export const getOutletOrders = async (req, res) => {
         // Compute Financial Summary across all matching orders
         const allOrdersForSummary = await OutletOrder.findAll({
             where: whereCondition,
+            attributes: ['id', 'createdBy', 'grandTotal', 'totalAmount', 'paidAmount', 'paymentMode', 'payments'],
             include: [
                 {
                     model: OutletOrderItem,
                     as: 'items',
                     required: false,
+                    attributes: ['quantity', 'sellUnit', 'variantInfo'],
                     include: [
                         { model: ProductVariant, as: 'variant', attributes: ['id', 'purchasePrice', 'baseUnitsPerPack'], required: false }
                     ]
                 }
-            ]
+            ],
+            subQuery: false
         });
 
         let totalSales = 0;

@@ -651,6 +651,39 @@ const runManualMigrations = async () => {
             `);
         } catch (e) { console.log('[Migration Warning] Orphan deliveryNotice cleanup failed:', e.message); }
 
+        // Automated High-Performance B-Tree Indexes Creation
+        try {
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders ("userId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_order_status ON orders ("orderStatus")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders ("createdAt")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_godown_id ON orders ("godownId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_route_cat_id ON orders ("routeCategoryId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_delivery_date ON orders ("deliveryDate")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders ("paymentStatus")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders ("orderStatus", "createdAt")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders ("userId", "orderStatus")');
+
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items ("orderId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items ("productId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_order_items_variant_id ON order_items ("variantId")');
+
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_order_payments_order_id ON order_payments ("orderId")');
+
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_outlet_orders_godown_id ON outlet_orders ("godownId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_outlet_orders_user_id ON outlet_orders ("userId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_outlet_orders_status ON outlet_orders ("orderStatus")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_outlet_orders_created_at ON outlet_orders ("createdAt")');
+
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_outlet_order_items_order_id ON outlet_order_items ("outletOrderId")');
+
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_users_status ON users ("status")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_users_kycverification ON users ("kycverification")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_users_godown_id ON users ("godownId")');
+            await sequelize.query('CREATE INDEX IF NOT EXISTS idx_users_route_cat_id ON users ("routeCategoryId")');
+        } catch (e) {
+            console.log('[Migration Warning] Index creation notice:', e.message);
+        }
+
         console.log('[Migration] DB schema updates applied successfully ✓');
 
 

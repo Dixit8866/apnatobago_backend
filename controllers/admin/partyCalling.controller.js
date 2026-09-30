@@ -83,11 +83,13 @@ export const getDailyPartyCalls = async (req, res, next) => {
                 model: PartyCalling,
                 as: 'calls',
                 where: { callingDate: callingDateStr },
+                attributes: ['id', 'status', 'notes', 'calledAt', 'followupDateTime'],
                 required: false
             },
             {
                 model: Order,
                 as: 'orders',
+                attributes: ['id'],
                 where: {
                     [Op.or]: [
                         {
@@ -109,27 +111,28 @@ export const getDailyPartyCalls = async (req, res, next) => {
         // Fetch all matching users (without offset/limit yet to compute accurate in-memory tab counts) with their last order date
         const users = await User.findAll({
             where: userWhere,
-            attributes: {
-                include: [
-                    [
-                        User.sequelize.literal(`(
-                            SELECT "createdAt"
-                            FROM "orders" AS "order"
-                            WHERE
-                                "order"."userId" = "User".id
-                                AND "order"."orderStatus" NOT IN ('Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel')
-                                AND "order"."deletedAt" IS NULL
-                            ORDER BY "order"."createdAt" DESC
-                            LIMIT 1
-                        )`),
-                        'lastOrderDate'
-                    ]
+            attributes: [
+                'id', 'fullname', 'number', 'city', 'kycverification', 'routeCategoryId',
+                'deliveryRoundId', 'deliveryRoundTiming', 'billPrintTime', 'createdAt', 'status',
+                [
+                    User.sequelize.literal(`(
+                        SELECT "createdAt"
+                        FROM "orders" AS "order"
+                        WHERE
+                            "order"."userId" = "User".id
+                            AND "order"."orderStatus" NOT IN ('Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel')
+                            AND "order"."deletedAt" IS NULL
+                        ORDER BY "order"."createdAt" DESC
+                        LIMIT 1
+                    )`),
+                    'lastOrderDate'
                 ]
-            },
+            ],
             include,
             order: [
                 ['fullname', 'ASC']
-            ]
+            ],
+            subQuery: false
         });
 
         // Calculate 30-day inactivity threshold based on calendar date start

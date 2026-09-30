@@ -105,6 +105,15 @@ const OutletOrder = sequelize.define(
         timestamps: true,
         tableName: 'outlet_orders',
         paranoid: true,
+        indexes: [
+            { fields: ['godownId'] },
+            { fields: ['userId'] },
+            { fields: ['orderStatus'] },
+            { fields: ['paymentStatus'] },
+            { fields: ['createdAt'] },
+            { fields: ['godownId', 'createdAt'] },
+            { fields: ['orderStatus', 'createdAt'] }
+        ]
     }
 );
 

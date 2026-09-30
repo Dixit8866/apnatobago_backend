@@ -328,6 +328,15 @@ export const getAllUsers = async (req, res, next) => {
             }
         ];
 
+        const countInclude = search ? [
+            {
+                model: BusinessProfile,
+                as: 'businessProfile',
+                attributes: ['id', 'shopName', 'shopNameAlt'],
+                required: false
+            }
+        ] : [];
+
         // Parallel status counts (All, Kyc Pending, R-KYC Pending, Non Order, Start Order, Daily Order)
         const [
             totalCount,
@@ -340,7 +349,7 @@ export const getAllUsers = async (req, res, next) => {
             inactiveCount,
             deletedCount
         ] = await Promise.all([
-            User.count({ where: searchWhere, include, distinct: true }),
+            User.count({ where: searchWhere, include: countInclude, distinct: true, col: 'id' }),
             User.count({
                 where: {
                     ...searchWhere,
@@ -348,8 +357,9 @@ export const getAllUsers = async (req, res, next) => {
                         sequelize.literal(DAILY_ORDER_SQL)
                     ]
                 },
-                include,
-                distinct: true
+                include: countInclude,
+                distinct: true,
+                col: 'id'
             }),
             User.count({
                 where: {
@@ -358,8 +368,9 @@ export const getAllUsers = async (req, res, next) => {
                         sequelize.literal(KYC_PENDING_SQL)
                     ]
                 },
-                include,
-                distinct: true
+                include: countInclude,
+                distinct: true,
+                col: 'id'
             }),
             User.count({
                 where: {
@@ -368,8 +379,9 @@ export const getAllUsers = async (req, res, next) => {
                         sequelize.literal(NON_ORDER_SQL)
                     ]
                 },
-                include,
-                distinct: true
+                include: countInclude,
+                distinct: true,
+                col: 'id'
             }),
             User.count({
                 where: {
@@ -378,8 +390,9 @@ export const getAllUsers = async (req, res, next) => {
                         sequelize.literal(START_ORDER_SQL)
                     ]
                 },
-                include,
-                distinct: true
+                include: countInclude,
+                distinct: true,
+                col: 'id'
             }),
             User.count({
                 where: {
@@ -388,12 +401,13 @@ export const getAllUsers = async (req, res, next) => {
                         sequelize.literal(RKYC_CONDITION_SQL)
                     ]
                 },
-                include,
-                distinct: true
+                include: countInclude,
+                distinct: true,
+                col: 'id'
             }),
-            User.count({ where: { ...searchWhere, status: 'Active' }, include, distinct: true }),
-            User.count({ where: { ...searchWhere, status: 'Inactive' }, include, distinct: true }),
-            User.count({ where: { ...searchWhere, status: 'Deleted' }, include, distinct: true }),
+            User.count({ where: { ...searchWhere, status: 'Active' }, include: countInclude, distinct: true, col: 'id' }),
+            User.count({ where: { ...searchWhere, status: 'Inactive' }, include: countInclude, distinct: true, col: 'id' }),
+            User.count({ where: { ...searchWhere, status: 'Deleted' }, include: countInclude, distinct: true, col: 'id' }),
         ]);
 
         const statusCounts = {
@@ -410,17 +424,42 @@ export const getAllUsers = async (req, res, next) => {
             Deleted: deletedCount
         };
 
-        // Calculate user counts by routeCategory for the currently active tab status, search and KYC status filters
+        // Calculate user counts by routeCategory, deliveryRoundTiming, and godownId in parallel
         const routeCountWhere = { ...where };
         delete routeCountWhere.routeCategoryId;
         routeCountWhere.routeCategoryId = { [Op.ne]: null };
 
-        const routeCountsRaw = await User.count({
-            where: routeCountWhere,
-            include,
-            distinct: true,
-            group: ['routeCategoryId']
-        });
+        const timingCountWhere = { ...where };
+        delete timingCountWhere.deliveryRoundTiming;
+        timingCountWhere.deliveryRoundTiming = { [Op.ne]: null };
+
+        const godownCountWhere = { ...where };
+        delete godownCountWhere.godownId;
+        godownCountWhere.godownId = { [Op.ne]: null };
+
+        const [routeCountsRaw, timingCountsRaw, godownCountsRaw] = await Promise.all([
+            User.count({
+                where: routeCountWhere,
+                include: countInclude,
+                distinct: true,
+                col: 'id',
+                group: ['routeCategoryId']
+            }),
+            User.count({
+                where: timingCountWhere,
+                include: countInclude,
+                distinct: true,
+                col: 'id',
+                group: ['deliveryRoundTiming']
+            }),
+            User.count({
+                where: godownCountWhere,
+                include: countInclude,
+                distinct: true,
+                col: 'id',
+                group: ['godownId']
+            })
+        ]);
 
         const routeCounts = {};
         if (Array.isArray(routeCountsRaw)) {
@@ -432,18 +471,6 @@ export const getAllUsers = async (req, res, next) => {
             });
         }
 
-        // Calculate user counts by deliveryRoundTiming for the currently active tab status, search and KYC status filters
-        const timingCountWhere = { ...where };
-        delete timingCountWhere.deliveryRoundTiming;
-        timingCountWhere.deliveryRoundTiming = { [Op.ne]: null };
-
-        const timingCountsRaw = await User.count({
-            where: timingCountWhere,
-            include,
-            distinct: true,
-            group: ['deliveryRoundTiming']
-        });
-
         const timingCounts = {};
         if (Array.isArray(timingCountsRaw)) {
             timingCountsRaw.forEach(r => {
@@ -453,18 +480,6 @@ export const getAllUsers = async (req, res, next) => {
                 }
             });
         }
-
-        // Calculate user counts by godownId
-        const godownCountWhere = { ...where };
-        delete godownCountWhere.godownId;
-        godownCountWhere.godownId = { [Op.ne]: null };
-
-        const godownCountsRaw = await User.count({
-            where: godownCountWhere,
-            include,
-            distinct: true,
-            group: ['godownId']
-        });
 
         const godownCounts = {};
         if (Array.isArray(godownCountsRaw)) {

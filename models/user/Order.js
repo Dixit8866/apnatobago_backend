@@ -187,6 +187,19 @@ const Order = sequelize.define(
         timestamps: true,
         tableName: 'orders',
         paranoid: true,
+        indexes: [
+            { fields: ['userId'] },
+            { fields: ['orderStatus'] },
+            { fields: ['createdAt'] },
+            { fields: ['godownId'] },
+            { fields: ['routeCategoryId'] },
+            { fields: ['deliveryDate'] },
+            { fields: ['paymentStatus'] },
+            { fields: ['paymentCollectStatus'] },
+            { fields: ['orderStatus', 'createdAt'] },
+            { fields: ['userId', 'orderStatus'] },
+            { fields: ['godownId', 'orderStatus'] }
+        ]
     }
 );
 

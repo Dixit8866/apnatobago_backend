@@ -54,6 +54,11 @@ const OutletOrderItem = sequelize.define(
     {
         timestamps: true,
         tableName: 'outlet_order_items',
+        indexes: [
+            { fields: ['outletOrderId'] },
+            { fields: ['productId'] },
+            { fields: ['variantId'] }
+        ]
     }
 );
 
