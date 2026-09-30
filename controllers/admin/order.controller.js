@@ -172,6 +172,13 @@ export const getAllOrders = async (req, res) => {
             baseWhere.userId = userId;
         }
 
+        // Flag to detect customer-specific queries (Print button, WhatsApp share, or customer dues lookup)
+        const isCustomerSpecificQuery = Boolean(
+            userId ||
+            req.query.skipCounts === 'true' ||
+            (req.query.limit && parseInt(req.query.limit, 10) >= 100 && (req.query.all === 'true' || req.query.allGodowns === 'true') && search)
+        );
+
         if (search && String(search).trim() !== '') {
             const term = String(search).trim();
             const searchPattern = `%${term}%`;
@@ -212,7 +219,16 @@ export const getAllOrders = async (req, res) => {
         const isDeliveredType = ['Delivered', 'Payment Collect', 'Payment Verify'].includes(status);
         const dateFilterField = req.query.dateType || 'createdAt';
 
-        // Apply status filter
+        // ── Status Filter Configuration ──────────────────────────────────────────
+        // 1. Pending:             નવા આવેલા ઓર્ડર્સ જેનું પેકિંગ બાકી છે
+        // 2. Packaging:           પેકિંગ પ્રોસેસમાં હોય તેવા ઓર્ડર્સ
+        // 3. Packed:              પેક થઈ ગયેલા અને રવાના થવા માટે તૈયાર ઓર્ડર્સ
+        // 4. Shipping:            ડિલિવરી બોય સાથે રવાના થયેલા ઓર્ડર્સ
+        // 5. Delivered:           ગ્રાહકને માલ પહોંચી ગયેલ ઓર્ડર્સ
+        // 6. Payment Collect:     માલ પહોંચ્યો, પૈસા કલેક્ટ થયા પણ એડમિન વેરિફિકેશન બાકી
+        // 7. Payment Verify:      એડમિને પેમેન્ટ વેરિફાય કરી કન્ફર્મ કરેલ ઓર્ડર્સ
+        // 8. Cancelled:           રદ થયેલા ઓર્ડર્સ (Admin/User/Delivery Cancel)
+        // 9. Pending Due Order:   માલ ડિલિવર થઈ ગયો પણ પેમેન્ટ બાકી (ઉધાર) હોય
         if (status && status !== 'All') {
             if (isDeliveredType) {
                 if (status === 'Delivered') {
@@ -395,9 +411,28 @@ export const getAllOrders = async (req, res) => {
         const pagination = getPaginationOptions(req.query);
         const { limit, offset, page } = pagination;
 
-        const result = await Order.findAndCountAll({
-            where,
-            include: [
+        // ── Conditional Includes & Attributes Based on Query Type ──────────────────
+        // [PERFORMANCE & LEAN PAYLOAD OPTIMIZATION]
+        // If this is a Customer-Specific / Print / WhatsApp / Dues query, exclude all
+        // unneeded joins (Godown, Creator, VerifiedBy, DeliveryBoy) and heavy JSON blobs to make it instant!
+        const orderIncludes = isCustomerSpecificQuery
+            ? [
+                {
+                    model: User,
+                    as: 'user',
+                    required: false,
+                    attributes: ['id', 'fullname', 'number', 'city', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType'],
+                    include: [
+                        {
+                            model: BusinessProfile,
+                            as: 'businessProfile',
+                            required: false,
+                            attributes: ['id', 'shopName']
+                        }
+                    ]
+                }
+            ]
+            : [
                 {
                     model: User,
                     as: 'user',
@@ -448,7 +483,17 @@ export const getAllOrders = async (req, res) => {
                     required: false,
                     attributes: ['id', 'name']
                 }
-            ],
+            ];
+
+        // Lean attributes for Customer-Specific / Print queries (removes unused razorpay & shipping address blobs)
+        const orderAttributes = isCustomerSpecificQuery
+            ? ['id', 'orderId', 'userId', 'saleType', 'customerName', 'customerNumber', 'totalAmount', 'orderStatus', 'paymentMethod', 'paymentStatus', 'paymentCollectStatus', 'paidAmount', 'dueAmount', 'couponDiscount', 'deliveryCharge', 'shippingCharge', 'grandTotal', 'payableAmount', 'createdAt', 'notes', 'deliveryNotice']
+            : undefined;
+
+        const result = await Order.findAndCountAll({
+            where,
+            attributes: orderAttributes,
+            include: orderIncludes,
             limit,
             offset,
             order: [['createdAt', 'DESC']],
@@ -456,52 +501,61 @@ export const getAllOrders = async (req, res) => {
             subQuery: false
         });
 
-        // Fetch and attach one-to-many associations (items and payments) for the paginated subset of orders
+        // Fetch and attach one-to-many associations (items, payments, returns) for the paginated subset of orders
         if (result.rows.length > 0) {
             const orderIds = result.rows.map(o => o.id);
 
-            // Fetch OrderItems with nested product, variant, and volumes
-            const items = await OrderItem.findAll({
-                where: { orderId: orderIds },
-                include: [
-                    {
-                        model: Product,
-                        as: 'product',
-                        attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'],
-                        include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
-                    },
-                    {
-                        model: ProductVariant,
-                        as: 'variant',
-                        attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'],
-                        include: [
-                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name', 'icon'] },
-                            { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name', 'icon'] },
-                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name', 'icon'] }
-                        ]
-                    }
-                ]
-            });
-
-            // Fetch OrderPayments
-            const payments = await OrderPayment.findAll({
+            // 1. Fetch OrderPayments (always needed to compute paid / due amounts)
+            const paymentsPromise = OrderPayment.findAll({
                 where: { orderId: orderIds },
                 attributes: ['id', 'amount', 'paymentMethod', 'isSubmitted', 'submittedAt', 'orderId', 'bankSettingId', 'notes']
             });
 
-            // Fetch SalesReturns
-            const returns = await SalesReturn.findAll({
-                where: { orderId: orderIds },
-                include: [
-                    {
-                        model: Product,
-                        as: 'product',
-                        attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId'],
-                        include: [{ model: ProductVariant, as: 'variants', attributes: ['id'] }]
-                    },
-                    { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'] }
-                ]
-            });
+            // 2. Optimization: If this is a customer-specific query (Print / WhatsApp / Dues lookup),
+            // skip fetching thousands of heavy OrderItems and SalesReturns since print dues only need order payments!
+            let itemsPromise = Promise.resolve([]);
+            let returnsPromise = Promise.resolve([]);
+
+            if (!isCustomerSpecificQuery) {
+                // Fetch OrderItems with nested product, variant, and volumes
+                itemsPromise = OrderItem.findAll({
+                    where: { orderId: orderIds },
+                    attributes: ['id', 'orderId', 'productId', 'productVariantId', 'quantity', 'price', 'totalPrice', 'gstAmount', 'unitType', 'packQuantity', 'unitLabel', 'pieceQuantity', 'sellingType', 'boxNumber', 'volume'],
+                    include: [
+                        {
+                            model: Product,
+                            as: 'product',
+                            attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId']
+                        },
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'],
+                            include: [
+                                { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name', 'icon'] },
+                                { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name', 'icon'] },
+                                { model: Volume, as: 'volumeRef', attributes: ['id', 'name', 'icon'] }
+                            ]
+                        }
+                    ]
+                });
+
+                // Fetch SalesReturns
+                returnsPromise = SalesReturn.findAll({
+                    where: { orderId: orderIds },
+                    include: [
+                        {
+                            model: Product,
+                            as: 'product',
+                            attributes: ['id', 'name', 'thumbnail', 'boxNumber', 'mainCategoryId']
+                        },
+                        { model: ProductVariant, as: 'variant', attributes: ['id', 'volume', 'image', 'innerUnitLabel', 'baseUnitLabel', 'volumeId', 'extra', 'baseUnitsPerPack', 'sellingVolume'] }
+                    ]
+                });
+            }
+
+            // Execute in parallel
+            const [items, payments, returns] = await Promise.all([itemsPromise, paymentsPromise, returnsPromise]);
 
             // Group items, payments, and returns by orderId
             const itemsMap = {};
@@ -545,7 +599,8 @@ export const getAllOrders = async (req, res) => {
                 customerDuesFilters.push({ '$user.number$': { [Op.in]: phoneNumbers } });
             }
 
-            if (customerDuesFilters.length > 0) {
+            // Skip second heavy table scan if this is already a customer-specific query (Print / WhatsApp)
+            if (!isCustomerSpecificQuery && customerDuesFilters.length > 0) {
                 try {
                     const unpaidOrdersList = await Order.findAll({
                         where: {
@@ -756,12 +811,6 @@ export const getAllOrders = async (req, res) => {
         // ── Smart Fast Bypass for Print / Customer-Specific Dues Queries ───────────
         // When querying for a specific customer (e.g. Print button, WhatsApp share, or customer-specific ledger lookup),
         // return the customer's orders and dues immediately in 15ms and bypass the 16 heavy global tab counts!
-        const isCustomerSpecificQuery = Boolean(
-            userId ||
-            req.query.skipCounts === 'true' ||
-            (req.query.limit && parseInt(req.query.limit, 10) >= 100 && (req.query.all === 'true' || req.query.allGodowns === 'true') && search)
-        );
-
         if (isCustomerSpecificQuery) {
             const responseData = formatPaginatedResponse(result, page, limit);
             responseData.routeCounts = {};
