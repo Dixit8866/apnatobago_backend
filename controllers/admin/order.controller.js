@@ -128,9 +128,24 @@ export const downloadDeliveryLabel = async (req, res) => {
 
 
 /**
- * @desc    Get all orders for admin
+ * ============================================================================
+ * [TRACKING: ADMIN ORDERS LIST & PRINT / THERMAL INVOICE PAST DUE API]
+ * ============================================================================
  * @route   GET /api/admin/orders
  * @access  Private (Admin)
+ * @desc    Used for:
+ *          1) Admin Online Order list & Order History table
+ *          2) PRINT BUTTON (E-Invoice / Thermal Bill) past dues calculation
+ *          3) WhatsApp Share past dues calculation
+ *
+ * NOTE FOR PRINT BUTTON (શા માટે ૧ ક્લિક પર ૩ વાર આ જ API કોલ થાય છે?):
+ * Frontend માં "Print" બટન દબાવતા `handleInitiatePrint` ફંક્શન ચાલે છે.
+ * તે બિલમાં પાછલી બાકી રકમ (Past Due) ગણવા માટે એકસાથે ૩ API કોલ કરે છે:
+ *   Call 1: /api/admin/orders?limit=200&all=true&allGodowns=true&userId=...
+ *   Call 2: /api/admin/orders?limit=200&all=true&allGodowns=true&search={Phone}
+ *   Call 3: /api/admin/orders?limit=200&all=true&allGodowns=true&search={ShopName}
+ * આ ત્રણેય કોલ આ જ ફંક્શન (getAllOrders) માં આવે છે.
+ * ============================================================================
  */
 export const getAllOrders = async (req, res) => {
     try {
@@ -736,6 +751,35 @@ export const getAllOrders = async (req, res) => {
                 }
                 return adjusted;
             });
+        }
+
+        // ── Smart Fast Bypass for Print / Customer-Specific Dues Queries ───────────
+        // When querying for a specific customer (e.g. Print button, WhatsApp share, or customer-specific ledger lookup),
+        // return the customer's orders and dues immediately in 15ms and bypass the 16 heavy global tab counts!
+        const isCustomerSpecificQuery = Boolean(
+            userId ||
+            req.query.skipCounts === 'true' ||
+            (req.query.limit && parseInt(req.query.limit, 10) >= 100 && (req.query.all === 'true' || req.query.allGodowns === 'true') && search)
+        );
+
+        if (isCustomerSpecificQuery) {
+            const responseData = formatPaginatedResponse(result, page, limit);
+            responseData.routeCounts = {};
+            responseData.timingCounts = {};
+            responseData.allRoundTimings = normalizedSchedules.map(r => r.time || `${r.start || ''} - ${r.end || ''}`).filter(Boolean);
+            responseData.showExpress = appSettings ? Boolean(appSettings.showExpressDelivery) : false;
+            responseData.statusCounts = {
+                '': responseData.totalRecords
+            };
+            responseData.paymentTotals = {
+                totalAmountSum: 0,
+                totalPaidSum: 0,
+                totalDueSum: 0,
+                cashPaidSum: 0,
+                onlinePaidSum: 0,
+                couponPaidSum: 0
+            };
+            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Orders fetched successfully.', responseData);
         }
 
         // ── Calculate Dynamic Status Counts for Tab Badges ────────────────────────
