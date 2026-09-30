@@ -215,7 +215,7 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             transaction: t
         });
         const availableCredit = creditFinancials.availableCredit;
-        const totalPastDue = creditFinancials.usedCredit || 0;
+        const totalPastDue = creditFinancials.totalPendingDue || creditFinancials.usedCredit || 0;
 
         // Fetch past due order models for settling past due payments
         let pastDueOrders = [];
@@ -312,6 +312,14 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             }, { transaction: t });
 
             await restoreUserCreditFromPayment(pOrder.id, clearAmt, user, t);
+        }
+
+        // If there is still payment collected to clear past due and user has temporaryPendingDue, clear it
+        if (remainingToClearPast > 0 && user && parseFloat(user.temporaryPendingDue || 0) > 0) {
+            const clearTemp = Math.min(parseFloat(user.temporaryPendingDue), remainingToClearPast);
+            user.temporaryPendingDue = Math.max(0, parseFloat((parseFloat(user.temporaryPendingDue) - clearTemp).toFixed(2)));
+            remainingToClearPast -= clearTemp;
+            await user.save({ transaction: t });
         }
 
         // Create Sales Return records if provided

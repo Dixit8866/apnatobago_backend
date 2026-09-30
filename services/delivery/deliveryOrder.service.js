@@ -283,7 +283,7 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     {
                         model: User,
                         as: 'user',
-                        attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
+                        attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'temporaryPendingDue'],
                         include: [
                             {
                                 model: BusinessProfile,
@@ -507,10 +507,28 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
 
                 const userAdvanceJama = parseFloat(data.order?.user?.advanceJama || 0);
                 const userCreditVal = parseFloat(data.order?.user?.creditline || 0);
-                const userBalanceType = data.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
+                const accountPendingDue = Math.max(0, parseFloat(data.order?.user?.temporaryPendingDue || 0) || 0);
+                const userBalanceType = data.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 || accountPendingDue > 0 ? 'DUE' : 'CLEAR'));
                 const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
 
-                let totalPastDueAmount = unpaidOrdersSum;
+                // [TEMPORARY PENDING DUE INTEGRATION]: Combine past unpaid orders + account temporary due into totalPastDueAmount
+                let totalPastDueAmount = unpaidOrdersSum + accountPendingDue;
+
+                if (accountPendingDue > 0) {
+                    pastDueOrders.unshift({
+                        id: `temp_due_${uId || data.order?.id}`,
+                        orderId: 'PAST DUE',
+                        billNo: 'PAST DUE',
+                        totalAmount: accountPendingDue,
+                        couponDiscount: 0,
+                        paidAmount: 0,
+                        dueAmount: accountPendingDue,
+                        paymentStatus: 'Pending',
+                        orderStatus: 'Pending Due',
+                        createdAt: data.order?.createdAt || new Date(),
+                        isTemporaryDue: true
+                    });
+                }
 
                 const currentPayments = paymentsMap[data.order?.id] || [];
                 const currentFin = calculateOrderFinancials(data.order, currentPayments);
@@ -560,10 +578,15 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     totalCustomerDue += calculatedDueAmt;
                 }
 
+                // Add accountPendingDue to total customer due
+                totalCustomerDue += accountPendingDue;
+
                 const baseCreditLimit = userCreditVal;
-                const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
+                const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - totalCustomerDue).toFixed(2)));
 
                 data.pastDueOrders = pastDueOrders;
+                data.temporaryPendingDue = accountPendingDue.toFixed(2);
+                data.accountPendingDue = accountPendingDue.toFixed(2);
                 data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
                 data.duePayment = totalPastDueAmount.toFixed(2);
                 data.pastDueAmount = totalPastDueAmount.toFixed(2);
@@ -600,6 +623,8 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     data.order.totalAmount = fullTotal.toFixed(2);
                     data.order.paymentStatus = currentFin.paymentStatus;
                     data.order.netPayableAmount = netOrderCollectible.toFixed(2);
+                    data.order.temporaryPendingDue = accountPendingDue.toFixed(2);
+                    data.order.accountPendingDue = accountPendingDue.toFixed(2);
                     data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
                     data.order.duePayment = totalPastDueAmount.toFixed(2);
                     data.order.pastDueAmount = totalPastDueAmount.toFixed(2);
@@ -615,6 +640,8 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     if (data.order.user) {
                         data.order.user.shopName = data.order.user.businessProfile?.shopName || '';
                         data.order.user.shopAddress = data.order.user.businessProfile?.shopAddress || '';
+                        data.order.user.temporaryPendingDue = accountPendingDue.toFixed(2);
+                        data.order.user.accountPendingDue = accountPendingDue.toFixed(2);
                         data.order.user.creditline = availableCredit.toFixed(2);
                         data.order.user.availableCredit = availableCredit.toFixed(2);
                         data.order.user.availableDue = availableCredit.toFixed(2);
@@ -666,7 +693,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                     {
                         model: User,
                         as: 'user',
-                        attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit', 'advanceJama', 'balanceType'],
+                        attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit', 'advanceJama', 'balanceType', 'temporaryPendingDue'],
                         include: [
                             {
                                 model: BusinessProfile,
@@ -903,10 +930,28 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
     const userAdvanceJama = parseFloat(assignment.order?.user?.advanceJama || 0);
     const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
-    const userBalanceType = assignment.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
+    const accountPendingDue = Math.max(0, parseFloat(assignment.order?.user?.temporaryPendingDue || 0) || 0);
+    const userBalanceType = assignment.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 || accountPendingDue > 0 ? 'DUE' : 'CLEAR'));
     const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
 
-    let totalPastDueAmount = unpaidOrdersSum;
+    // [TEMPORARY PENDING DUE INTEGRATION]: Combine past unpaid orders + account temporary due into totalPastDueAmount
+    let totalPastDueAmount = unpaidOrdersSum + accountPendingDue;
+
+    if (accountPendingDue > 0) {
+        pastDueOrders.unshift({
+            id: `temp_due_${userId || assignment.order?.id}`,
+            orderId: 'PAST DUE',
+            billNo: 'PAST DUE',
+            totalAmount: accountPendingDue,
+            couponDiscount: 0,
+            paidAmount: 0,
+            dueAmount: accountPendingDue,
+            paymentStatus: 'Pending',
+            orderStatus: 'Pending Due',
+            createdAt: assignment.order?.createdAt || new Date(),
+            isTemporaryDue: true
+        });
+    }
 
     const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
     const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(assignment.order?.orderStatus);
@@ -925,7 +970,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
         excludeOrderId: currentOrderDbId 
     });
 
-    let totalCustomerDue = creditFinancials.usedCredit;
+    let totalCustomerDue = creditFinancials.totalPendingDue || (creditFinancials.usedCredit + accountPendingDue);
     if (isDelivered && calculatedDueAmt > 0) {
         totalCustomerDue += calculatedDueAmt;
     }
@@ -936,6 +981,8 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     const availableCredit = Math.max(0, parseFloat((baseCreditLimit + advanceJamaForCredit - totalCustomerDue).toFixed(2)));
 
     data.pastDueOrders = pastDueOrders;
+    data.temporaryPendingDue = accountPendingDue.toFixed(2);
+    data.accountPendingDue = accountPendingDue.toFixed(2);
     data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
     data.duePayment = totalPastDueAmount.toFixed(2);
     data.pastDueAmount = totalPastDueAmount.toFixed(2);
@@ -965,6 +1012,8 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
         data.order.netPayableAmount = netOrderCollectible.toFixed(2);
         data.order.payableAmount = netOrderCollectible.toFixed(2);
         data.order.dueAmount = netOrderCollectible.toFixed(2);
+        data.order.temporaryPendingDue = accountPendingDue.toFixed(2);
+        data.order.accountPendingDue = accountPendingDue.toFixed(2);
         data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
         data.order.duePayment = totalPastDueAmount.toFixed(2);
         data.order.salesReturnCalculation = data.salesReturnCalculation;
@@ -975,6 +1024,8 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     }
 
     if (data.order && data.order.user) {
+        data.order.user.temporaryPendingDue = accountPendingDue.toFixed(2);
+        data.order.user.accountPendingDue = accountPendingDue.toFixed(2);
         data.order.user.creditline = availableCredit.toFixed(2);
         data.order.user.availableCredit = availableCredit.toFixed(2);
         data.order.user.availableDue = availableCredit.toFixed(2);
@@ -1000,7 +1051,7 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
     let user = null;
     if (uuidPattern.test(userId)) {
         user = await User.findByPk(userId, {
-            attributes: ['id', 'fullname', 'number', 'creditline'],
+            attributes: ['id', 'fullname', 'number', 'creditline', 'temporaryPendingDue'],
             include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
         });
     }
@@ -1010,7 +1061,7 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
         if (cleanPhone.length >= 7) {
             user = await User.findOne({
                 where: { number: { [Op.like]: `%${cleanPhone}` } },
-                attributes: ['id', 'fullname', 'number', 'creditline'],
+                attributes: ['id', 'fullname', 'number', 'creditline', 'temporaryPendingDue'],
                 include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopAddress'] }]
             });
         }
@@ -1262,6 +1313,32 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
     const latest5Bills = previousBills.slice(0, 5);
 
     const creditFinancials = await getCustomerCreditFinancials({ userId, userPhone: cleanPhone });
+
+    const accountPendingDue = Math.max(0, parseFloat(user?.temporaryPendingDue || 0) || 0);
+    if (accountPendingDue > 0) {
+        previousBills.unshift({
+            id: `temp_due_${user?.id || userId}`,
+            orderId: 'PAST DUE',
+            billNo: 'PAST DUE',
+            orderStatus: 'Delivered',
+            paymentStatus: 'Pending',
+            paymentMethod: 'CREDIT',
+            totalAmount: accountPendingDue.toFixed(2),
+            couponDiscount: '0.00',
+            couponPoints: 0,
+            discountType: null,
+            payableAmount: accountPendingDue.toFixed(2),
+            paidAmount: '0.00',
+            dueAmount: accountPendingDue.toFixed(2),
+            createdAt: new Date().toISOString(),
+            deliveredAt: new Date().toISOString(),
+            items: [],
+            hasReturnableItems: false,
+            isFullyReturned: false,
+            allOrderedItems: [],
+            isTemporaryDue: true
+        });
+    }
 
     return {
         user: {

@@ -119,6 +119,7 @@ export const getUserCreditDetails = async (req, res) => {
 
         const creditData = await getCustomerCreditFinancials({ userId });
 
+        const totalPendingDue = creditData.totalPendingDue || (creditData.usedCredit + creditData.temporaryPendingDue);
         return sendSuccessResponse(res, HTTP_STATUS.OK, "User credit details fetched.", {
             id: creditData.userId || userId,
             creditLimit: creditData.availableCredit,
@@ -127,9 +128,11 @@ export const getUserCreditDetails = async (req, res) => {
             creditline: creditData.availableCredit,
             availableCredit: creditData.availableCredit,
             availableDue: creditData.availableCredit,
-            usedCredit: creditData.usedCredit,
-            totalDue: creditData.totalDue,
-            totalUnpaidDue: creditData.totalUnpaidDue,
+            usedCredit: totalPendingDue,
+            totalDue: totalPendingDue,
+            totalUnpaidDue: totalPendingDue,
+            temporaryPendingDue: creditData.temporaryPendingDue,
+            accountPendingDue: creditData.temporaryPendingDue,
             blockcredit: creditData.blockcredit,
             pastDueOrders: creditData.pastDueOrders
         });
