@@ -520,7 +520,6 @@ export const getAllOrders = async (req, res) => {
                 // Fetch OrderItems with nested product, variant, and volumes
                 itemsPromise = OrderItem.findAll({
                     where: { orderId: orderIds },
-                    attributes: ['id', 'orderId', 'productId', 'productVariantId', 'quantity', 'price', 'totalPrice', 'gstAmount', 'unitType', 'packQuantity', 'unitLabel', 'pieceQuantity', 'sellingType', 'boxNumber', 'volume'],
                     include: [
                         {
                             model: Product,
