@@ -357,7 +357,7 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 Order.findAll({
                     where: {
                         [Op.or]: userConditions,
-                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                        orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
                     },
                     include: [
                         {
@@ -752,7 +752,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
             where: {
                 [Op.or]: userOrConditions,
                 id: { [Op.ne]: currentOrderDbId },
-                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
+                orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
             },
             include: [
                 {

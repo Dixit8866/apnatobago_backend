@@ -487,7 +487,7 @@ export const getAllOrders = async (req, res) => {
 
         // Lean attributes for Customer-Specific / Print queries (removes unused razorpay & shipping address blobs)
         const orderAttributes = isCustomerSpecificQuery
-            ? ['id', 'orderId', 'userId', 'saleType', 'customerName', 'customerNumber', 'totalAmount', 'orderStatus', 'paymentMethod', 'paymentStatus', 'paymentCollectStatus', 'paidAmount', 'dueAmount', 'couponDiscount', 'deliveryCharge', 'shippingCharge', 'grandTotal', 'payableAmount', 'createdAt', 'notes', 'deliveryNotice']
+            ? ['id', 'orderId', 'userId', 'saleType', 'customerName', 'customerNumber', 'totalAmount', 'orderStatus', 'paymentMethod', 'paymentStatus', 'paymentCollectStatus', 'paidAmount', 'dueAmount', 'couponDiscount', 'deliveryCharge', 'createdAt', 'notes', 'deliveryNotice']
             : undefined;
 
         const result = await Order.findAndCountAll({
@@ -603,7 +603,9 @@ export const getAllOrders = async (req, res) => {
                 try {
                     const unpaidOrdersList = await Order.findAll({
                         where: {
-                            orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] },
+                            // [PAST DUE FIX]: Only orders that have been DELIVERED to the customer count as Past Due
+                            // Pending, Packaging, Packed, and Shipping orders are in-progress and must NOT be counted as past dues
+                            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] },
                             [Op.or]: customerDuesFilters
                         },
                         include: [
