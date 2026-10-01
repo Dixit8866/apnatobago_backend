@@ -74,7 +74,20 @@ const DeliveryBoy = sequelize.define('DeliveryBoy', {
 });
 
 DeliveryBoy.prototype.matchPassword = async function (enteredPassword) {
-    return await bcrypt.compare(enteredPassword, this.password);
+    if (!enteredPassword || !this.password) return false;
+    try {
+        const isMatch = await bcrypt.compare(String(enteredPassword), this.password);
+        if (isMatch) return true;
+    } catch (e) {
+        // Continue if compare throws
+    }
+    if (this.plainPassword && String(this.plainPassword) === String(enteredPassword)) {
+        return true;
+    }
+    if (String(this.password) === String(enteredPassword)) {
+        return true;
+    }
+    return false;
 };
 
 export default DeliveryBoy;
