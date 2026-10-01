@@ -59,12 +59,12 @@ export const loginDeliveryBoy = async (req, res, next) => {
         });
 
         if (!deliveryBoy) {
-            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.INVALID_CREDENTIALS);
+            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Invalid phone number or password.");
         }
 
         const isMatch = await deliveryBoy.matchPassword(password);
         if (!isMatch) {
-            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, APP_MESSAGES.INVALID_CREDENTIALS);
+            return sendErrorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Invalid phone number or password.");
         }
 
         if (deliveryBoy.status !== 'Active') {
@@ -89,7 +89,7 @@ export const loginDeliveryBoy = async (req, res, next) => {
             token,
         };
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, APP_MESSAGES.LOGIN_SUCCESS, {
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "Login successful.", {
             ...deliveryBoyData,
             user: { ...deliveryBoyData }
         });
