@@ -427,9 +427,15 @@ export const getAllOrders = async (req, res) => {
                             model: BusinessProfile,
                             as: 'businessProfile',
                             required: false,
-                            attributes: ['id', 'shopName']
+                            attributes: ['id', 'shopName', 'shopNameAlt']
                         }
                     ]
+                },
+                {
+                    model: OrderAssignment,
+                    as: 'assignment',
+                    required: false,
+                    include: [{ model: DeliveryBoy, as: 'deliveryBoy', required: false, attributes: ['id', 'name', 'phone'] }]
                 }
             ]
             : [
