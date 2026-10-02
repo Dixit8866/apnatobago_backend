@@ -268,7 +268,7 @@ export const getAllOrders = async (req, res) => {
         };
 
         const { startOfTodayUTC, endOfTodayUTC } = getISTTodayRange();
-        const isDeliveredType = ['Delivered', 'Payment Collect', 'Payment Verify'].includes(status);
+        const isDeliveredType = ['Delivered', 'Payment Collect', 'Payment Confirm', 'Payment Verify'].includes(status);
         const dateFilterField = req.query.dateType || 'createdAt';
 
         // ── Status Filter Configuration ──────────────────────────────────────────
@@ -276,7 +276,7 @@ export const getAllOrders = async (req, res) => {
         // 2. Packaging:           પેકિંગ પ્રોસેસમાં હોય તેવા ઓર્ડર્સ
         // 3. Packed:              પેક થઈ ગયેલા અને રવાના થવા માટે તૈયાર ઓર્ડર્સ
         // 4. Shipping:            ડિલિવરી બોય સાથે રવાના થયેલા ઓર્ડર્સ
-        // 5. Delivered:           ગ્રાહકને માલ પહોંચી ગયેલ ઓર્ડર્સ
+        // 5. Delivered:           ગ્રાહકને માલ પહોંચી ગયેલ ઓર્ડર્સ (Today + Past Unverified)
         // 6. Payment Collect:     માલ પહોંચ્યો, પૈસા કલેક્ટ થયા પણ એડમિન વેરિફિકેશન બાકી
         // 7. Payment Verify:      એડમિને પેમેન્ટ વેરિફાય કરી કન્ફર્મ કરેલ ઓર્ડર્સ
         // 8. Cancelled:           રદ થયેલા ઓર્ડર્સ (Admin/User/Delivery Cancel)
@@ -285,9 +285,17 @@ export const getAllOrders = async (req, res) => {
             if (isDeliveredType) {
                 if (status === 'Delivered') {
                     baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
-                } else if (status === 'Payment Collect') {
+                } else if (status === 'Payment Collect' || status === 'Payment Confirm') {
                     baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect'] };
-                    baseWhere.paymentCollectStatus = { [Op.ne]: 'Verified' };
+                    baseWhere[Op.and] = [
+                        {
+                            [Op.or]: [
+                                { paymentCollectStatus: null },
+                                { paymentCollectStatus: { [Op.ne]: 'Verified' } }
+                            ]
+                        },
+                        { orderStatus: { [Op.ne]: 'Payment Verify' } }
+                    ];
                 } else if (status === 'Payment Verify') {
                     baseWhere[Op.or] = [
                         { orderStatus: 'Payment Verify' },
@@ -356,10 +364,31 @@ export const getAllOrders = async (req, res) => {
             } : { createdAt: { [Op.between]: [sDate, eDate] } };
         };
 
-        // Restrict historical statuses (Delivered, Payment Verify, Cancelled) to today by default unless filtered; keep active workflow tabs (Pending, Packaging, Packed, Shipping, Payment Collect) unrestricted so all open orders appear
-        const activeWorkflowStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Payment Collect', 'Pending Due Order', 'All'];
+        // Restrict historical statuses to today by default unless filtered; keep active workflow tabs (Pending, Packaging, Packed, Shipping, Payment Collect, Payment Confirm) unrestricted so all open orders appear
+        const activeWorkflowStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Payment Collect', 'Payment Confirm', 'Pending Due Order', 'All'];
         if (!startDate && !endDate && !date && status && !activeWorkflowStatuses.includes(status)) {
-            dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
+            if (status === 'Delivered') {
+                // Today's delivered orders OR past delivered orders whose payment verification is pending
+                dateClause = {
+                    [Op.or]: [
+                        { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                        {
+                            [Op.and]: [
+                                {
+                                    [Op.or]: [
+                                        { paymentCollectStatus: null },
+                                        { paymentCollectStatus: { [Op.ne]: 'Verified' } }
+                                    ]
+                                },
+                                { orderStatus: { [Op.ne]: 'Payment Verify' } }
+                            ]
+                        }
+                    ]
+                };
+            } else {
+                dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
+            }
         }
 
         let startOfDate = null;
@@ -954,7 +983,15 @@ export const getAllOrders = async (req, res) => {
         const paymentCollectCountWhere = {
             ...countWhere,
             orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
-            paymentCollectStatus: { [Op.ne]: 'Verified' }
+            [Op.and]: [
+                {
+                    [Op.or]: [
+                        { paymentCollectStatus: null },
+                        { paymentCollectStatus: { [Op.ne]: 'Verified' } }
+                    ]
+                },
+                { orderStatus: { [Op.ne]: 'Payment Verify' } }
+            ]
         };
         const paymentVerifyCountWhere = {
             ...countWhere,
@@ -990,11 +1027,24 @@ export const getAllOrders = async (req, res) => {
                 cancelledCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
             }
         } else {
-            // Restrict Delivered, Payment Verify, Pending Due, and Cancelled badges to today in IST by default if no active date filter is set
-            const delClauseToday = buildDateClause(startOfTodayUTC, endOfTodayUTC, 'Delivered');
-            if (delClauseToday && delClauseToday[Op.or]) {
-                deliveredCountWhere[Op.and] = [{ [Op.or]: delClauseToday[Op.or] }];
-            }
+            // Restrict Delivered to today's delivered OR past orders with pending payment verification
+            deliveredCountWhere[Op.and] = [{
+                [Op.or]: [
+                    { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
+                    {
+                        [Op.and]: [
+                            {
+                                [Op.or]: [
+                                    { paymentCollectStatus: null },
+                                    { paymentCollectStatus: { [Op.ne]: 'Verified' } }
+                                ]
+                            },
+                            { orderStatus: { [Op.ne]: 'Payment Verify' } }
+                        ]
+                    }
+                ]
+            }];
 
             const genericClauseToday = buildDateClause(startOfTodayUTC, endOfTodayUTC);
             if (genericClauseToday && genericClauseToday[Op.or]) {
@@ -1126,6 +1176,7 @@ export const getAllOrders = async (req, res) => {
             Shipping: shippingCount,
             Delivered: deliveredCount,
             'Payment Collect': paymentCollectCount,
+            'Payment Confirm': paymentCollectCount,
             'Payment Verify': paymentVerifyCount,
             Cancelled: cancelledCount,
             SalesReturn: salesReturnCount,
