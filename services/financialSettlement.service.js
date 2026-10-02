@@ -34,7 +34,12 @@ export const calculateOrderFinancials = (order, payments = null) => {
         };
     }
 
-    const totalAmt = parseFloat(order.totalAmount || 0);
+    const rawAmt = order.totalAmount ?? order.grandTotal;
+    const totalAmt = parseFloat(
+        (rawAmt !== null && rawAmt !== undefined && parseFloat(rawAmt) > 0)
+            ? rawAmt
+            : (parseFloat(order.paidAmount || 0) + parseFloat(order.dueAmount || 0)) || 0
+    );
     const couponDisc = parseFloat(order.couponDiscount || 0);
     const deliveryCharge = parseFloat(order.deliveryCharge || order.shippingCharge || 0);
     const netPayable = Math.max(0, totalAmt - couponDisc + deliveryCharge);

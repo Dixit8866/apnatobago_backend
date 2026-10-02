@@ -35,16 +35,35 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
     try {
         if (!userId) throw new Error('User ID is required for party ledger sync');
 
-        const user = await User.findByPk(userId, {
-            include: [{ model: BusinessProfile, as: 'businessProfile' }],
-            transaction
-        });
+        let user = null;
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId).trim());
+        if (isUUID) {
+            user = await User.findByPk(userId, {
+                include: [{ model: BusinessProfile, as: 'businessProfile' }],
+                transaction
+            });
+        } else {
+            const cleanPhone = String(userId).replace(/\D/g, '').slice(-10);
+            if (cleanPhone) {
+                user = await User.findOne({
+                    where: { number: { [Op.like]: `%${cleanPhone}` } },
+                    include: [{ model: BusinessProfile, as: 'businessProfile' }],
+                    transaction
+                });
+            }
+        }
 
         if (!user) throw new Error(`User not found: ${userId}`);
 
-        // Fetch all non-cancelled orders for this party
+        // Fetch all non-cancelled orders for this party (match by userId OR phone number)
+        const orderOrConds = [{ userId: user.id }];
+        const cleanUserPhone = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
+        if (cleanUserPhone && cleanUserPhone.length >= 7) {
+            orderOrConds.push({ customerNumber: { [Op.like]: `%${cleanUserPhone}` } });
+        }
+
         const orders = await Order.findAll({
-            where: { userId },
+            where: { [Op.or]: orderOrConds },
             include: [
                 {
                     model: OrderPayment,
@@ -64,7 +83,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         // Fetch manual balance logs (adjustments, direct party payments, opening dues)
         const balanceLogs = await PartyBalanceLog.findAll({
-            where: { userId },
+            where: { userId: user.id },
             order: [['createdAt', 'ASC']],
             transaction
         });
@@ -82,7 +101,15 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const orderDate = ord.createdAt || new Date();
 
             // Total Gross Bill Amount -> DEBIT (ઉધાર)
-            const grossBill = fin.totalAmount || 0;
+            // Use robust fallback so orders with null or 0 totalAmount are properly recognized
+            const orderPaymentsList = ord.payments || [];
+            const paymentsSum = orderPaymentsList.reduce((acc, p) => acc + parseFloat(p.amount || 0), 0);
+            const grossBill = parseFloat(
+                fin.totalAmount > 0 
+                    ? fin.totalAmount 
+                    : (parseFloat(ord.totalAmount || ord.grandTotal || 0) || (parseFloat(ord.paidAmount || 0) + parseFloat(ord.dueAmount || 0)) || paymentsSum || 0)
+            );
+
             if (grossBill > 0) {
                 timelineEvents.push({
                     type: 'SALES_INVOICE',
@@ -394,18 +421,30 @@ export const getPartyLedger = async (userId, query = {}) => {
     try {
         const { startDate, endDate, search, limit = 500, refresh = false } = query;
 
+        let user = null;
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId).trim());
+        if (isUUID) {
+            user = await User.findByPk(userId, {
+                include: [{ model: BusinessProfile, as: 'businessProfile' }]
+            });
+        } else {
+            const cleanPhone = String(userId).replace(/\D/g, '').slice(-10);
+            if (cleanPhone) {
+                user = await User.findOne({
+                    where: { number: { [Op.like]: `%${cleanPhone}` } },
+                    include: [{ model: BusinessProfile, as: 'businessProfile' }]
+                });
+            }
+        }
+
+        if (!user) throw new Error(`User not found: ${userId}`);
+
         // Always force-rebuild from real Orders every time to ensure 100% accuracy
         // This ensures no stale/dummy data is served - ledger is always fresh from DB
-        await syncPartyLedger(userId, { forceRebuild: true });
-
-        const user = await User.findByPk(userId, {
-            include: [{ model: BusinessProfile, as: 'businessProfile' }]
-        });
-
-        if (!user) throw new Error('User not found');
+        await syncPartyLedger(user.id, { forceRebuild: true });
 
         // Build query conditions
-        const where = { userId };
+        const where = { userId: user.id };
 
         if (startDate && endDate) {
             where.date = {
@@ -435,7 +474,7 @@ export const getPartyLedger = async (userId, query = {}) => {
         if (startDate) {
             const priorEntries = await PartyLedger.findAll({
                 where: {
-                    userId,
+                    userId: user.id,
                     date: { [Op.lt]: new Date(`${startDate}T00:00:00.000Z`) }
                 },
                 attributes: ['debit', 'credit']
@@ -447,11 +486,30 @@ export const getPartyLedger = async (userId, query = {}) => {
         }
 
         // Fetch records for this view
-        const entries = await PartyLedger.findAll({
+        const dbEntries = await PartyLedger.findAll({
             where,
             order: [['date', 'ASC'], ['createdAt', 'ASC']],
             limit: parseInt(limit, 10) || 500
         });
+
+        const entries = dbEntries.map(e => e.toJSON ? e.toJSON() : e);
+
+        // Prepend opening balance record if viewing a filtered date range
+        if (startDate) {
+            entries.unshift({
+                id: 'OPENING_BALANCE',
+                userId: user.id,
+                voucherNo: 'OPN-BAL',
+                voucherType: 'OPENING_BALANCE',
+                date: new Date(`${startDate}T00:00:00.000Z`),
+                particulars: 'Opening Balance (શરૂઆતની બાકી)',
+                debit: openingBalance > 0 ? openingBalance.toFixed(2) : '0.00',
+                credit: openingBalance < 0 ? Math.abs(openingBalance).toFixed(2) : '0.00',
+                runningBalance: openingBalance.toFixed(2),
+                paymentMethod: 'NONE',
+                isOpeningBalance: true
+            });
+        }
 
         // Compute totals for this filtered range
         const periodDebit = entries.reduce((acc, r) => acc + parseFloat(r.debit || 0), 0);
