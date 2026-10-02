@@ -633,8 +633,36 @@ const runManualMigrations = async () => {
                 AND NOT EXISTS (SELECT 1 FROM order_payments WHERE "orderId" = orders.id AND "paymentMethod" = 'CASH');
             `);
             await sequelize.query(`
-                UPDATE order_payments SET amount = 8000.00 
-                WHERE "paymentMethod" = 'CREDIT' AND "orderId" IN (SELECT id FROM orders WHERE "orderId" = '100081');
+                UPDATE orders 
+                SET "dueAmount" = 20492.00, "paidAmount" = 0.00, "pastDueCollected" = 28170.00, "paymentMethod" = 'SPLIT' 
+                WHERE "orderId" = '29569';
+
+                INSERT INTO order_payments ("id", "orderId", "amount", "paymentMethod", "notes", "createdAt", "updatedAt")
+                SELECT gen_random_uuid(), id, 12690.00, 'CASH', 'Cash collected during delivery (Past due cleared: ₹12690.00)', "deliveredAt", "deliveredAt"
+                FROM orders WHERE "orderId" = '29569'
+                AND NOT EXISTS (SELECT 1 FROM order_payments WHERE "orderId" = orders.id AND "paymentMethod" = 'CASH');
+
+                UPDATE order_payments SET amount = 12690.00 
+                WHERE "paymentMethod" = 'CASH' AND "orderId" IN (SELECT id FROM orders WHERE "orderId" = '29569');
+
+                INSERT INTO order_payments ("id", "orderId", "amount", "paymentMethod", "bankSettingId", "onlineType", "notes", "createdAt", "updatedAt")
+                SELECT gen_random_uuid(), id, 15480.00, 'ONLINE', (SELECT id FROM bank_settings WHERE "bankName" ILIKE '%Kotak%' LIMIT 1), 'Bank Account', 'Online payment during delivery (Past due cleared: ₹15480.00)', "deliveredAt", "deliveredAt"
+                FROM orders WHERE "orderId" = '29569'
+                AND NOT EXISTS (SELECT 1 FROM order_payments WHERE "orderId" = orders.id AND "paymentMethod" = 'ONLINE');
+
+                UPDATE order_payments 
+                SET amount = 15480.00, 
+                    "bankSettingId" = COALESCE("bankSettingId", (SELECT id FROM bank_settings WHERE "bankName" ILIKE '%Kotak%' LIMIT 1)),
+                    "onlineType" = 'Bank Account'
+                WHERE "paymentMethod" = 'ONLINE' AND "orderId" IN (SELECT id FROM orders WHERE "orderId" = '29569');
+
+                INSERT INTO order_payments ("id", "orderId", "amount", "paymentMethod", "notes", "createdAt", "updatedAt")
+                SELECT gen_random_uuid(), id, 20492.00, 'CREDIT', 'Goods given on credit (baki)', "deliveredAt", "deliveredAt"
+                FROM orders WHERE "orderId" = '29569'
+                AND NOT EXISTS (SELECT 1 FROM order_payments WHERE "orderId" = orders.id AND "paymentMethod" = 'CREDIT');
+
+                UPDATE order_payments SET amount = 20492.00 
+                WHERE "paymentMethod" = 'CREDIT' AND "orderId" IN (SELECT id FROM orders WHERE "orderId" = '29569');
             `);
         } catch (e) { console.log('[Migration Warning] Orders pastDueCollected migration failed:', e.message); }
 
