@@ -20,7 +20,8 @@ import {
     settlePastDuePayment,
     adjustPartyBalance,
     scanAndPackOrder,
-    resolvePartyNotice
+    resolvePartyNotice,
+    getPartyLedger
 } from '../../controllers/admin/order.controller.js';
 import { getSalesReturns, approveSalesReturn, approveAllSalesReturnByOrder, getPartyOrdersForReturn, createAdminSalesReturn, updateCompanyReturnStatus } from '../../controllers/common/salesReturn.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
@@ -38,6 +39,7 @@ router.get('/sales-returns', protect, getSalesReturns);
 router.post('/sales-returns/direct', protect, createAdminSalesReturn);
 router.put('/sales-returns/:id/company-status', protect, updateCompanyReturnStatus);
 router.get('/party/:userId/orders-for-return', protect, getPartyOrdersForReturn);
+router.get('/party/:userId/ledger', protect, getPartyLedger);
 router.post('/merge', protect, mergeOrders);
 router.get('/:id/mergeable', protect, getMergeableOrders);
 

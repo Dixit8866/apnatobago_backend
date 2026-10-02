@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing, OutletOrder, OutletOrderItem, PartyBalanceLog } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing, OutletOrder, OutletOrderItem, PartyBalanceLog, PartyLedger } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -13,6 +13,7 @@ import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered, broadcastUserUpdated } from '../../services/socketEvent.service.js';
 import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
+import { getPartyLedger as getPartyLedgerFromService, syncPartyLedger } from '../../services/partyLedger.service.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -3897,21 +3898,23 @@ export const adjustPartyBalance = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Either userId, orderId, or phoneNumber is required.");
         }
 
-        const validTypes = ['DUE', 'JAMA', 'CLEAR'];
-        const type = String(balanceType || '').toUpperCase();
+        const validTypes = ['DUE', 'JAMA', 'CLEAR', 'FIELD_EDIT', 'UPDATE_SETTINGS'];
+        const type = String(balanceType || (req.body.fieldEdit ? 'FIELD_EDIT' : '')).toUpperCase();
         if (!validTypes.includes(type)) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Invalid balanceType. Must be one of: ${validTypes.join(', ')}`);
         }
 
         const parsedAmount = Math.max(0, parseFloat(amount || 0));
-        if (isNaN(parsedAmount) || parsedAmount < 0) {
+        if (type !== 'FIELD_EDIT' && type !== 'UPDATE_SETTINGS' && (isNaN(parsedAmount) || parsedAmount < 0)) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Amount must be a valid number >= 0.");
         }
 
         // When amount is 0 (or balanceType is CLEAR), reset the party balance and advance Jama to ₹0.00
-        const actionType = (type === 'CLEAR' || parsedAmount === 0) ? 'CLEAR' : type;
+        const actionType = (type === 'FIELD_EDIT' || type === 'UPDATE_SETTINGS')
+            ? type
+            : ((type === 'CLEAR' || parsedAmount === 0) ? 'CLEAR' : type);
 
         const isUUID = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
 
@@ -4088,6 +4091,132 @@ export const adjustPartyBalance = async (req, res) => {
                 : (regularOrders.length > 0 && isUUID(String(regularOrders[regularOrders.length - 1].id))
                     ? regularOrders[regularOrders.length - 1].id
                     : null));
+
+        if (actionType === 'FIELD_EDIT' || actionType === 'UPDATE_SETTINGS') {
+            const updates = {};
+            const field = String(req.body.fieldEdit || req.body.field || '').trim();
+            const val = parseFloat(req.body.value !== undefined ? req.body.value : req.body.amount);
+
+            if (field === 'baseLimit' || field === 'creditline' || req.body.baseLimit !== undefined) {
+                const limitVal = Math.max(0, parseFloat(req.body.baseLimit !== undefined ? req.body.baseLimit : val) || 0);
+                updates.creditline = limitVal;
+                finalCreditline = limitVal;
+            }
+            if (field === 'advJama' || field === 'advanceJama' || req.body.advJama !== undefined) {
+                const advVal = Math.max(0, parseFloat(req.body.advJama !== undefined ? req.body.advJama : val) || 0);
+                updates.advanceJama = advVal;
+                if (advVal > 0) updates.balanceType = 'JAMA';
+            }
+            if (field === 'totalDue' || field === 'temporaryPendingDue' || req.body.totalDue !== undefined) {
+                const dueVal = Math.max(0, parseFloat(req.body.totalDue !== undefined ? req.body.totalDue : val) || 0);
+                updates.temporaryPendingDue = dueVal;
+            }
+            if (req.body.blockcredit !== undefined) {
+                updates.blockcredit = Boolean(req.body.blockcredit);
+            }
+
+            if (Object.keys(updates).length > 0) {
+                for (const u of matchedUsers) {
+                    await u.update(updates, { transaction: t });
+                }
+                if (user && !matchedUsers.some(u => u.id === user.id)) {
+                    await user.update(updates, { transaction: t });
+                }
+            }
+
+            // If usedDue is being directly set/adjusted
+            if (field === 'usedDue' || req.body.usedDue !== undefined) {
+                const targetUsedDue = Math.max(0, parseFloat(req.body.usedDue !== undefined ? req.body.usedDue : val) || 0);
+                let remainingDue = targetUsedDue;
+                for (const ord of pastDeliveredOrders) {
+                    const tot = parseFloat(ord.totalAmount || ord.payableAmount || 0);
+                    await OrderPayment.destroy({
+                        where: { orderId: ord.id, paymentMethod: 'CREDIT' },
+                        transaction: t
+                    });
+                    if (remainingDue > 0) {
+                        const assignDue = Math.min(remainingDue, tot);
+                        const assignPaid = Math.max(0, tot - assignDue);
+                        await ord.update({
+                            dueAmount: assignDue,
+                            creditAmount: assignDue,
+                            paidAmount: assignPaid,
+                            paymentStatus: assignDue === 0 ? 'Paid' : (assignPaid === 0 ? 'Pending' : 'Partial'),
+                            deliveryNotice: null
+                        }, { transaction: t });
+                        if (assignDue > 0) {
+                            await OrderPayment.create({
+                                orderId: ord.id,
+                                amount: assignDue,
+                                paymentMethod: 'CREDIT',
+                                isSubmitted: false,
+                                notes: `Adjusted Credit Due: ₹${assignDue}`,
+                                createdAt: new Date(),
+                                updatedAt: new Date()
+                            }, { transaction: t });
+                        }
+                        remainingDue -= assignDue;
+                    } else {
+                        await ord.update({
+                            dueAmount: 0,
+                            creditAmount: 0,
+                            paidAmount: tot,
+                            paymentStatus: 'Paid',
+                            deliveryNotice: null
+                        }, { transaction: t });
+                    }
+                }
+            }
+
+            await PartyBalanceLog.create({
+                userId: user?.id || null,
+                orderId: logOrderId,
+                type: 'ADJUSTMENT',
+                amount: isNaN(val) ? 0 : val,
+                previousBalance: previousCreditline,
+                newBalance: parseFloat(updates.creditline ?? previousCreditline),
+                note: note || `Admin field edit: ${field} to ₹${val}`,
+                createdById: req.user?.id || null,
+                createdByName: req.user?.fullname || req.user?.name || 'Admin'
+            }, { transaction: t });
+
+            await t.commit();
+
+            // Centralized financials
+            const fin = await getCustomerCreditFinancials({ userId: user?.id || userId });
+
+            try {
+                if (user) broadcastUserUpdated(user);
+                for (const u of matchedUsers) {
+                    if (u.id !== user?.id) broadcastUserUpdated(u);
+                }
+                const io = getIO();
+                if (io) {
+                    io.emit('party_balance_updated', {
+                        userId: user?.id || null,
+                        orderId: logOrderId,
+                        balanceType: 'FIELD_EDIT',
+                        updates,
+                        financials: fin
+                    });
+                }
+            } catch (sockErr) {
+                logger.warn(`[adjustPartyBalance Socket Warning]: ${sockErr.message}`);
+            }
+
+            if (user?.id) {
+                syncPartyLedger(user.id, { forceRebuild: true }).catch(err => {
+                    logger.warn(`[syncPartyLedger Warning]: ${err.message}`);
+                });
+            }
+
+            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Party payment settings updated successfully', {
+                userId: user?.id || null,
+                partyName: resolvedPartyName,
+                updates,
+                financials: fin
+            });
+        }
 
         if (actionType === 'CLEAR') {
             // ── CLEAR BALANCE: 0 credit, 0 advanceJama, 0 due on entire khata and all orders ────
@@ -4545,7 +4674,107 @@ export const resolvePartyNotice = async (req, res) => {
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to resolve party notice.", err.message);
     }
 };
+/**
+ * @desc    Get Party Ledger History + Current Balance Breakdown
+ * @route   GET /api/admin/orders/party/:userId/ledger
+ * @access  Private (Admin - dixitmathukiya75@gmail.com only)
+ */
+export const getPartyLedger = async (req, res) => {
+    try {
+        const adminEmail = (req.user?.email || '').trim().toLowerCase();
+        if (adminEmail !== 'dixitmathukiya75@gmail.com') {
+            return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, 'Access denied. Only authorized admin can view party ledger.');
+        }
 
+        const { userId } = req.params;
+        if (!userId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'userId is required.');
+        }
 
+        // Fetch party user details with balance fields
+        const user = await User.findByPk(userId, {
+            attributes: ['id', 'fullname', 'number', 'email', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit'],
+            include: [{
+                model: BusinessProfile,
+                as: 'businessProfile',
+                required: false,
+                attributes: ['shopName', 'shopNameAlt', 'shopAddress', 'area']
+            }]
+        });
 
+        if (!user) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Party not found.');
+        }
+
+        // Centralized financial settlement numbers (Single Source of Truth)
+        const financials = await getCustomerCreditFinancials({ userId, user });
+
+        // Accurate double-entry ledger calculation from partyLedger.service
+        let ledgerResult = null;
+        try {
+            ledgerResult = await getPartyLedgerFromService(userId, {
+                startDate: req.query.startDate,
+                endDate: req.query.endDate,
+                search: req.query.search,
+                refresh: true
+            });
+        } catch (lErr) {
+            logger.warn(`[getPartyLedgerService Warning]: ${lErr.message}`);
+        }
+
+        const entries = (ledgerResult?.entries || []).map(e => ({
+            id: e.id,
+            voucherNo: e.voucherNo,
+            voucherType: e.voucherType,
+            date: e.date,
+            particulars: e.particulars,
+            debit: parseFloat(e.debit || 0),
+            credit: parseFloat(e.credit || 0),
+            runningBalance: parseFloat(e.runningBalance || 0),
+            paymentMethod: e.paymentMethod,
+            bankName: e.bankName,
+            referenceId: e.referenceId,
+            note: e.note,
+            createdAt: e.createdAt,
+        }));
+
+        const closingBalance = ledgerResult?.summary?.closingBalance ?? (financials.advanceJama > 0 ? financials.advanceJama : -financials.totalPendingDue);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Party ledger fetched successfully.', {
+            user: {
+                id: user.id,
+                fullname: user.fullname,
+                number: user.number,
+                email: user.email,
+                shopName: user.businessProfile?.shopName || user.businessProfile?.shopNameAlt || user.fullname,
+                shopAddress: user.businessProfile?.shopAddress || '',
+                area: user.businessProfile?.area || '',
+                // Centralized finance breakdown
+                baseCreditLimit: financials.baseCreditLimit,
+                creditline: financials.baseCreditLimit,
+                usedCredit: financials.usedCredit,
+                usedDue: financials.usedCredit,
+                advanceJama: financials.advanceJama,
+                temporaryPendingDue: financials.temporaryPendingDue,
+                totalDue: financials.temporaryPendingDue,
+                totalPendingDue: financials.totalPendingDue,
+                availableCredit: financials.availableCredit,
+                balanceType: user.balanceType || (financials.advanceJama > 0 ? 'JAMA' : 'DUE'),
+                blockcredit: user.blockcredit || false,
+            },
+            summary: ledgerResult?.summary || {
+                openingBalance: 0,
+                totalDebit: entries.reduce((s, e) => s + e.debit, 0),
+                totalCredit: entries.reduce((s, e) => s + e.credit, 0),
+                closingBalance
+            },
+            ledger: entries,
+            closingBalance,
+            totalEntries: entries.length,
+        });
+    } catch (err) {
+        logger.error(`[getPartyLedger] Error: ${err.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to fetch party ledger.', err.message);
+    }
+};
 
