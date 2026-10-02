@@ -23,7 +23,8 @@
     "transfer-100percent:prod": "NODE_ENV=production node scripts/transfer-100percent-stock.js",
     "update-custom-volume": "node scripts/updateCustomSalesVolumeToLowest.js",
     "update-custom-volume:prod": "NODE_ENV=production node scripts/updateCustomSalesVolumeToLowest.js",
-    "clear:orders": "node scripts/clearAllOrders.js"
+    "clear:orders": "node scripts/clearAllOrders.js",
+    "cleanup:old-orders": "node scripts/cleanup-30days-old-orders.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1022.0",
