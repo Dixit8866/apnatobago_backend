@@ -80,6 +80,12 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             salesReturnItems,
             returnItems,
             onlineTransactionId,
+            transactionId,
+            bankSettingId,
+            bankAccountId,
+            bankId,
+            screenshot,
+            onlineType,
             notes,
             note,
             deliveryNote,
@@ -92,6 +98,10 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             couponItems
         } = body;
 
+        const resolvedBankId = bankSettingId || bankAccountId || bankId || null;
+        const resolvedTxnId = onlineTransactionId || transactionId || null;
+        const resolvedOnlineType = onlineType || (resolvedBankId ? 'Bank Account' : null);
+        const resolvedScreenshot = screenshot || null;
         const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
 
         const assignment = await OrderAssignment.findOne({
@@ -301,15 +311,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             pOrder.dueAmount = Math.max(0, pDue - clearAmt);
             pOrder.paidAmount = parseFloat(pOrder.paidAmount || 0) + clearAmt;
             pOrder.paymentStatus = pOrder.dueAmount <= 1e-7 ? 'Paid' : 'Partial';
+            const pastNote = `[Past Due Cleared]: ₹${clearAmt.toFixed(2)} settled during delivery of Order #${assignment.order?.orderId || assignment.orderId}`;
+            pOrder.notes = pOrder.notes ? `${pOrder.notes} | ${pastNote}` : pastNote;
             await pOrder.save({ transaction: t });
-
-            await OrderPayment.create({
-                orderId: pOrder.id,
-                deliveryBoyId,
-                amount: clearAmt,
-                paymentMethod: 'CASH',
-                notes: `Auto-adjusted ₹${clearAmt} past due during delivery of Order #${assignment.order.orderId || assignment.orderId}`
-            }, { transaction: t });
 
             await restoreUserCreditFromPayment(pOrder.id, clearAmt, user, t);
         }
@@ -368,24 +372,25 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         const cashUsedForPastDue = Math.min(inputCash, pastDueSettled);
         const onlineUsedForPastDue = Math.max(0, pastDueSettled - cashUsedForPastDue);
 
-        const currentOrderCash = Math.max(0, inputCash - cashUsedForPastDue);
-        const currentOrderOnline = Math.max(0, inputOnline - onlineUsedForPastDue);
-
         // Record true payments ON CURRENT ASSIGNMENT ORDER
-        if (currentOrderCash > 0) {
+        // (All payments collected by rider during this delivery trip belong to this order voucher)
+        if (inputCash > 0) {
             const existingCash = await OrderPayment.findOne({
                 where: { orderId: assignment.order.id, paymentMethod: 'CASH' },
                 transaction: t
             });
+            const cashNotes = pastDueSettled > 0 && cashUsedForPastDue > 0
+                ? `Cash collected during delivery (Past due cleared: ₹${cashUsedForPastDue.toFixed(2)})`
+                : 'Cash collected during delivery';
             if (existingCash) {
-                await existingCash.update({ amount: currentOrderCash }, { transaction: t });
+                await existingCash.update({ amount: inputCash, notes: cashNotes }, { transaction: t });
             } else {
                 await OrderPayment.create({
                     orderId: assignment.order.id,
                     deliveryBoyId,
-                    amount: currentOrderCash,
+                    amount: inputCash,
                     paymentMethod: 'CASH',
-                    notes: 'Cash collected during delivery'
+                    notes: cashNotes
                 }, { transaction: t });
             }
         } else {
@@ -395,21 +400,34 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             });
         }
 
-        if (currentOrderOnline > 0) {
+        if (inputOnline > 0) {
             const existingOnline = await OrderPayment.findOne({
                 where: { orderId: assignment.order.id, paymentMethod: 'ONLINE' },
                 transaction: t
             });
+            const onlineNotes = pastDueSettled > 0 && onlineUsedForPastDue > 0
+                ? `Online payment during delivery (Past due cleared: ₹${onlineUsedForPastDue.toFixed(2)})`
+                : 'Online payment during delivery';
             if (existingOnline) {
-                await existingOnline.update({ amount: currentOrderOnline, transactionId: onlineTransactionId || existingOnline.transactionId }, { transaction: t });
+                await existingOnline.update({ 
+                    amount: inputOnline, 
+                    bankSettingId: resolvedBankId || existingOnline.bankSettingId,
+                    transactionId: resolvedTxnId || existingOnline.transactionId,
+                    onlineType: resolvedOnlineType || existingOnline.onlineType,
+                    screenshot: resolvedScreenshot || existingOnline.screenshot,
+                    notes: onlineNotes 
+                }, { transaction: t });
             } else {
                 await OrderPayment.create({
                     orderId: assignment.order.id,
                     deliveryBoyId,
-                    amount: currentOrderOnline,
+                    amount: inputOnline,
                     paymentMethod: 'ONLINE',
-                    transactionId: onlineTransactionId,
-                    notes: 'Online payment during delivery'
+                    bankSettingId: resolvedBankId,
+                    transactionId: resolvedTxnId,
+                    onlineType: resolvedOnlineType || 'Bank Account',
+                    screenshot: resolvedScreenshot,
+                    notes: onlineNotes
                 }, { transaction: t });
             }
         } else {
@@ -487,8 +505,8 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         assignment.order.paymentStatus = inputCredit <= 1e-7 ? 'Paid' : 'Partial';
 
         const paymentMethodsUsed = [];
-        if (currentOrderCash > 0) paymentMethodsUsed.push('CASH');
-        if (currentOrderOnline > 0) paymentMethodsUsed.push('ONLINE');
+        if (inputCash > 0) paymentMethodsUsed.push('CASH');
+        if (inputOnline > 0) paymentMethodsUsed.push('ONLINE');
         if (inputCredit > 0) paymentMethodsUsed.push('CREDIT');
         if (inputReturn > 0) paymentMethodsUsed.push('SALES_RETURN');
 
@@ -663,11 +681,21 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
             salesReturnItems,
             returnItems,
             onlineTransactionId,
+            transactionId,
+            bankSettingId,
+            bankAccountId,
+            bankId,
+            screenshot,
+            onlineType,
             notes,
             note,
             deliveryNote
         } = body;
 
+        const resolvedBankId = bankSettingId || bankAccountId || bankId || null;
+        const resolvedTxnId = onlineTransactionId || transactionId || null;
+        const resolvedOnlineType = onlineType || (resolvedBankId ? 'Bank Account' : null);
+        const resolvedScreenshot = screenshot || null;
         const customDeliveryNote = String(notes || note || deliveryNote || '').trim();
 
         if (!orderId) {
@@ -865,7 +893,7 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                 remainingOnline -= deduction;
                 due -= deduction;
                 order.paidAmount = parseFloat(order.paidAmount) + deduction;
-                const txnIdStr = onlineTransactionId ? ` (Txn: ${onlineTransactionId})` : '';
+                const txnIdStr = resolvedTxnId ? ` (Txn: ${resolvedTxnId})` : '';
                 orderNotes.push(`Paid ${deduction} via Online${txnIdStr}`);
                 paymentMethodsUsed.push('ONLINE');
 
@@ -874,7 +902,10 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                     deliveryBoyId,
                     amount: deduction,
                     paymentMethod: 'ONLINE',
-                    transactionId: onlineTransactionId,
+                    bankSettingId: resolvedBankId,
+                    transactionId: resolvedTxnId,
+                    onlineType: resolvedOnlineType || 'Bank Account',
+                    screenshot: resolvedScreenshot,
                     notes: 'Settle Single Payment (Online)'
                 }, { transaction: t });
 
