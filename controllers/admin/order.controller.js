@@ -4038,13 +4038,8 @@ export const adjustPartyBalance = async (req, res) => {
                     ? regularOrders[regularOrders.length - 1].id
                     : null));
 
-<<<<<<< HEAD
-        if (type === 'CLEAR' || parsedAmount === 0) {
-            // ── CLEAR BALANCE: 0 credit, 0 due on entire khata and past delivered orders ────
-=======
         if (actionType === 'CLEAR') {
             // ── CLEAR BALANCE: 0 credit, 0 advanceJama, 0 due on entire khata and all orders ────
->>>>>>> dev
             finalCreditline = 0;
             finalDue = 0;
             for (const u of matchedUsers) {
