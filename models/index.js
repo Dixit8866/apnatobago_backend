@@ -514,7 +514,8 @@ const runManualMigrations = async () => {
         try {
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "accountNumber" VARCHAR(255)');
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "ifscCode" VARCHAR(255)');
-            await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID REFERENCES delivery_boys(id) ON DELETE SET NULL');
+            await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "deliveryBoyId" UUID');
+            await sequelize.query('ALTER TABLE bank_settings DROP CONSTRAINT IF EXISTS "bank_settings_deliveryBoyId_fkey"');
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "deliveryBoyIds" JSONB DEFAULT \'[]\'::jsonb');
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "openingBalance" DECIMAL(15, 2) DEFAULT 0.00');
             await sequelize.query('ALTER TABLE bank_settings ADD COLUMN IF NOT EXISTS "branchName" VARCHAR(255)');
