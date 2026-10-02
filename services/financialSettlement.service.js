@@ -39,8 +39,26 @@ export const calculateOrderFinancials = (order, payments = null) => {
     const deliveryCharge = parseFloat(order.deliveryCharge || order.shippingCharge || 0);
     const netPayable = Math.max(0, totalAmt - couponDisc + deliveryCharge);
 
+    const orderStatusStr = String(order.orderStatus || '').toLowerCase();
+    const isDelivered = ['delivered', 'payment collect', 'payment verify', 'completed'].includes(orderStatusStr);
+
     // Resolve payment records (from parameter, dataValues, or object property)
-    const paymentList = payments || order.payments || order.dataValues?.payments || [];
+    const rawPaymentList = payments || order.payments || order.dataValues?.payments || [];
+    
+    // For in-flight / active orders (Pending, Packaging, Packed, Shipping), exclude phantom admin clearance records
+    const paymentList = (!isDelivered && Array.isArray(rawPaymentList))
+        ? rawPaymentList.filter(p => {
+            const n = String(p.notes || '').toLowerCase();
+            return !(
+                n.includes('party balance cleared') ||
+                n.includes('due cleared by admin') ||
+                n.includes('advance jama credit by admin') ||
+                n.includes('advance credit adjustment') ||
+                n.includes('order settled in full via admin') ||
+                n.includes('adjusted paid portion')
+            );
+        })
+        : rawPaymentList;
     
     let creditPaymentSum = 0;
     let nonCreditPaid = 0;
@@ -62,7 +80,18 @@ export const calculateOrderFinancials = (order, payments = null) => {
             }
         });
     } else {
-        nonCreditPaid = parseFloat(order.paidAmount || 0);
+        // If not delivered, an order is cash on delivery unless prepaid online
+        if (isDelivered) {
+            nonCreditPaid = parseFloat(order.paidAmount || 0);
+        } else {
+            const methodUpper = String(order.paymentMethod || '').toUpperCase();
+            const statusUpper = String(order.paymentStatus || '').toUpperCase();
+            if (['ONLINE', 'RAZORPAY', 'UPI'].includes(methodUpper) && statusUpper === 'PAID') {
+                nonCreditPaid = netPayable;
+            } else {
+                nonCreditPaid = 0;
+            }
+        }
     }
 
     // Determine due amount:
@@ -75,25 +104,27 @@ export const calculateOrderFinancials = (order, payments = null) => {
         paidAmt = netPayable;
     } else if (creditPaymentSum > 0) {
         dueAmt = creditPaymentSum;
-    } else if (order.dueAmount !== undefined && order.dueAmount !== null && order.dueAmount !== '') {
+    } else if (isDelivered && order.dueAmount !== undefined && order.dueAmount !== null && order.dueAmount !== '') {
         const rawDue = parseFloat(order.dueAmount);
-        if (!isNaN(rawDue) && rawDue >= 0) {
+        if (!isNaN(rawDue) && rawDue > 0) {
             dueAmt = rawDue;
         } else {
             dueAmt = Math.max(0, netPayable - nonCreditPaid);
         }
     } else {
+        // For in-flight / non-delivered orders, due is the remaining unpaid portion of net bill!
         dueAmt = Math.max(0, netPayable - nonCreditPaid);
     }
 
     // Determine payment status
     let paymentStatus = 'Pending';
-    const isExplicitlyPaid = String(order.paymentStatus || '').toLowerCase() === 'paid';
-    if ((isExplicitlyPaid && creditPaymentSum <= 0.01 && nonCreditPaid >= netPayable - 0.01) || dueAmt <= 0.01) {
+    if (nonCreditPaid >= netPayable - 0.01 && creditPaymentSum <= 0.01) {
         paymentStatus = 'Paid';
         dueAmt = 0;
-    } else if (paidAmt > 0 || dueAmt > 0) {
+    } else if (paidAmt > 0) {
         paymentStatus = 'Partial';
+    } else {
+        paymentStatus = 'Pending';
     }
 
     return {
