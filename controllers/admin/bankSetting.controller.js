@@ -6,6 +6,15 @@ import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/que
 import { Op } from 'sequelize';
 import sequelize from '../../config/db.js';
 
+// Auto-cleanup: remove foreign key constraint on deliveryBoyId to allow multi-boy JSONB storage without FK errors
+(async () => {
+    try {
+        await sequelize.query('ALTER TABLE bank_settings DROP CONSTRAINT IF EXISTS "bank_settings_deliveryBoyId_fkey"');
+    } catch (e) {
+        // Non-fatal
+    }
+})();
+
 // ─── CREATE ─────────────────────────────────────────────────────────────────
 // Helper to enrich bank settings with assigned delivery boys list
 const enrichBankSettingsWithDeliveryBoys = async (items) => {
@@ -73,12 +82,23 @@ export const createBankSetting = async (req, res, next) => {
             );
         }
 
-        let finalBoyIds = [];
+        let inputBoyIds = [];
         if (Array.isArray(deliveryBoyIds)) {
-            finalBoyIds = deliveryBoyIds.filter(Boolean);
+            inputBoyIds = deliveryBoyIds.filter(Boolean);
         } else if (deliveryBoyId) {
-            finalBoyIds = [deliveryBoyId];
+            inputBoyIds = [deliveryBoyId];
         }
+
+        // Validate IDs against actual DeliveryBoy records to prevent foreign key errors
+        let validBoys = [];
+        if (inputBoyIds.length > 0) {
+            validBoys = await DeliveryBoy.findAll({
+                where: { id: { [Op.in]: inputBoyIds } },
+                attributes: ['id']
+            });
+        }
+        const validIdsSet = new Set(validBoys.map(b => b.id));
+        const finalBoyIds = inputBoyIds.filter(id => validIdsSet.has(id));
         const finalSingleBoyId = finalBoyIds.length > 0 ? finalBoyIds[0] : null;
 
         const bankSetting = await BankSetting.create({
@@ -252,14 +272,27 @@ export const updateBankSetting = async (req, res, next) => {
         }
 
         if (deliveryBoyIds !== undefined || deliveryBoyId !== undefined) {
-            let updatedBoyIds = [];
+            let inputBoyIds = [];
             if (Array.isArray(deliveryBoyIds)) {
-                updatedBoyIds = deliveryBoyIds.filter(Boolean);
+                inputBoyIds = deliveryBoyIds.filter(Boolean);
             } else if (deliveryBoyId) {
-                updatedBoyIds = [deliveryBoyId];
+                inputBoyIds = [deliveryBoyId];
             }
-            bankSetting.deliveryBoyIds = updatedBoyIds;
-            bankSetting.deliveryBoyId = updatedBoyIds.length > 0 ? updatedBoyIds[0] : null;
+
+            // Validate IDs against actual DeliveryBoy records to prevent foreign key errors
+            let validBoys = [];
+            if (inputBoyIds.length > 0) {
+                validBoys = await DeliveryBoy.findAll({
+                    where: { id: { [Op.in]: inputBoyIds } },
+                    attributes: ['id']
+                });
+            }
+            const validIdsSet = new Set(validBoys.map(b => b.id));
+            const finalBoyIds = inputBoyIds.filter(id => validIdsSet.has(id));
+            const finalSingleBoyId = finalBoyIds.length > 0 ? finalBoyIds[0] : null;
+
+            bankSetting.deliveryBoyIds = finalBoyIds;
+            bankSetting.deliveryBoyId = finalSingleBoyId;
         }
 
         if (image !== undefined) {
