@@ -71,6 +71,58 @@ export const extractManualDeliveryNotice = (raw) => {
                OR "notes" ILIKE '%[Due Cleared by Advance Jama Credit]%'
                OR "notes" ILIKE '%[Due Cleared by Admin Adjustment]%';
         `);
+
+        // Clean up any phantom "Party balance cleared" payments created on active in-flight orders
+        await sequelize.query(`
+            DELETE FROM "OrderPayments"
+            WHERE "id" IN (
+                SELECT op."id"
+                FROM "OrderPayments" op
+                JOIN "Orders" o ON o."id" = op."orderId"
+                WHERE LOWER(o."orderStatus") IN ('pending', 'packaging', 'packed', 'shipping', 'in transit', 'out for delivery')
+                  AND (
+                      op."notes" ILIKE '%Party balance cleared%'
+                      OR op."notes" ILIKE '%Due cleared by Admin%'
+                      OR op."notes" ILIKE '%Advance Jama Credit by Admin%'
+                      OR op."notes" ILIKE '%Advance credit adjustment%'
+                      OR op."notes" ILIKE '%Cleared past due via Advance Jama%'
+                      OR op."notes" ILIKE '%Order settled in full via Admin adjustment%'
+                      OR op."notes" ILIKE '%Adjusted Paid Portion%'
+                  )
+            );
+        `);
+        await sequelize.query(`
+            UPDATE "Orders" o
+            SET "paidAmount" = COALESCE((
+                    SELECT SUM(op."amount")
+                    FROM "OrderPayments" op
+                    WHERE op."orderId" = o."id"
+                      AND UPPER(op."paymentMethod") != 'CREDIT'
+                ), 0),
+                "dueAmount" = GREATEST(0, CAST(o."totalAmount" AS NUMERIC) - COALESCE((
+                    SELECT SUM(op."amount")
+                    FROM "OrderPayments" op
+                    WHERE op."orderId" = o."id"
+                      AND UPPER(op."paymentMethod") != 'CREDIT'
+                ), 0)),
+                "paymentStatus" = CASE 
+                    WHEN COALESCE((
+                        SELECT SUM(op."amount")
+                        FROM "OrderPayments" op
+                        WHERE op."orderId" = o."id"
+                          AND UPPER(op."paymentMethod") != 'CREDIT'
+                    ), 0) >= CAST(o."totalAmount" AS NUMERIC) THEN 'Paid'
+                    WHEN COALESCE((
+                        SELECT SUM(op."amount")
+                        FROM "OrderPayments" op
+                        WHERE op."orderId" = o."id"
+                          AND UPPER(op."paymentMethod") != 'CREDIT'
+                    ), 0) > 0 THEN 'Partial'
+                    ELSE 'Pending'
+                END
+            WHERE LOWER(o."orderStatus") IN ('pending', 'packaging', 'packed', 'shipping', 'in transit', 'out for delivery')
+              AND LOWER(o."orderStatus") NOT IN ('cancelled', 'admin cancel', 'user cancel', 'delivery boy cancel');
+        `);
     } catch (e) {
         logger.debug(`[Notice Cleanup Non-fatal]: ${e.message}`);
     }
@@ -183,7 +235,7 @@ export const getAllOrders = async (req, res) => {
             const term = String(search).trim();
             const searchPattern = `%${term}%`;
             const escapedSearch = sequelize.escape(searchPattern);
-            
+
             searchClause = sequelize.literal(`(
                 CAST("Order"."orderId" AS TEXT) ILIKE ${escapedSearch}
                 OR COALESCE("Order"."customerName", '') ILIKE ${escapedSearch}
@@ -248,7 +300,7 @@ export const getAllOrders = async (req, res) => {
                 baseWhere.orderStatus = { [Op.in]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] };
             } else if (status === 'Pending Due Order') {
                 baseWhere.paymentStatus = { [Op.ne]: 'Paid' };
-                baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] };
+                baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
             } else {
                 baseWhere.orderStatus = status;
             }
@@ -615,73 +667,73 @@ export const getAllOrders = async (req, res) => {
                             [Op.or]: customerDuesFilters
                         },
                         include: [
-                        {
-                            model: User,
-                            as: 'user',
-                            required: false,
-                            attributes: ['id', 'number', 'fullname', 'deliveryNotice'],
-                            include: [
-                                {
-                                    model: BusinessProfile,
-                                    as: 'businessProfile',
-                                    required: false,
-                                    attributes: ['id', 'shopName']
-                                }
-                            ]
-                        },
-                        {
-                            model: OrderPayment,
-                            as: 'payments',
-                            required: false,
-                            attributes: ['id', 'amount', 'paymentMethod']
-                        },
-                        {
-                            model: OrderAssignment,
-                            as: 'assignment',
-                            required: false,
-                            attributes: ['id', 'notes']
+                            {
+                                model: User,
+                                as: 'user',
+                                required: false,
+                                attributes: ['id', 'number', 'fullname', 'deliveryNotice'],
+                                include: [
+                                    {
+                                        model: BusinessProfile,
+                                        as: 'businessProfile',
+                                        required: false,
+                                        attributes: ['id', 'shopName']
+                                    }
+                                ]
+                            },
+                            {
+                                model: OrderPayment,
+                                as: 'payments',
+                                required: false,
+                                attributes: ['id', 'amount', 'paymentMethod']
+                            },
+                            {
+                                model: OrderAssignment,
+                                as: 'assignment',
+                                required: false,
+                                attributes: ['id', 'notes']
+                            }
+                        ],
+                        attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'couponDiscount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt', 'notes', 'deliveryNotice'],
+                        order: [['createdAt', 'DESC']]
+                    });
+
+                    unpaidOrdersStore = unpaidOrdersList.map(uo => {
+                        // Centralized financial calculation for unpaid orders
+                        const fin = calculateOrderFinancials(uo, uo.payments);
+                        const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+
+                        const uPhone = String(uo.user?.number || uo.customerNumber || uo.customerPhone || '').replace(/\D/g, '').slice(-10);
+                        const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
+                        const uName = String(uo.user?.fullname || uo.customerName || '').toLowerCase().trim();
+
+                        let pastNote = null;
+                        if (uo.deliveryNotice && !isSystemOrAuditNotice(uo.deliveryNotice)) {
+                            pastNote = extractManualDeliveryNotice(uo.deliveryNotice);
+                        } else if (uo.user?.deliveryNotice && !isSystemOrAuditNotice(uo.user.deliveryNotice)) {
+                            pastNote = extractManualDeliveryNotice(uo.user.deliveryNotice);
+                        } else if (uo.assignment?.notes && !isSystemOrAuditNotice(uo.assignment.notes)) {
+                            pastNote = extractManualDeliveryNotice(uo.assignment.notes);
                         }
-                    ],
-                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'couponDiscount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt', 'notes', 'deliveryNotice'],
-                    order: [['createdAt', 'DESC']]
-                });
 
-                unpaidOrdersStore = unpaidOrdersList.map(uo => {
-                    // Centralized financial calculation for unpaid orders
-                    const fin = calculateOrderFinancials(uo, uo.payments);
-                    const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+                        return {
+                            id: uo.id,
+                            orderId: uo.orderId,
+                            userId: uo.userId || uo.user?.id,
+                            phone: uPhone,
+                            shopName: uShop,
+                            name: uName,
+                            due,
+                            pastNote,
+                            createdAt: new Date(uo.createdAt).getTime()
+                        };
+                    });
 
-                    const uPhone = String(uo.user?.number || uo.customerNumber || uo.customerPhone || '').replace(/\D/g, '').slice(-10);
-                    const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
-                    const uName = String(uo.user?.fullname || uo.customerName || '').toLowerCase().trim();
-
-                    let pastNote = null;
-                    if (uo.deliveryNotice && !isSystemOrAuditNotice(uo.deliveryNotice)) {
-                        pastNote = extractManualDeliveryNotice(uo.deliveryNotice);
-                    } else if (uo.user?.deliveryNotice && !isSystemOrAuditNotice(uo.user.deliveryNotice)) {
-                        pastNote = extractManualDeliveryNotice(uo.user.deliveryNotice);
-                    } else if (uo.assignment?.notes && !isSystemOrAuditNotice(uo.assignment.notes)) {
-                        pastNote = extractManualDeliveryNotice(uo.assignment.notes);
-                    }
-
-                    return {
-                        id: uo.id,
-                        orderId: uo.orderId,
-                        userId: uo.userId || uo.user?.id,
-                        phone: uPhone,
-                        shopName: uShop,
-                        name: uName,
-                        due,
-                        pastNote,
-                        createdAt: new Date(uo.createdAt).getTime()
-                    };
-                });
-
-            } catch (dueErr) {
-                console.error(`[DEBUG DUES ERROR] Previous Unpaid Dues Calc Error: ${dueErr.message}`, dueErr);
-                logger.error(`[Previous Unpaid Dues Calc Error]: ${dueErr.message}`);
+                } catch (dueErr) {
+                    console.error(`[DEBUG DUES ERROR] Previous Unpaid Dues Calc Error: ${dueErr.message}`, dueErr);
+                    logger.error(`[Previous Unpaid Dues Calc Error]: ${dueErr.message}`);
+                }
             }
-        }
 
             // Attach to Sequelize models using setDataValue so they are serialized correctly
             result.rows = result.rows.map(order => {
@@ -899,8 +951,8 @@ export const getAllOrders = async (req, res) => {
         const shippingCountWhere = { ...countWhere, orderStatus: 'Shipping' };
 
         const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
-        const paymentCollectCountWhere = { 
-            ...countWhere, 
+        const paymentCollectCountWhere = {
+            ...countWhere,
             orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
             paymentCollectStatus: { [Op.ne]: 'Verified' }
         };
@@ -916,7 +968,7 @@ export const getAllOrders = async (req, res) => {
         const pendingDueCountWhere = {
             ...countWhere,
             paymentStatus: { [Op.ne]: 'Paid' },
-            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] }
         };
 
         if (isDateFiltered && countDateRange) {
@@ -1030,7 +1082,7 @@ export const getAllOrders = async (req, res) => {
             roundTimingCountsRaw.forEach(r => {
                 const roundId = r.deliveryRoundId;
                 let timing = r.deliveryRoundTiming;
-                
+
                 // Always resolve and normalize timing from normalizedSchedules if roundId is present
                 if (roundId) {
                     const matchedRound = normalizedSchedules.find(s => s.id === roundId);
@@ -1038,7 +1090,7 @@ export const getAllOrders = async (req, res) => {
                         timing = matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`;
                     }
                 }
-                
+
                 if (timing) {
                     timingCounts[timing] = (timingCounts[timing] || 0) + parseInt(r.count || 0, 10);
                 }
@@ -1194,7 +1246,7 @@ export const updateOrderStatus = async (req, res) => {
                 order.deliveredAt = null;
             } else {
                 order.orderStatus = orderStatus;
-                
+
                 // Track timestamps for fulfillment milestones and clear downstream steps on reversion
                 if (orderStatus === 'Pending') {
                     order.packagingAt = null;
@@ -1791,13 +1843,13 @@ export const verifyAndSettleOrder = async (req, res) => {
     const transaction = await sequelize.transaction();
     try {
         const { id } = req.params;
-        const { 
-            cashAmount = 0, 
-            onlineAmount = 0, 
+        const {
+            cashAmount = 0,
+            onlineAmount = 0,
             couponAmount = 0,
-            creditAmount = 0, 
-            bankAccountId, 
-            note, 
+            creditAmount = 0,
+            bankAccountId,
+            note,
             salesReturns = [],
             previousReturnCredit = 0,
             previousReturnOrderId = null,
@@ -2175,7 +2227,7 @@ export const verifyAndSettleOrder = async (req, res) => {
             });
             User.findByPk(order.userId).then(u => {
                 if (u) broadcastUserUpdated(u);
-            }).catch(() => {});
+            }).catch(() => { });
         }
 
         try {
@@ -2407,6 +2459,41 @@ export const getOrderDetails = async (req, res) => {
                 if (matchedRound) {
                     order.setDataValue('deliveryRoundTiming', matchedRound.time || `${matchedRound.start || ''} - ${matchedRound.end || ''}`);
                 }
+            }
+        }
+
+        // [CRITICAL FIX]: For in-flight / active orders (Pending, Packaging, Packed, Shipping),
+        // purge any phantom admin balance clear audit payment records so they do not show up as Cash Payments.
+        const orderStatusLower = String(order.orderStatus || '').toLowerCase();
+        const isInFlight = ['pending', 'packaging', 'packed', 'shipping', 'in transit', 'out for delivery'].includes(orderStatusLower);
+        if (isInFlight && Array.isArray(order.payments) && order.payments.length > 0) {
+            const phantomIds = [];
+            const cleanPayments = order.payments.filter(p => {
+                const n = String(p.notes || '').toLowerCase();
+                const isPhantom = n.includes('party balance cleared') ||
+                    n.includes('due cleared by admin') ||
+                    n.includes('advance jama credit by admin') ||
+                    n.includes('advance credit adjustment') ||
+                    n.includes('order settled in full via admin') ||
+                    n.includes('adjusted paid portion');
+                if (isPhantom && p.id) phantomIds.push(p.id);
+                return !isPhantom;
+            });
+            if (phantomIds.length > 0) {
+                await OrderPayment.destroy({ where: { id: { [Op.in]: phantomIds } } }).catch(() => {});
+                order.setDataValue('payments', cleanPayments);
+                // Recalculate true financials
+                const realPaid = cleanPayments
+                    .filter(p => String(p.paymentMethod || '').toUpperCase() !== 'CREDIT')
+                    .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+                const tot = parseFloat(order.totalAmount || 0);
+                const realDue = Math.max(0, tot - realPaid);
+                const realStatus = realPaid >= tot ? 'Paid' : (realPaid > 0 ? 'Partial' : 'Pending');
+                await order.update({
+                    paidAmount: realPaid,
+                    dueAmount: realDue,
+                    paymentStatus: realStatus
+                }).catch(() => {});
             }
         }
 
@@ -2917,9 +3004,9 @@ export const mergeOrders = async (req, res) => {
 
             // Verify they belong to the same customer
             const sameUser = sourceOrder.userId && targetOrder.userId && sourceOrder.userId === targetOrder.userId;
-            const sameGuest = !sourceOrder.userId && !targetOrder.userId && 
-                              sourceOrder.customerName === targetOrder.customerName && 
-                              sourceOrder.customerNumber === targetOrder.customerNumber;
+            const sameGuest = !sourceOrder.userId && !targetOrder.userId &&
+                sourceOrder.customerName === targetOrder.customerName &&
+                sourceOrder.customerNumber === targetOrder.customerNumber;
 
             if (!sameUser && !sameGuest) {
                 await t.rollback();
@@ -2943,10 +3030,10 @@ export const mergeOrders = async (req, res) => {
                 if (targetItem) {
                     const newQty = Number(targetItem.quantity) + Number(quantity);
                     const newDiscount = Number(targetItem.discount || 0) + Number(discount || 0);
-                    
+
                     // Calculate weighted average price to preserve exact amount
-                    const newPrice = ((Number(targetItem.price) * Number(targetItem.quantity)) + 
-                                      (Number(price) * Number(quantity))) / newQty;
+                    const newPrice = ((Number(targetItem.price) * Number(targetItem.quantity)) +
+                        (Number(price) * Number(quantity))) / newQty;
 
                     await targetItem.update({
                         quantity: newQty,
@@ -2985,10 +3072,10 @@ export const mergeOrders = async (req, res) => {
         // Fetch settings for delivery charge recalculation
         const settings = await AppSettings.findOne({ transaction: t });
         let newDeliveryCharge = 0;
-        
+
         // Use target order's delivery mode
         const deliveryMode = targetOrder.deliveryMode || 'Outlet';
-        
+
         if (settings && newSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
             if (deliveryMode === 'Express') newDeliveryCharge = parseFloat(settings.expressDeliveryCharge || 0);
             else if (deliveryMode === 'Round') newDeliveryCharge = parseFloat(settings.deliveryOnRoundCharge || 0);
@@ -3746,6 +3833,12 @@ export const getCustomerPaymentsReport = async (req, res) => {
 export const adjustPartyBalance = async (req, res) => {
     const t = await sequelize.transaction();
     try {
+        const adminEmail = (req.user?.email || '').trim().toLowerCase();
+        if (adminEmail !== 'dixitmathukiya75@gmail.com') {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.FORBIDDEN, "તમને હિસાબ બદલવાની પરવાનગી નથી. માત્ર dixitmathukiya75@gmail.com ને જ પરવાનગી છે (Unauthorized to adjust balance).");
+        }
+
         const { userId, orderId, phoneNumber, partyName, shopName, balanceType, amount, note } = req.body;
 
         if (!userId && !orderId && !phoneNumber) {
@@ -3887,18 +3980,63 @@ export const adjustPartyBalance = async (req, res) => {
             (o.notes && String(o.notes).includes('Opening Due / Khata Balance'))
         );
 
+        // [CRITICAL FIX]: Strictly separate past delivered/settled orders from in-flight orders!
+        // Party balance adjustments (CLEAR / JAMA / DUE) must ONLY apply to past delivered orders and KHATA orders.
+        // Current in-flight orders (Pending, Packaging, Packed, Shipping) are active dispatches and must NOT be marked as paid or have phantom cash payments attached!
+        const deliveredStatuses = ['delivered', 'payment collect', 'payment verify', 'completed'];
+        const pastDeliveredOrders = regularOrders.filter(o =>
+            deliveredStatuses.includes(String(o.orderStatus || '').toLowerCase())
+        );
+        const inFlightOrders = regularOrders.filter(o =>
+            !deliveredStatuses.includes(String(o.orderStatus || '').toLowerCase())
+        );
+
+        // Clean up any historical phantom payments on in-flight orders for this customer
+        for (const ifo of inFlightOrders) {
+            await OrderPayment.destroy({
+                where: {
+                    orderId: ifo.id,
+                    [Op.or]: [
+                        { notes: { [Op.like]: '%Party balance cleared%' } },
+                        { notes: { [Op.like]: '%Due cleared by Admin%' } },
+                        { notes: { [Op.like]: '%Advance credit adjustment%' } },
+                        { notes: { [Op.like]: '%Cleared past due via Advance Jama%' } },
+                        { notes: { [Op.like]: '%Adjusted Paid Portion%' } },
+                        { notes: { [Op.like]: '%Order settled in full via Admin adjustment%' } }
+                    ]
+                },
+                transaction: t
+            });
+            const remainingPayments = await OrderPayment.findAll({
+                where: { orderId: ifo.id, paymentMethod: { [Op.ne]: 'CREDIT' } },
+                transaction: t
+            });
+            const realPaid = remainingPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+            const tot = parseFloat(ifo.totalAmount || ifo.payableAmount || 0);
+            const realDue = Math.max(0, tot - realPaid);
+            const realStatus = realPaid >= tot ? 'Paid' : (realPaid > 0 ? 'Partial' : 'Pending');
+            await ifo.update({
+                paidAmount: realPaid,
+                dueAmount: realDue,
+                creditAmount: 0,
+                paymentStatus: realStatus
+            }, { transaction: t });
+        }
+
         let finalCreditline = 0;
         let finalDue = 0;
 
         // Loggable order ID
         const logOrderId = (contextOrder && isUUID(String(contextOrder.id)))
             ? contextOrder.id
-            : (regularOrders.length > 0 && isUUID(String(regularOrders[regularOrders.length - 1].id))
-                ? regularOrders[regularOrders.length - 1].id
-                : null);
+            : (pastDeliveredOrders.length > 0 && isUUID(String(pastDeliveredOrders[pastDeliveredOrders.length - 1].id))
+                ? pastDeliveredOrders[pastDeliveredOrders.length - 1].id
+                : (regularOrders.length > 0 && isUUID(String(regularOrders[regularOrders.length - 1].id))
+                    ? regularOrders[regularOrders.length - 1].id
+                    : null));
 
         if (type === 'CLEAR' || parsedAmount === 0) {
-            // ── CLEAR BALANCE: 0 credit, 0 due on entire khata and all orders ────
+            // ── CLEAR BALANCE: 0 credit, 0 due on entire khata and past delivered orders ────
             finalCreditline = 0;
             finalDue = 0;
             for (const u of matchedUsers) {
@@ -3913,8 +4051,8 @@ export const adjustPartyBalance = async (req, res) => {
                 await ko.destroy({ transaction: t });
             }
 
-            // 2. Unconditionally clear dues on all regular orders of this customer
-            for (const ord of regularOrders) {
+            // 2. Unconditionally clear dues on past delivered regular orders of this customer
+            for (const ord of pastDeliveredOrders) {
                 const tot = parseFloat(ord.totalAmount || ord.payableAmount || 0);
                 const curPaid = parseFloat(ord.paidAmount || 0);
                 const needed = Math.max(0, tot - curPaid);
@@ -3976,8 +4114,8 @@ export const adjustPartyBalance = async (req, res) => {
                 await ko.destroy({ transaction: t });
             }
 
-            // Clear dues on all regular orders
-            for (const ord of regularOrders) {
+            // Clear dues on past delivered regular orders
+            for (const ord of pastDeliveredOrders) {
                 const tot = parseFloat(ord.totalAmount || ord.payableAmount || 0);
                 const curPaid = parseFloat(ord.paidAmount || 0);
                 const needed = Math.max(0, tot - curPaid);
@@ -4037,8 +4175,8 @@ export const adjustPartyBalance = async (req, res) => {
 
             let remainingDue = parsedAmount;
 
-            // Reconcile regular orders: orders receive due up to parsedAmount; any orders beyond that become Paid!
-            for (const ord of regularOrders) {
+            // Reconcile past delivered regular orders: orders receive due up to parsedAmount; any orders beyond that become Paid!
+            for (const ord of pastDeliveredOrders) {
                 const tot = parseFloat(ord.totalAmount || ord.payableAmount || 0);
 
                 // Destroy old CREDIT payment entries
@@ -4252,7 +4390,7 @@ export const scanAndPackOrder = async (req, res) => {
 
         try {
             await logActivity(req, 'UPDATE', 'Order', order.id, `Order #${order.orderId} moved from ${previousStatus} to Packed via Barcode Scan.`);
-        } catch (_) {}
+        } catch (_) { }
 
         // Emit real-time update to admin socket room
         try {
@@ -4260,7 +4398,7 @@ export const scanAndPackOrder = async (req, res) => {
             if (io) {
                 io.to('admin_notifications').emit('order_updated', { id: order.id, status: 'Packed' });
             }
-        } catch (_) {}
+        } catch (_) { }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક Packed થઈ ગયો છે.`, {
             id: order.id,

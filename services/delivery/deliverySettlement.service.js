@@ -1,13 +1,13 @@
 import { Op } from 'sequelize';
-import { 
-    OrderAssignment, 
-    Order, 
-    User, 
-    OrderItem, 
-    OrderPayment, 
-    SalesReturn, 
-    PartyBalanceLog, 
-    DeliveryBoy 
+import {
+    OrderAssignment,
+    Order,
+    User,
+    OrderItem,
+    OrderPayment,
+    SalesReturn,
+    PartyBalanceLog,
+    DeliveryBoy
 } from '../../models/index.js';
 import logger from '../../logger/apiLogger.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
@@ -125,9 +125,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                 }
 
                 if (!matchedItem && cItem.productId && cItem.variantId) {
-                    matchedItem = existingOrderItems.find(it => 
+                    matchedItem = existingOrderItems.find(it =>
                         !updatedItemIds.has(it.id) &&
-                        String(it.productId) === String(cItem.productId) && 
+                        String(it.productId) === String(cItem.productId) &&
                         String(it.variantId) === String(cItem.variantId)
                     );
                 }
@@ -143,8 +143,8 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                 }
 
                 if (!matchedItem && cItem.productId) {
-                    matchedItem = existingOrderItems.find(it => 
-                        !updatedItemIds.has(it.id) && 
+                    matchedItem = existingOrderItems.find(it =>
+                        !updatedItemIds.has(it.id) &&
                         String(it.productId) === String(cItem.productId)
                     );
                 }
@@ -551,7 +551,7 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                 user.advanceJama = prevJama + excessCollected;
                 user.balanceType = 'JAMA';
                 const newJama = user.advanceJama;
-                
+
                 const noteParts = [];
                 if (excessCashOnline > 0) noteParts.push(`Cash/Online Overpayment: +₹${excessCashOnline.toFixed(2)}`);
                 if (excessReturn > 0) noteParts.push(`Excess Sales Return: +₹${excessReturn.toFixed(2)}`);
@@ -594,14 +594,14 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         }
 
         await Order.update(
-            { 
-                orderStatus: 'Payment Collect', 
+            {
+                orderStatus: 'Payment Collect',
                 dueAmount: inputCredit.toFixed(2),
                 paidAmount: actualPaidOnThisBill.toFixed(2),
                 pastDueCollected: pastDueSettled.toFixed(2),
                 paymentStatus: inputCredit <= 1e-7 ? 'Paid' : 'Partial',
                 paymentMethod: paymentMethodsUsed.length === 1 ? paymentMethodsUsed[0] : (paymentMethodsUsed.length > 1 ? 'SPLIT' : assignment.order.paymentMethod),
-                deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())') 
+                deliveredAt: Order.sequelize.literal('COALESCE("deliveredAt", NOW())')
             },
             { where: { id: assignment.orderId }, transaction: t }
         );
@@ -1038,7 +1038,7 @@ export const submitDeliveryBankPaymentService = async ({ orderIdOrUuid, delivery
         }
 
         const paymentAmount = amount ? parseFloat(amount) : parseFloat(order.totalAmount);
-        
+
         const payment = await OrderPayment.create({
             orderId: order.id,
             deliveryBoyId,

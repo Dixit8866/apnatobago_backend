@@ -87,7 +87,7 @@ export const getGodownOrders = async (req, res, next) => {
             const dateField = dateType === 'deliveredAt' ? 'deliveredAt' : 'createdAt';
             dateFilter[dateField] = {};
             if (startDate) dateFilter[dateField][Op.gte] = new Date(startDate.includes('T') ? startDate : startDate + 'T00:00:00+05:30');
-            if (endDate)   dateFilter[dateField][Op.lte] = new Date(endDate.includes('T') ? endDate : endDate + 'T23:59:59.999+05:30');
+            if (endDate) dateFilter[dateField][Op.lte] = new Date(endDate.includes('T') ? endDate : endDate + 'T23:59:59.999+05:30');
         }
 
         const where = {
@@ -438,9 +438,9 @@ export const mergeGodownOrders = async (req, res, next) => {
 
             // Verify they belong to the same customer
             const sameUser = sourceOrder.userId && targetOrder.userId && sourceOrder.userId === targetOrder.userId;
-            const sameGuest = !sourceOrder.userId && !targetOrder.userId && 
-                              sourceOrder.customerName === targetOrder.customerName && 
-                              sourceOrder.customerNumber === targetOrder.customerNumber;
+            const sameGuest = !sourceOrder.userId && !targetOrder.userId &&
+                sourceOrder.customerName === targetOrder.customerName &&
+                sourceOrder.customerNumber === targetOrder.customerNumber;
 
             if (!sameUser && !sameGuest) {
                 await t.rollback();
@@ -463,9 +463,9 @@ export const mergeGodownOrders = async (req, res, next) => {
                 if (targetItem) {
                     const newQty = Number(targetItem.quantity) + Number(quantity);
                     const newDiscount = Number(targetItem.discount || 0) + Number(discount || 0);
-                    
-                    const newPrice = ((Number(targetItem.price) * Number(targetItem.quantity)) + 
-                                      (Number(price) * Number(quantity))) / newQty;
+
+                    const newPrice = ((Number(targetItem.price) * Number(targetItem.quantity)) +
+                        (Number(price) * Number(quantity))) / newQty;
 
                     await targetItem.update({
                         quantity: newQty,
@@ -502,7 +502,7 @@ export const mergeGodownOrders = async (req, res, next) => {
         const settings = await AppSettings.findOne({ transaction: t });
         let newDeliveryCharge = 0;
         const deliveryMode = targetOrder.deliveryMode || 'Outlet';
-        
+
         if (settings && newSubtotal < parseFloat(settings.freeDeliveryThreshold)) {
             if (deliveryMode === 'Express') newDeliveryCharge = parseFloat(settings.expressDeliveryCharge || 0);
             else if (deliveryMode === 'Round') newDeliveryCharge = parseFloat(settings.deliveryOnRoundCharge || 0);
@@ -679,7 +679,7 @@ export const scanAndPackGodownOrder = async (req, res) => {
             if (io) {
                 io.to('admin_notifications').emit('order_updated', { id: order.id, status: 'Packed' });
             }
-        } catch (_) {}
+        } catch (_) { }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, `ઓર્ડર #${order.orderId} (${shopName}) સફળતાપૂર્વક Packed થઈ ગયો છે.`, {
             id: order.id,

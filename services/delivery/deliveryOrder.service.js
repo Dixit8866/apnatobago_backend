@@ -1,18 +1,18 @@
 import { Op } from 'sequelize';
-import { 
-    OrderAssignment, 
-    Order, 
-    User, 
-    OrderItem, 
-    Product, 
-    ProductVariant, 
-    Volume, 
-    OrderPayment, 
-    InventoryStock, 
-    SalesReturn, 
-    Notification, 
-    BusinessProfile, 
-    DeliveryBoy 
+import {
+    OrderAssignment,
+    Order,
+    User,
+    OrderItem,
+    Product,
+    ProductVariant,
+    Volume,
+    OrderPayment,
+    InventoryStock,
+    SalesReturn,
+    Notification,
+    BusinessProfile,
+    DeliveryBoy
 } from '../../models/index.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -101,7 +101,7 @@ export const enrichItemsWithProductVolumes = async (items) => {
     for (const item of items) {
         const itemVariant = item.variant || {};
         const variantInfo = item.variantInfo || {};
-        
+
         const baseUnitsPerPack = Number(itemVariant.baseUnitsPerPack || variantInfo.baseUnitsPerPack || 1);
         const sellingVolume = Number(itemVariant.sellingVolume || variantInfo.sellingVolume || 1);
         const packUnits = (baseUnitsPerPack * sellingVolume) > 0 ? (baseUnitsPerPack * sellingVolume) : 1;
@@ -127,9 +127,9 @@ export const enrichItemsWithProductVolumes = async (items) => {
 
         pVariants.forEach(v => {
             const volName = helperGetVolName(v.volumeRef) ||
-                           helperGetVolName(v.baseUnitRef) ||
-                           helperGetVolName(v.innerUnitRef) ||
-                           v.volume || v.extra || 'Unit';
+                helperGetVolName(v.baseUnitRef) ||
+                helperGetVolName(v.innerUnitRef) ||
+                v.volume || v.extra || 'Unit';
 
             const vBaseUnits = Number(v.baseUnitsPerPack || 1);
             const vSellingVol = Number(v.sellingVolume || 1);
@@ -807,7 +807,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     if (data.order && data.order.items) {
         data.order.items.forEach(itemData => {
             const isItemCouponApplied = itemData.hasCoupon === true || itemData.hasCoupon === 'true';
-            
+
             itemData.hasCoupon = isItemCouponApplied;
             itemData.couponPoints = isItemCouponApplied ? Number(itemData.couponPoints || 0) : 0;
             itemData.couponPrice = isItemCouponApplied ? parseFloat(itemData.couponPrice || 0).toFixed(2) : "0.00";
@@ -964,10 +964,10 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     const netPayableVal = Math.max(0, totalDueAmt);
 
     // Centralized Customer Total Due and Available Credit Calculation (Single Source of Truth)
-    const creditFinancials = await getCustomerCreditFinancials({ 
-        userId, 
-        userPhone: userPhoneClean, 
-        excludeOrderId: currentOrderDbId 
+    const creditFinancials = await getCustomerCreditFinancials({
+        userId,
+        userPhone: userPhoneClean,
+        excludeOrderId: currentOrderDbId
     });
 
     let totalCustomerDue = creditFinancials.totalPendingDue || (creditFinancials.usedCredit + accountPendingDue);
@@ -1097,8 +1097,8 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
     const orders = await Order.findAll({
         where: orderWhere,
         attributes: [
-            'id', 'orderId', 'totalAmount', 'couponPoints', 'couponDiscount', 
-            'discountType', 'paidAmount', 'dueAmount', 'paymentStatus', 
+            'id', 'orderId', 'totalAmount', 'couponPoints', 'couponDiscount',
+            'discountType', 'paidAmount', 'dueAmount', 'paymentStatus',
             'paymentMethod', 'orderStatus', 'createdAt', 'deliveredAt'
         ],
         include: [

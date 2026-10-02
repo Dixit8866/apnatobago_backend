@@ -1,10 +1,10 @@
 import { Op } from 'sequelize';
-import { 
-    OrderAssignment, 
-    Order, 
-    User, 
-    BusinessProfile, 
-    DeliveryBoy 
+import {
+    OrderAssignment,
+    Order,
+    User,
+    BusinessProfile,
+    DeliveryBoy
 } from '../../models/index.js';
 import logger from '../../logger/apiLogger.js';
 import { broadcastOrderStatusChanged, broadcastOrderAssigned } from '../socketEvent.service.js';

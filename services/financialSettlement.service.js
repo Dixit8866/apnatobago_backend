@@ -300,6 +300,42 @@ export const adjustOrderResponse = (order) => {
         }
     }
 
+    // [CRITICAL FIX]: For in-flight / active orders (Pending, Packaging, Packed, Shipping, In Transit, Out for Delivery),
+    // purge any phantom admin balance clear audit payment records (e.g. 'Party balance cleared to ₹0.00 by Admin').
+    // In-flight orders have not been delivered and must NOT have fake cash payments attached to them!
+    const orderStatusStr = String(rowData.orderStatus || '').toLowerCase();
+    const isDelivered = ['delivered', 'payment collect', 'payment verify', 'completed'].includes(orderStatusStr);
+    if (!isDelivered && Array.isArray(rowData.payments) && rowData.payments.length > 0) {
+        const phantomIds = [];
+        rowData.payments = rowData.payments.filter(p => {
+            const n = String(p.notes || '').toLowerCase();
+            const isPhantom = n.includes('party balance cleared') ||
+                n.includes('due cleared by admin') ||
+                n.includes('advance jama credit by admin') ||
+                n.includes('advance credit adjustment') ||
+                n.includes('order settled in full via admin') ||
+                n.includes('adjusted paid portion');
+            if (isPhantom && p.id) {
+                phantomIds.push(p.id);
+            }
+            return !isPhantom;
+        });
+
+        if (phantomIds.length > 0) {
+            OrderPayment.destroy({ where: { id: { [Op.in]: phantomIds } } }).catch(err => {
+                logger.debug(`[adjustOrderResponse] Phantom cleanup non-fatal: ${err.message}`);
+            });
+            const fin = calculateOrderFinancials(rowData, rowData.payments);
+            if (order.id) {
+                Order.update({
+                    paidAmount: fin.paidAmount,
+                    dueAmount: fin.dueAmount,
+                    paymentStatus: fin.paymentStatus
+                }, { where: { id: order.id } }).catch(() => {});
+            }
+        }
+    }
+
     const financials = calculateOrderFinancials(rowData, rowData.payments);
 
     // Set standard response properties (preserving existing response contract)
