@@ -3753,10 +3753,13 @@ export const adjustPartyBalance = async (req, res) => {
         }
 
         const parsedAmount = Math.max(0, parseFloat(amount || 0));
-        if (type !== 'CLEAR' && parsedAmount <= 0) {
+        if (isNaN(parsedAmount) || parsedAmount < 0) {
             await t.rollback();
-            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Amount must be greater than 0 for DUE or JAMA.");
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Amount must be a valid number >= 0.");
         }
+
+        // When amount is 0 (or balanceType is CLEAR), reset the party balance and advance Jama to ₹0.00
+        const actionType = (type === 'CLEAR' || parsedAmount === 0) ? 'CLEAR' : type;
 
         const isUUID = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
 
@@ -3889,15 +3892,15 @@ export const adjustPartyBalance = async (req, res) => {
                 ? regularOrders[regularOrders.length - 1].id
                 : null);
 
-        if (type === 'CLEAR' || parsedAmount === 0) {
-            // ── CLEAR BALANCE: 0 credit, 0 due on entire khata and all orders ────
+        if (actionType === 'CLEAR') {
+            // ── CLEAR BALANCE: 0 credit, 0 advanceJama, 0 due on entire khata and all orders ────
             finalCreditline = 0;
             finalDue = 0;
             for (const u of matchedUsers) {
-                await u.update({ creditline: 0, advanceJama: 0, balanceType: 'CLEAR' }, { transaction: t });
+                await u.update({ creditline: 0, advanceJama: 0, temporaryPendingDue: 0, balanceType: 'CLEAR' }, { transaction: t });
             }
             if (user && !matchedUsers.some(u => u.id === user.id)) {
-                await user.update({ creditline: 0, advanceJama: 0, balanceType: 'CLEAR' }, { transaction: t });
+                await user.update({ creditline: 0, advanceJama: 0, temporaryPendingDue: 0, balanceType: 'CLEAR' }, { transaction: t });
             }
 
             // 1. Destroy all KHATA- opening orders
@@ -3940,6 +3943,22 @@ export const adjustPartyBalance = async (req, res) => {
                 }
             }
 
+            // If contextOrder was not captured in regularOrders or khataOrders, ensure it is also settled
+            if (contextOrder && !regularOrders.some(o => o.id === contextOrder.id) && !khataOrders.some(o => o.id === contextOrder.id)) {
+                const tot = parseFloat(contextOrder.totalAmount || contextOrder.payableAmount || 0);
+                await OrderPayment.destroy({
+                    where: { orderId: contextOrder.id, paymentMethod: 'CREDIT' },
+                    transaction: t
+                });
+                await contextOrder.update({
+                    dueAmount: 0,
+                    creditAmount: 0,
+                    paidAmount: tot,
+                    paymentStatus: 'Paid',
+                    deliveryNotice: null
+                }, { transaction: t });
+            }
+
             await PartyBalanceLog.create({
                 userId: user?.id || null,
                 orderId: logOrderId,
@@ -3952,15 +3971,15 @@ export const adjustPartyBalance = async (req, res) => {
                 createdByName: req.user?.fullname || req.user?.name || 'Admin'
             }, { transaction: t });
 
-        } else if (type === 'JAMA') {
+        } else if (actionType === 'JAMA') {
             // ── ADVANCE JAMA: Add advance credit, clear all past dues ────────────
             finalCreditline = 0;
             finalDue = 0;
             for (const u of matchedUsers) {
-                await u.update({ creditline: 0, advanceJama: parsedAmount, balanceType: 'JAMA' }, { transaction: t });
+                await u.update({ creditline: 0, advanceJama: parsedAmount, temporaryPendingDue: 0, balanceType: 'JAMA' }, { transaction: t });
             }
             if (user && !matchedUsers.some(u => u.id === user.id)) {
-                await user.update({ creditline: 0, advanceJama: parsedAmount, balanceType: 'JAMA' }, { transaction: t });
+                await user.update({ creditline: 0, advanceJama: parsedAmount, temporaryPendingDue: 0, balanceType: 'JAMA' }, { transaction: t });
             }
 
             // Destroy all KHATA- opening balance orders
@@ -4002,6 +4021,22 @@ export const adjustPartyBalance = async (req, res) => {
                 }
             }
 
+            // If contextOrder was not captured in regularOrders or khataOrders, ensure it is also settled
+            if (contextOrder && !regularOrders.some(o => o.id === contextOrder.id) && !khataOrders.some(o => o.id === contextOrder.id)) {
+                const tot = parseFloat(contextOrder.totalAmount || contextOrder.payableAmount || 0);
+                await OrderPayment.destroy({
+                    where: { orderId: contextOrder.id, paymentMethod: 'CREDIT' },
+                    transaction: t
+                });
+                await contextOrder.update({
+                    dueAmount: 0,
+                    creditAmount: 0,
+                    paidAmount: tot,
+                    paymentStatus: 'Paid',
+                    deliveryNotice: null
+                }, { transaction: t });
+            }
+
             await PartyBalanceLog.create({
                 userId: user?.id || null,
                 orderId: logOrderId,
@@ -4014,17 +4049,17 @@ export const adjustPartyBalance = async (req, res) => {
                 createdByName: req.user?.fullname || req.user?.name || 'Admin'
             }, { transaction: t });
 
-        } else if (type === 'DUE') {
+        } else if (actionType === 'DUE') {
             // ── CUSTOMER DUE: Reconcile all orders to match exact target due ─────
             // IMPORTANT: Do NOT overwrite user.creditline (which is the BASE credit limit set by admin)
             // Only update balanceType and clear any advance jama
             finalCreditline = parseFloat(user?.creditline || 0); // preserve existing base limit
             finalDue = parsedAmount;
             for (const u of matchedUsers) {
-                await u.update({ advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
+                await u.update({ advanceJama: 0, temporaryPendingDue: 0, balanceType: 'DUE' }, { transaction: t });
             }
             if (user && !matchedUsers.some(u => u.id === user.id)) {
-                await user.update({ advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
+                await user.update({ advanceJama: 0, temporaryPendingDue: 0, balanceType: 'DUE' }, { transaction: t });
             }
 
             let remainingDue = parsedAmount;
@@ -4166,11 +4201,44 @@ export const adjustPartyBalance = async (req, res) => {
 
         await t.commit();
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, `Party balance updated successfully to ${type === 'CLEAR' ? '₹0.00 (Clear)' : (type === 'JAMA' ? `+₹${finalCreditline} (Jama)` : `₹${finalDue} (Due)`)}`, {
+        // Broadcast user update & order update via socket so Delivery App & Admin Panels update in real-time
+        try {
+            if (user) {
+                broadcastUserUpdated(user);
+            }
+            for (const u of matchedUsers) {
+                if (u.id !== user?.id) {
+                    broadcastUserUpdated(u);
+                }
+            }
+            const io = getIO();
+            if (io) {
+                io.emit('party_balance_updated', {
+                    userId: user?.id || null,
+                    orderId: logOrderId,
+                    balanceType: actionType,
+                    amount: parsedAmount,
+                    finalCreditline,
+                    finalDue
+                });
+                if (logOrderId) {
+                    io.to('admin_orders').emit('order:status_changed', {
+                        id: logOrderId,
+                        orderId: contextOrder?.orderId || null,
+                        type: 'PARTY_BALANCE_ADJUSTED'
+                    });
+                }
+            }
+        } catch (socketErr) {
+            logger.warn(`[adjustPartyBalance Socket Warning]: ${socketErr.message}`);
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, `Party balance updated successfully to ${actionType === 'CLEAR' ? '₹0.00 (Clear)' : (actionType === 'JAMA' ? `+₹${parsedAmount.toFixed(2)} (Jama)` : `₹${finalDue.toFixed(2)} (Due)`)}`, {
             userId: user?.id || null,
             partyName: resolvedPartyName,
-            balanceType: type,
+            balanceType: actionType,
             userCreditline: finalCreditline,
+            advanceJama: actionType === 'JAMA' ? parsedAmount : 0,
             previousUnpaidDue: finalDue
         });
 
