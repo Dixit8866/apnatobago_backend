@@ -94,31 +94,37 @@ export const calculateOrderFinancials = (order, payments = null) => {
         }
     }
 
-    // Determine due amount:
-    // 1. If non-credit paid >= net bill (within 1 cent rounding), due is 0
-    let dueAmt = 0;
-    let paidAmt = Math.min(netPayable, nonCreditPaid);
+    const pastDueColl = parseFloat(order.pastDueCollected || order.pastDuePaid || 0);
+    // Non-credit payment attributable to this current bill (excluding amounts collected for past dues)
+    const nonCreditPaidForThisBill = Math.max(0, nonCreditPaid - pastDueColl);
 
-    if (nonCreditPaid >= netPayable - 0.01) {
+    // Determine due amount:
+    let dueAmt = 0;
+    let paidAmt = Math.min(netPayable, nonCreditPaidForThisBill);
+
+    if (creditPaymentSum > 0) {
+        dueAmt = creditPaymentSum;
+        paidAmt = Math.min(netPayable, Math.max(0, netPayable - creditPaymentSum));
+    } else if (nonCreditPaidForThisBill >= netPayable - 0.01) {
         dueAmt = 0;
         paidAmt = netPayable;
-    } else if (creditPaymentSum > 0) {
-        dueAmt = creditPaymentSum;
     } else if (isDelivered && order.dueAmount !== undefined && order.dueAmount !== null && order.dueAmount !== '') {
         const rawDue = parseFloat(order.dueAmount);
         if (!isNaN(rawDue) && rawDue > 0) {
             dueAmt = rawDue;
         } else {
-            dueAmt = Math.max(0, netPayable - nonCreditPaid);
+            dueAmt = Math.max(0, netPayable - nonCreditPaidForThisBill);
         }
     } else {
         // For in-flight / non-delivered orders, due is the remaining unpaid portion of net bill!
-        dueAmt = Math.max(0, netPayable - nonCreditPaid);
+        dueAmt = Math.max(0, netPayable - nonCreditPaidForThisBill);
     }
 
     // Determine payment status
     let paymentStatus = 'Pending';
-    if (nonCreditPaid >= netPayable - 0.01 && creditPaymentSum <= 0.01) {
+    if (creditPaymentSum > 0.01) {
+        paymentStatus = paidAmt > 0 ? 'Partial' : 'Pending';
+    } else if (nonCreditPaidForThisBill >= netPayable - 0.01) {
         paymentStatus = 'Paid';
         dueAmt = 0;
     } else if (paidAmt > 0) {
