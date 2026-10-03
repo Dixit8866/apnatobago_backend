@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import {
     Order,
     OrderPayment,
+    OrderItem,
     User,
     BusinessProfile,
     SalesReturn,
@@ -75,6 +76,11 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     model: SalesReturn,
                     as: 'returns',
                     required: false
+                },
+                {
+                    model: OrderItem,
+                    as: 'items',
+                    required: false
                 }
             ],
             order: [['createdAt', 'ASC']],
@@ -101,13 +107,15 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const orderDate = ord.createdAt || new Date();
 
             // Total Gross Bill Amount -> DEBIT (ઉધાર)
-            // Use robust fallback so orders with null or 0 totalAmount are properly recognized
+            // Use robust fallback: fin.totalAmount -> ord.totalAmount -> ord.grandTotal -> (paid + due) -> paymentsSum -> itemsSum
             const orderPaymentsList = ord.payments || [];
             const paymentsSum = orderPaymentsList.reduce((acc, p) => acc + parseFloat(p.amount || 0), 0);
+            const orderItemsList = ord.items || [];
+            const itemsSum = orderItemsList.reduce((acc, it) => acc + (parseFloat(it.quantity || 0) * parseFloat(it.price || 0)), 0);
             const grossBill = parseFloat(
                 fin.totalAmount > 0 
                     ? fin.totalAmount 
-                    : (parseFloat(ord.totalAmount || ord.grandTotal || 0) || (parseFloat(ord.paidAmount || 0) + parseFloat(ord.dueAmount || 0)) || paymentsSum || 0)
+                    : (parseFloat(ord.totalAmount || ord.grandTotal || 0) || (parseFloat(ord.paidAmount || 0) + parseFloat(ord.dueAmount || 0)) || paymentsSum || itemsSum || 0)
             );
 
             if (grossBill > 0) {
@@ -518,7 +526,7 @@ export const getPartyLedger = async (userId, query = {}) => {
 
         // Compute overall lifetime balance for party header
         const allEntries = await PartyLedger.findAll({
-            where: { userId },
+            where: { userId: user.id },
             attributes: ['debit', 'credit']
         });
         const lifetimeDebit = allEntries.reduce((acc, r) => acc + parseFloat(r.debit || 0), 0);

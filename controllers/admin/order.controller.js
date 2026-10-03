@@ -4128,8 +4128,24 @@ export const adjustPartyBalance = async (req, res) => {
             if (field === 'usedDue' || req.body.usedDue !== undefined) {
                 const targetUsedDue = Math.max(0, parseFloat(req.body.usedDue !== undefined ? req.body.usedDue : val) || 0);
                 let remainingDue = targetUsedDue;
-                for (const ord of pastDeliveredOrders) {
+
+                if (targetUsedDue === 0) {
+                    updates.temporaryPendingDue = 0;
+                    for (const u of matchedUsers) {
+                        await u.update({ temporaryPendingDue: 0 }, { transaction: t });
+                    }
+                    if (user && !matchedUsers.some(u => u.id === user.id)) {
+                        await user.update({ temporaryPendingDue: 0 }, { transaction: t });
+                    }
+                    for (const ko of khataOrders) {
+                        await ko.destroy({ transaction: t });
+                    }
+                }
+
+                const targetOrders = pastDeliveredOrders.length > 0 ? pastDeliveredOrders : regularOrders;
+                for (const ord of targetOrders) {
                     const tot = parseFloat(ord.totalAmount || ord.payableAmount || 0);
+                    const curPaid = parseFloat(ord.paidAmount || 0);
                     await OrderPayment.destroy({
                         where: { orderId: ord.id, paymentMethod: 'CREDIT' },
                         transaction: t
@@ -4157,6 +4173,7 @@ export const adjustPartyBalance = async (req, res) => {
                         }
                         remainingDue -= assignDue;
                     } else {
+                        const needed = Math.max(0, tot - curPaid);
                         await ord.update({
                             dueAmount: 0,
                             creditAmount: 0,
@@ -4164,7 +4181,35 @@ export const adjustPartyBalance = async (req, res) => {
                             paymentStatus: 'Paid',
                             deliveryNotice: null
                         }, { transaction: t });
+
+                        if (needed > 0.01) {
+                            await OrderPayment.create({
+                                orderId: ord.id,
+                                amount: needed,
+                                paymentMethod: 'CASH',
+                                isSubmitted: true,
+                                submittedAt: new Date(),
+                                notes: note ? `Due cleared by Admin: ${note}` : 'Party used due set to ₹0.00 by Admin',
+                                createdAt: new Date(),
+                                updatedAt: new Date()
+                            }, { transaction: t });
+                        }
                     }
+                }
+
+                if (contextOrder && targetUsedDue === 0) {
+                    const tot = parseFloat(contextOrder.totalAmount || contextOrder.payableAmount || 0);
+                    await OrderPayment.destroy({
+                        where: { orderId: contextOrder.id, paymentMethod: 'CREDIT' },
+                        transaction: t
+                    });
+                    await contextOrder.update({
+                        dueAmount: 0,
+                        creditAmount: 0,
+                        paidAmount: tot,
+                        paymentStatus: 'Paid',
+                        deliveryNotice: null
+                    }, { transaction: t });
                 }
             }
 
@@ -4205,9 +4250,11 @@ export const adjustPartyBalance = async (req, res) => {
             }
 
             if (user?.id) {
-                syncPartyLedger(user.id, { forceRebuild: true }).catch(err => {
+                try {
+                    await syncPartyLedger(user.id, { forceRebuild: true });
+                } catch (err) {
                     logger.warn(`[syncPartyLedger Warning]: ${err.message}`);
-                });
+                }
             }
 
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'Party payment settings updated successfully', {
