@@ -387,6 +387,17 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         const totalCredit = processedEntries.reduce((sum, e) => sum + parseFloat(e.credit || 0), 0);
         const netOutstandingDue = Math.max(0, currentRunningBalance);
         const advanceJama = currentRunningBalance < 0 ? Math.abs(currentRunningBalance) : 0;
+        const balanceType = currentRunningBalance > 0 ? 'DUE' : (currentRunningBalance < 0 ? 'JAMA' : 'CLEAR');
+
+        if (user) {
+            try {
+                user.advanceJama = advanceJama;
+                user.balanceType = balanceType;
+                await user.save({ transaction });
+            } catch (uErr) {
+                logger.warn(`[syncPartyLedger User update warning]: ${uErr.message}`);
+            }
+        }
 
         return {
             user: {
@@ -399,7 +410,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 creditline: parseFloat(user.creditline || 0),
                 currentDue: netOutstandingDue,
                 advanceJama: advanceJama,
-                balanceType: currentRunningBalance > 0 ? 'DUE' : (currentRunningBalance < 0 ? 'JAMA' : 'CLEAR')
+                balanceType: balanceType
             },
             summary: {
                 totalBilled: parseFloat(totalDebit.toFixed(2)),

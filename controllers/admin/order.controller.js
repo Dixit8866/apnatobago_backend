@@ -1501,51 +1501,64 @@ export const updateOrderStatus = async (req, res) => {
             }
         } else if (cash > 0 || online > 0 || credit > 0) {
             const cleanNotes = String(paymentNotes || notes || '').trim().slice(0, 240);
+            const paymentDate = order.deliveredAt || order.createdAt || new Date();
+
+            // Clean up existing payments for this order to cleanly replace them without accumulating
+            await OrderPayment.destroy({ where: { orderId: order.id } });
+
             if (cash > 0) {
                 await OrderPayment.create({
                     orderId: order.id,
+                    userId: order.userId,
                     amount: cash,
                     paymentMethod: 'CASH',
                     isSubmitted: true,
-                    submittedAt: new Date(),
+                    submittedAt: paymentDate,
+                    createdAt: paymentDate,
+                    updatedAt: new Date(),
                     notes: cleanNotes || 'Admin Collected Cash Payment'
                 });
             }
             if (online > 0) {
                 await OrderPayment.create({
                     orderId: order.id,
+                    userId: order.userId,
                     amount: online,
                     paymentMethod: 'ONLINE',
                     isSubmitted: true,
-                    submittedAt: new Date(),
+                    submittedAt: paymentDate,
+                    createdAt: paymentDate,
+                    updatedAt: new Date(),
                     notes: cleanNotes || 'Admin Collected Online Payment'
                 });
             }
             if (credit > 0) {
                 await OrderPayment.create({
                     orderId: order.id,
+                    userId: order.userId,
                     amount: credit,
                     paymentMethod: 'CREDIT',
                     isSubmitted: true,
-                    submittedAt: new Date(),
+                    submittedAt: paymentDate,
+                    createdAt: paymentDate,
+                    updatedAt: new Date(),
                     notes: cleanNotes || 'Admin Recorded Credit Payment'
                 });
             }
 
-            const currentPaid = parseFloat(order.paidAmount || 0);
             const total = parseFloat(order.totalAmount || 0);
-            const addedReal = cash + online;
-            const totalReceived = currentPaid + addedReal;
-            const newPaid = Math.min(total, totalReceived);
+            const coupon = parseFloat(order.couponDiscount || 0);
+            const netBill = Math.max(0, total - coupon);
+            const realPaid = Math.min(netBill, cash + online);
+            const realDue = credit > 0 ? credit : Math.max(0, netBill - realPaid);
 
-            order.paidAmount = newPaid.toFixed(2);
-            const newDue = Math.max(0, total - newPaid - credit);
-            order.dueAmount = newDue.toFixed(2);
-
-            if (newDue <= 1e-5) {
-                order.paymentStatus = 'Paid';
-            } else if (newPaid > 0) {
-            }
+            order.cashAmount = cash;
+            order.onlineAmount = online;
+            order.creditAmount = credit;
+            order.paidAmount = realPaid.toFixed(2);
+            order.dueAmount = realDue.toFixed(2);
+            order.paymentStatus = realDue <= 0.01 ? 'Paid' : (realPaid > 0 ? 'Partial' : 'Pending');
+            order.paymentMethod = (cash > 0 && online > 0) ? 'MIXED' : (online > 0 ? 'ONLINE' : (credit > 0 ? 'CREDIT' : 'CASH'));
         } else if (newPaidAmount !== undefined) {
             const total = parseFloat(order.totalAmount);
             const paid = parseFloat(newPaidAmount);
@@ -2272,14 +2285,16 @@ export const verifyAndSettleOrder = async (req, res) => {
 
         await transaction.commit();
 
-        // Sync centralized delivery notice for the customer to prevent stale "900 baki" notices
+        // Sync centralized party ledger & delivery notice for the customer to reflect changes immediately across admin & delivery
         if (order.userId) {
-            syncPartyDeliveryNotice(order.userId).catch(err => {
-                logger.warn(`[Sync Delivery Notice Error during Admin Settlement]: ${err.message}`);
-            });
-            User.findByPk(order.userId).then(u => {
+            try {
+                await syncPartyLedger(order.userId, { forceRebuild: true });
+                await syncPartyDeliveryNotice(order.userId);
+                const u = await User.findByPk(order.userId);
                 if (u) broadcastUserUpdated(u);
-            }).catch(() => { });
+            } catch (syncErr) {
+                logger.warn(`[Sync Ledger/Notice Error during Admin Settlement]: ${syncErr.message}`);
+            }
         }
 
         try {
@@ -2382,6 +2397,17 @@ export const settlePastDuePayment = async (req, res) => {
 
         await order.save({ transaction });
         await transaction.commit();
+
+        if (order.userId) {
+            try {
+                await syncPartyLedger(order.userId, { forceRebuild: true });
+                await syncPartyDeliveryNotice(order.userId);
+                const u = await User.findByPk(order.userId);
+                if (u) broadcastUserUpdated(u);
+            } catch (syncErr) {
+                logger.warn(`[Sync Ledger/Notice Error during Past Due Settlement]: ${syncErr.message}`);
+            }
+        }
 
         try {
             logActivity(req, {

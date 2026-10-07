@@ -13,6 +13,7 @@ import logger from '../../logger/apiLogger.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
 import { broadcastOrderStatusChanged, broadcastUserUpdated } from '../socketEvent.service.js';
 import { syncPartyDeliveryNotice, calculateOrderFinancials, getCustomerCreditFinancials } from '../financialSettlement.service.js';
+import { syncPartyLedger } from '../partyLedger.service.js';
 import { sendDeliveredNotification } from './deliveryOrder.service.js';
 
 /**
@@ -631,6 +632,15 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
 
         await t.commit();
 
+        if (user?.id) {
+            try {
+                await syncPartyLedger(user.id, { forceRebuild: true });
+                await syncPartyDeliveryNotice(user.id);
+            } catch (syncErr) {
+                logger.warn(`[Delivery Settlement Ledger Sync Error]: ${syncErr.message}`);
+            }
+        }
+
         await sendDeliveredNotification(assignment.orderId);
 
         try {
@@ -991,6 +1001,15 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
         }
 
         await t.commit();
+
+        if (user?.id) {
+            try {
+                await syncPartyLedger(user.id, { forceRebuild: true });
+                await syncPartyDeliveryNotice(user.id);
+            } catch (syncErr) {
+                logger.warn(`[Delivery Single Settlement Ledger Sync Error]: ${syncErr.message}`);
+            }
+        }
 
         for (const order of orders) {
             await sendDeliveredNotification(order.id);
