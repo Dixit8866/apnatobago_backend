@@ -426,7 +426,7 @@ export const getCustomerCreditFinancials = async ({
         let customerUser = user;
         if (!customerUser && userId) {
             customerUser = await User.findByPk(userId, {
-                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit'],
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
                 transaction
             });
         }
@@ -438,17 +438,15 @@ export const getCustomerCreditFinancials = async ({
         if (!customerUser && cleanPhone && cleanPhone.length >= 7) {
             customerUser = await User.findOne({
                 where: { number: { [Op.like]: `%${cleanPhone}` } },
-                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit'],
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
                 transaction
             });
         }
 
         const effectiveUserId = customerUser?.id || userId;
         const baseCreditLimit = parseFloat(customerUser?.creditline || 0);
-        const userAdvanceJama = parseFloat(customerUser?.advanceJama || 0);
-        const temporaryPendingDue = Math.max(0, parseFloat(customerUser?.temporaryPendingDue || 0) || 0);
 
-        // Build where conditions to locate orders
+        // Fetch candidate unpaid past orders (if any)
         const matchConditions = [];
         if (effectiveUserId) {
             matchConditions.push({ userId: effectiveUserId });
@@ -486,20 +484,11 @@ export const getCustomerCreditFinancials = async ({
             });
 
             candidateOrders.forEach(ord => {
-                // Determine if this order constitutes an unpaid due / used credit:
-                // An order counts as past due ONLY if:
-                // 1) It has been delivered/settled (Delivered, Payment Collect, Payment Verify, Completed)
-                // OR
-                // 2) It has an explicit CREDIT payment record
-                // OR
-                // 3) dueAmount > 0 and paidAmount > 0 (partial settlement happened)
                 const isDeliveredOrSettled = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(ord.orderStatus);
                 const payments = ord.payments || [];
                 const hasCreditPayment = payments.some(p => String(p.paymentMethod || '').toUpperCase() === 'CREDIT' && parseFloat(p.amount || 0) > 0);
                 const hasPartialSettlement = parseFloat(ord.paidAmount || 0) > 0 && parseFloat(ord.dueAmount || 0) > 0;
 
-                // If the order is un-delivered (Pending, Packaging, Packed, Assigned) and has no credit payment,
-                // it is an in-transit order, NOT past used credit!
                 if (!isDeliveredOrSettled && !hasCreditPayment && !hasPartialSettlement) {
                     return;
                 }
@@ -524,10 +513,9 @@ export const getCustomerCreditFinancials = async ({
             });
         }
 
+        const userAdvanceJama = parseFloat(customerUser?.advanceJama || 0);
         const roundedUsedDue = parseFloat(totalUnpaidDue.toFixed(2));
-        const totalPendingDue = parseFloat((roundedUsedDue + temporaryPendingDue).toFixed(2));
-        // Include advanceJama (excess overpayment by customer) in availableCredit
-        // e.g. baseCreditLimit=5000, advanceJama=10 → availableCredit=5010
+        const totalPendingDue = roundedUsedDue;
         const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - roundedUsedDue).toFixed(2)));
         const isBlocked = customerUser?.blockcredit ? true : false;
 
@@ -537,12 +525,11 @@ export const getCustomerCreditFinancials = async ({
             usedCredit: roundedUsedDue,
             totalDue: roundedUsedDue,
             totalUnpaidDue: roundedUsedDue,
-            temporaryPendingDue,
             totalPendingDue,
             availableCredit,
-            creditLimit: availableCredit,    // Returns available credit so delivery app and components show available balance!
-            creditAmount: availableCredit,   // Returns available credit so delivery app showing Credit Amount shows available balance!
-            creditline: availableCredit,     // Available credit
+            creditLimit: availableCredit,
+            creditAmount: availableCredit,
+            creditline: availableCredit,
             blockcredit: (isBlocked && availableCredit <= 0),
             pastDueOrders,
             advanceJama: userAdvanceJama
@@ -555,7 +542,6 @@ export const getCustomerCreditFinancials = async ({
             usedCredit: 0,
             totalDue: 0,
             totalUnpaidDue: 0,
-            temporaryPendingDue: 0,
             totalPendingDue: 0,
             availableCredit: 0,
             creditLimit: 0,

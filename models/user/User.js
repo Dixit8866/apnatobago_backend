@@ -45,17 +45,9 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(10, 2),
         defaultValue: 0,
     },
-    advanceJama: {
+    closingBalance: {
         type: DataTypes.DECIMAL(12, 2),
         defaultValue: 0.00,
-    },
-    temporaryPendingDue: {
-        type: DataTypes.DECIMAL(12, 2),
-        defaultValue: 0.00,
-    },
-    balanceType: {
-        type: DataTypes.STRING, // 'DUE' | 'JAMA' | 'CLEAR'
-        defaultValue: 'DUE',
     },
     blockcredit: {
         type: DataTypes.BOOLEAN,
@@ -162,6 +154,20 @@ const User = sequelize.define('User', {
         set(value) {
             this.creditline = value;
         }
+    },
+    advanceJama: {
+        type: DataTypes.VIRTUAL,
+        get() {
+            const cb = parseFloat(this.closingBalance || 0);
+            return cb < 0 ? Math.abs(cb) : 0.00;
+        }
+    },
+    balanceType: {
+        type: DataTypes.VIRTUAL,
+        get() {
+            const cb = parseFloat(this.closingBalance || 0);
+            return cb > 0 ? 'DUE' : (cb < 0 ? 'JAMA' : 'CLEAR');
+        }
     }
 }, {
     timestamps: true,
@@ -173,6 +179,7 @@ const User = sequelize.define('User', {
         { fields: ['godownId'] },
         { fields: ['deliveryRoundTiming'] },
         { fields: ['number'] },
+        { fields: ['closingBalance'] },
         { fields: ['createdAt'] }
     ],
     hooks: {

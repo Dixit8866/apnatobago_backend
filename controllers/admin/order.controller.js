@@ -503,7 +503,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'creditline', 'advanceJama', 'balanceType'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -525,7 +525,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit', 'routeCategoryId', 'deliveryNotice', 'billPrintTime'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'routeCategoryId', 'deliveryNotice', 'billPrintTime'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -2579,8 +2579,6 @@ export const getOrderDetails = async (req, res) => {
         if (adjustedOrder && adjustedOrder.user) {
             const uId = adjustedOrder.userId || adjustedOrder.user?.id;
             const creditFinancials = await getCustomerCreditFinancials({ userId: uId });
-            adjustedOrder.accountPendingDue = creditFinancials.temporaryPendingDue;
-            adjustedOrder.user.temporaryPendingDue = creditFinancials.temporaryPendingDue;
             let totalCustomerDue = 0;
             if (uId) {
                 const uOrders = await Order.findAll({
@@ -2660,9 +2658,6 @@ export const downloadInvoice = async (req, res) => {
         if (!order) {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
         }
-
-        const creditFinancials = await getCustomerCreditFinancials({ userId: order.userId || order.user?.id });
-        order.setDataValue('accountPendingDue', creditFinancials.temporaryPendingDue);
 
         const pdfBuffer = await generateOrderInvoice(order);
 
@@ -4133,10 +4128,6 @@ export const adjustPartyBalance = async (req, res) => {
                 updates.advanceJama = advVal;
                 if (advVal > 0) updates.balanceType = 'JAMA';
             }
-            if (field === 'totalDue' || field === 'temporaryPendingDue' || req.body.totalDue !== undefined) {
-                const dueVal = Math.max(0, parseFloat(req.body.totalDue !== undefined ? req.body.totalDue : val) || 0);
-                updates.temporaryPendingDue = dueVal;
-            }
             if (req.body.blockcredit !== undefined) {
                 updates.blockcredit = Boolean(req.body.blockcredit);
             }
@@ -4156,13 +4147,6 @@ export const adjustPartyBalance = async (req, res) => {
                 let remainingDue = targetUsedDue;
 
                 if (targetUsedDue === 0) {
-                    updates.temporaryPendingDue = 0;
-                    for (const u of matchedUsers) {
-                        await u.update({ temporaryPendingDue: 0 }, { transaction: t });
-                    }
-                    if (user && !matchedUsers.some(u => u.id === user.id)) {
-                        await user.update({ temporaryPendingDue: 0 }, { transaction: t });
-                    }
                     for (const ko of khataOrders) {
                         await ko.destroy({ transaction: t });
                     }
@@ -4296,10 +4280,10 @@ export const adjustPartyBalance = async (req, res) => {
             finalCreditline = 0;
             finalDue = 0;
             for (const u of matchedUsers) {
-                await u.update({ creditline: 0, advanceJama: 0, temporaryPendingDue: 0, balanceType: 'CLEAR' }, { transaction: t });
+                await u.update({ creditline: 0, advanceJama: 0, balanceType: 'CLEAR' }, { transaction: t });
             }
             if (user && !matchedUsers.some(u => u.id === user.id)) {
-                await user.update({ creditline: 0, advanceJama: 0, temporaryPendingDue: 0, balanceType: 'CLEAR' }, { transaction: t });
+                await user.update({ creditline: 0, advanceJama: 0, balanceType: 'CLEAR' }, { transaction: t });
             }
 
             // 1. Destroy all KHATA- opening orders
@@ -4375,10 +4359,10 @@ export const adjustPartyBalance = async (req, res) => {
             finalCreditline = 0;
             finalDue = 0;
             for (const u of matchedUsers) {
-                await u.update({ creditline: 0, advanceJama: parsedAmount, temporaryPendingDue: 0, balanceType: 'JAMA' }, { transaction: t });
+                await u.update({ creditline: 0, advanceJama: parsedAmount, balanceType: 'JAMA' }, { transaction: t });
             }
             if (user && !matchedUsers.some(u => u.id === user.id)) {
-                await user.update({ creditline: 0, advanceJama: parsedAmount, temporaryPendingDue: 0, balanceType: 'JAMA' }, { transaction: t });
+                await user.update({ creditline: 0, advanceJama: parsedAmount, balanceType: 'JAMA' }, { transaction: t });
             }
 
             // Destroy all KHATA- opening balance orders
@@ -4455,10 +4439,10 @@ export const adjustPartyBalance = async (req, res) => {
             finalCreditline = parseFloat(user?.creditline || 0); // preserve existing base limit
             finalDue = parsedAmount;
             for (const u of matchedUsers) {
-                await u.update({ advanceJama: 0, temporaryPendingDue: 0, balanceType: 'DUE' }, { transaction: t });
+                await u.update({ advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
             }
             if (user && !matchedUsers.some(u => u.id === user.id)) {
-                await user.update({ advanceJama: 0, temporaryPendingDue: 0, balanceType: 'DUE' }, { transaction: t });
+                await user.update({ advanceJama: 0, balanceType: 'DUE' }, { transaction: t });
             }
 
             let remainingDue = parsedAmount;
@@ -4766,7 +4750,7 @@ export const getPartyLedger = async (req, res) => {
 
         // Fetch party user details with balance fields
         const user = await User.findByPk(userId, {
-            attributes: ['id', 'fullname', 'number', 'email', 'creditline', 'advanceJama', 'temporaryPendingDue', 'balanceType', 'blockcredit'],
+            attributes: ['id', 'fullname', 'number', 'email', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
             include: [{
                 model: BusinessProfile,
                 as: 'businessProfile',
@@ -4828,9 +4812,8 @@ export const getPartyLedger = async (req, res) => {
                 usedCredit: financials.usedCredit,
                 usedDue: financials.usedCredit,
                 advanceJama: financials.advanceJama,
-                temporaryPendingDue: financials.temporaryPendingDue,
-                totalDue: financials.temporaryPendingDue,
                 totalPendingDue: financials.totalPendingDue,
+                totalDue: financials.totalPendingDue,
                 availableCredit: financials.availableCredit,
                 balanceType: user.balanceType || (financials.advanceJama > 0 ? 'JAMA' : 'DUE'),
                 blockcredit: user.blockcredit || false,

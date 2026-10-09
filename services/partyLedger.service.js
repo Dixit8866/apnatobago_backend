@@ -9,28 +9,41 @@ import {
     PartyBalanceLog,
     PartyLedger,
     BankSetting,
-    DeliveryBoy
+    DeliveryBoy,
+    ProductVariant
 } from '../models/index.js';
 import { calculateOrderFinancials } from './financialSettlement.service.js';
 import logger from '../logger/apiLogger.js';
 
 /**
- * ==============================================================================
- * CENTRALIZED PARTY ACCOUNTING & DOUBLE-ENTRY LEDGER SERVICE
- * ==============================================================================
- * Manages Party / Customer Ledger (ખાતાવહી):
- * - DEBIT (ઉધાર): Bill Generation, Invoices, Debit Notes
- * - CREDIT (જમા): Cash, Online Bank, Cheque, Coupons, Sales Return, Advance Jama
- * - RUNNING BALANCE: Progressive outstanding dues or advance balance
+ * Helper to format date & time for UI
  */
+const formatLedgerDateTime = (d) => {
+    const dt = new Date(d);
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    
+    let hours = dt.getHours();
+    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const hoursStr = String(hours).padStart(2, '0');
+
+    return {
+        dateStr: `${day}/${month}/${year}`,
+        timeStr: `${hoursStr}:${minutes} ${ampm}`,
+        isoDate: dt.toISOString()
+    };
+};
 
 /**
  * Reconstruct and synchronize the entire ledger history for a party.
- * Idempotent: checks existing vouchers and reconciles chronological balance.
  *
- * @param {string} userId - UUID of customer
+ * @param {string} userId - UUID or phone of customer
  * @param {Object} [options] - { forceRebuild: boolean, transaction: Object }
- * @returns {Promise<Object>} { user, summary, entries }
+ * @returns {Promise<Object>} { user, summary, ledgerRows, entries }
  */
 export const syncPartyLedger = async (userId, { forceRebuild = false, transaction = null } = {}) => {
     try {
@@ -56,7 +69,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         if (!user) throw new Error(`User not found: ${userId}`);
 
-        // Fetch all non-cancelled orders for this party (match by userId OR phone number)
+        // Fetch all non-cancelled orders for this party
         const orderOrConds = [{ userId: user.id }];
         const cleanUserPhone = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
         if (cleanUserPhone && cleanUserPhone.length >= 7) {
@@ -65,39 +78,66 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         const orders = await Order.findAll({
             where: { [Op.or]: orderOrConds },
+            attributes: ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'payableAmount', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt'],
             include: [
                 {
                     model: OrderPayment,
                     as: 'payments',
+                    attributes: ['id', 'orderId', 'amount', 'cashAmount', 'onlineAmount', 'paymentMethod', 'bankAccountId', 'deliveryBoyId', 'createdAt'],
                     required: false,
-                    include: [{ model: BankSetting, as: 'bankAccount', attributes: ['id', 'bankName', 'accountNumber'] }]
+                    include: [
+                        { model: BankSetting, as: 'bankAccount', attributes: ['id', 'bankName', 'accountHolderName'] },
+                        { model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name'] }
+                    ]
                 },
                 {
                     model: SalesReturn,
                     as: 'returns',
+                    attributes: ['id', 'orderId', 'returnAmount', 'quantity', 'price', 'reason', 'status'],
                     required: false
                 },
                 {
                     model: OrderItem,
                     as: 'items',
-                    required: false
+                    attributes: ['id', 'orderId', 'quantity', 'price', 'purchasePrice', 'variantId'],
+                    required: false,
+                    include: [
+                        {
+                            model: ProductVariant,
+                            as: 'variant',
+                            attributes: ['id', 'purchasePrice']
+                        }
+                    ]
                 }
             ],
             order: [['createdAt', 'ASC']],
             transaction
         });
 
-        // Fetch manual balance logs (adjustments, direct party payments, opening dues)
-        const balanceLogs = await PartyBalanceLog.findAll({
-            where: { userId: user.id },
+        // Fetch standalone Sales Returns for this party
+        const standaloneReturns = await SalesReturn.findAll({
+            where: {
+                userId: user.id,
+                orderId: null,
+                status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+            },
+            attributes: ['id', 'userId', 'returnNumber', 'returnAmount', 'quantity', 'price', 'reason', 'status', 'createdAt'],
             order: [['createdAt', 'ASC']],
             transaction
         });
 
-        // Build atomic timeline events
-        const timelineEvents = [];
+        // Fetch manual balance logs (Opening dues, Adjustments)
+        const balanceLogs = await PartyBalanceLog.findAll({
+            where: { userId: user.id },
+            attributes: ['id', 'userId', 'type', 'amount', 'note', 'createdByName', 'createdAt'],
+            order: [['createdAt', 'ASC']],
+            transaction
+        });
 
-        // 1. Process Orders & attached payments
+        // Build Chronological Transactions List
+        const chronologicalTransactions = [];
+
+        // 1. Process Orders
         for (const ord of orders) {
             const st = String(ord.orderStatus || '').toLowerCase();
             if (st.includes('cancel') || st.includes('reject')) continue;
@@ -106,172 +146,122 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const fin = calculateOrderFinancials(ord, ord.payments);
             const orderDate = ord.createdAt || new Date();
 
-            // Total Gross Bill Amount -> DEBIT (ઉધાર)
-            // Use robust fallback: fin.totalAmount -> ord.totalAmount -> ord.grandTotal -> (paid + due) -> paymentsSum -> itemsSum
             const orderPaymentsList = ord.payments || [];
-            const paymentsSum = orderPaymentsList.reduce((acc, p) => acc + parseFloat(p.amount || 0), 0);
             const orderItemsList = ord.items || [];
-            const itemsSum = orderItemsList.reduce((acc, it) => acc + (parseFloat(it.quantity || 0) * parseFloat(it.price || 0)), 0);
-            const grossBill = parseFloat(
-                fin.totalAmount > 0 
-                    ? fin.totalAmount 
-                    : (parseFloat(ord.totalAmount || ord.grandTotal || 0) || (parseFloat(ord.paidAmount || 0) + parseFloat(ord.dueAmount || 0)) || paymentsSum || itemsSum || 0)
+            const attachedReturns = ord.returns || [];
+
+            // Sales Amount (Gross Bill)
+            const salesAmt = parseFloat(
+                fin.totalAmount > 0
+                    ? fin.totalAmount
+                    : (parseFloat(ord.totalAmount || ord.payableAmount || 0) || 0)
             );
 
-            if (grossBill > 0) {
-                timelineEvents.push({
-                    type: 'SALES_INVOICE',
-                    voucherNo: `BILL-${billNo}`,
-                    date: orderDate,
-                    particulars: `Sales Bill #${billNo} (${ord.orderStatus})`,
-                    debit: grossBill,
-                    credit: 0,
-                    paymentMethod: 'BILL',
-                    bankName: null,
-                    orderId: ord.id,
-                    referenceId: `ORD-BILL-${ord.id}`,
-                    note: `Order Status: ${ord.orderStatus}`,
-                    sortTime: new Date(orderDate).getTime()
-                });
-            }
+            // Purchase Cost = sum(item.quantity * variant.purchasePrice)
+            const purchaseCost = orderItemsList.reduce((sum, it) => {
+                const qty = parseFloat(it.quantity || 0);
+                const cost = parseFloat(it.variant?.purchasePrice || it.purchasePrice || 0);
+                return sum + (qty * cost);
+            }, 0);
 
-            // Coupon Discount -> CREDIT (જમા)
-            if (fin.couponDiscount > 0) {
-                timelineEvents.push({
-                    type: 'COUPON',
-                    voucherNo: `CPN-${billNo}`,
-                    date: orderDate,
-                    particulars: `Coupon Discount Applied (Bill #${billNo})`,
-                    debit: 0,
-                    credit: fin.couponDiscount,
-                    paymentMethod: 'COUPON',
-                    bankName: null,
-                    orderId: ord.id,
-                    referenceId: `ORD-CPN-${ord.id}`,
-                    note: ord.discountType || 'Coupon Discount',
-                    sortTime: new Date(orderDate).getTime() + 10 // right after bill
-                });
-            }
+            // Profit = Sales - Purchase Cost
+            const profit = Math.max(0, salesAmt - purchaseCost);
 
-            // Sales Return on Order -> CREDIT (જમા)
-            const attachedReturns = ord.returns || ord.salesReturns || [];
-            let totalReturnAmt = 0;
-            attachedReturns.forEach((ret, rIdx) => {
-                const retAmt = parseFloat(ret.returnAmount || (ret.quantity * (ret.price || 0)) || 0);
-                if (retAmt > 0) {
-                    totalReturnAmt += retAmt;
-                    timelineEvents.push({
-                        type: 'SALES_RETURN',
-                        voucherNo: `SR-${billNo}-${rIdx + 1}`,
-                        date: ret.createdAt || orderDate,
-                        particulars: `Sales Return Credit (Bill #${billNo})`,
-                        debit: 0,
-                        credit: retAmt,
-                        paymentMethod: 'SALES_RETURN',
-                        bankName: null,
-                        orderId: ord.id,
-                        referenceId: `ORD-RET-${ret.id || `${ord.id}-${rIdx}`}`,
-                        note: ret.reason || 'Goods returned',
-                        sortTime: new Date(ret.createdAt || orderDate).getTime() + 20
-                    });
-                }
-            });
+            // Payment Breakdown
+            let cashCollected = 0;
+            let bankCollected = 0;
+            const receiverNames = [];
 
-            // Payments recorded on this order -> CREDIT (જમા)
-            const payments = ord.payments || [];
-            payments.forEach((p, pIdx) => {
+            orderPaymentsList.forEach(p => {
                 const method = String(p.paymentMethod || '').toUpperCase();
                 const pAmt = parseFloat(p.amount || 0);
                 const pCash = parseFloat(p.cashAmount || 0);
                 const pOnline = parseFloat(p.onlineAmount || 0);
-                const bank = p.bankAccount?.bankName || p.bankSetting?.bankName || null;
-                const pDate = p.createdAt || orderDate;
 
-                if (method === 'CREDIT') {
-                    // Credit method means remaining was put on Credit / Due (already reflected in debit - payments)
-                    return;
+                if (method === 'CREDIT') return;
+
+                if (pCash > 0 || pOnline > 0) {
+                    cashCollected += pCash;
+                    bankCollected += pOnline;
+                } else if (method === 'CASH') {
+                    cashCollected += pAmt;
+                } else {
+                    bankCollected += pAmt;
                 }
 
-                if (pCash > 0 && pOnline > 0) {
-                    timelineEvents.push({
-                        type: 'PAYMENT',
-                        voucherNo: `RCP-${billNo}-CASH`,
-                        date: pDate,
-                        particulars: `Payment Received (Cash - Bill #${billNo})`,
-                        debit: 0,
-                        credit: pCash,
-                        paymentMethod: 'CASH',
-                        bankName: null,
-                        orderId: ord.id,
-                        referenceId: `PAY-SPLIT-CASH-${p.id}`,
-                        note: p.notes || 'Cash collection',
-                        sortTime: new Date(pDate).getTime() + 30 + pIdx
-                    });
-
-                    timelineEvents.push({
-                        type: 'PAYMENT',
-                        voucherNo: `RCP-${billNo}-ONLINE`,
-                        date: pDate,
-                        particulars: `Payment Received (Online Bank - Bill #${billNo}${bank ? ` via ${bank}` : ''})`,
-                        debit: 0,
-                        credit: pOnline,
-                        paymentMethod: 'ONLINE',
-                        bankName: bank,
-                        orderId: ord.id,
-                        referenceId: `PAY-SPLIT-ONLINE-${p.id}`,
-                        note: p.notes || (p.transactionId ? `Txn: ${p.transactionId}` : 'Bank transfer'),
-                        sortTime: new Date(pDate).getTime() + 31 + pIdx
-                    });
-                } else if (pAmt > 0) {
-                    const isCash = method === 'CASH' || pCash > 0;
-                    timelineEvents.push({
-                        type: 'PAYMENT',
-                        voucherNo: `RCP-${billNo}-${pIdx + 1}`,
-                        date: pDate,
-                        particulars: `Payment Received (${isCash ? 'Cash' : `Online Bank${bank ? ` - ${bank}` : ''}`} - Bill #${billNo})`,
-                        debit: 0,
-                        credit: pAmt,
-                        paymentMethod: isCash ? 'CASH' : 'ONLINE',
-                        bankName: bank,
-                        orderId: ord.id,
-                        referenceId: `PAY-${p.id}`,
-                        note: p.notes || (p.transactionId ? `Txn: ${p.transactionId}` : null),
-                        sortTime: new Date(pDate).getTime() + 30 + pIdx
-                    });
+                if (p.bankAccount?.bankName) {
+                    const holder = p.bankAccount.accountHolderName ? ` • ${p.bankAccount.accountHolderName}` : '';
+                    receiverNames.push(`${p.bankAccount.bankName}${holder}`);
+                } else if (p.deliveryBoy?.name) {
+                    receiverNames.push(p.deliveryBoy.name);
                 }
             });
 
-            // Fallback for orders marked Paid or with paidAmount but no separate OrderPayment record
-            if (payments.length === 0 && fin.paidAmount > 0) {
-                const paidVal = parseFloat(fin.paidAmount);
-                timelineEvents.push({
-                    type: 'PAYMENT',
-                    voucherNo: `RCP-${billNo}`,
-                    date: orderDate,
-                    particulars: `Payment Received (Settled Bill #${billNo})`,
-                    debit: 0,
-                    credit: paidVal,
-                    paymentMethod: ord.paymentMethod || 'CASH',
-                    bankName: null,
-                    orderId: ord.id,
-                    referenceId: `ORD-PAID-${ord.id}`,
-                    note: `Settled payment for order #${billNo}`,
-                    sortTime: new Date(orderDate).getTime() + 30
-                });
+            // Fallback: If marked Paid or has paidAmount without individual OrderPayment record
+            if (orderPaymentsList.length === 0 && fin.paidAmount > 0) {
+                const fallbackMethod = String(ord.paymentMethod || 'CASH').toUpperCase();
+                if (fallbackMethod === 'CASH') {
+                    cashCollected = parseFloat(fin.paidAmount);
+                } else {
+                    bankCollected = parseFloat(fin.paidAmount);
+                }
             }
+
+            // Coupon Discount
+            const couponDiscount = parseFloat(fin.couponDiscount || ord.couponDiscount || 0);
+
+            // Sales Return on Order
+            const returnTotal = attachedReturns.reduce((sum, r) => {
+                return sum + parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0);
+            }, 0);
+            const returnNote = attachedReturns.map(r => r.reason).filter(Boolean).join(', ') || '-';
+
+            chronologicalTransactions.push({
+                type: 'ORDER',
+                orderId: ord.id,
+                dateObj: new Date(orderDate),
+                billNo: billNo.startsWith('B-') || billNo.startsWith('#') ? billNo.replace(/^#/, '') : `B-${billNo}`,
+                sales: salesAmt,
+                purchaseCost: parseFloat(purchaseCost.toFixed(2)),
+                profit: parseFloat(profit.toFixed(2)),
+                cash: parseFloat(cashCollected.toFixed(2)),
+                bank: parseFloat(bankCollected.toFixed(2)),
+                bankReceiver: receiverNames.length > 0 ? Array.from(new Set(receiverNames)).join(', ') : '-',
+                kupan: parseFloat(couponDiscount.toFixed(2)),
+                returnVal: parseFloat(returnTotal.toFixed(2)),
+                returnNote: returnNote,
+                sortTime: new Date(orderDate).getTime()
+            });
         }
 
-        // 2. Process Independent Party Balance Logs
-        // IMPORTANT: Skip any log that:
-        //  (a) Has an orderId that was already counted in orders above, OR
-        //  (b) Has orderId at all (delivery settlement auto-logs - already counted via Order payments), OR
-        //  (c) Is an auto-generated system note about overpayment/jama from delivery settlement
-        //  ONLY include pure manual admin-entered adjustments (no orderId, no auto-system notes)
+        // 2. Process Standalone Sales Returns
+        standaloneReturns.forEach((ret, rIdx) => {
+            const retDate = ret.createdAt || new Date();
+            const retAmt = parseFloat(ret.returnAmount || (parseFloat(ret.quantity || 0) * parseFloat(ret.price || 0)) || 0);
+            if (retAmt > 0) {
+                chronologicalTransactions.push({
+                    type: 'RETURN',
+                    orderId: null,
+                    dateObj: new Date(retDate),
+                    billNo: ret.returnNumber || `RTN-${String(ret.id).slice(0, 6).toUpperCase()}`,
+                    sales: 0,
+                    purchaseCost: 0,
+                    profit: 0,
+                    cash: 0,
+                    bank: 0,
+                    bankReceiver: '-',
+                    kupan: 0,
+                    returnVal: parseFloat(retAmt.toFixed(2)),
+                    returnNote: ret.reason || 'Goods returned',
+                    sortTime: new Date(retDate).getTime() + 15 + rIdx
+                });
+            }
+        });
+
+        // 3. Process Independent Manual Adjustments (PartyBalanceLog)
         for (const log of balanceLogs) {
-            // Skip if tied to ANY order (already processed via OrderPayment / order financials above)
             if (log.orderId) continue;
 
-            // Skip auto-generated delivery settlement overpayment notes
             const autoNote = String(log.note || '').toLowerCase();
             if (
                 autoNote.includes('overpayment') ||
@@ -290,109 +280,85 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const logDate = log.createdAt || new Date();
 
             if (logType === 'JAMA' || logType === 'PAYMENT') {
-                // Customer gave money / Advance Jama / Direct Settlement -> CREDIT (જમા)
-                timelineEvents.push({
-                    type: 'ADJUSTMENT',
-                    voucherNo: `ADJ-CR-${String(log.id).slice(0, 8)}`,
-                    date: logDate,
-                    particulars: log.note || 'Direct Payment / Advance Jama Received',
-                    debit: 0,
-                    credit: logAmt,
-                    paymentMethod: 'CASH',
-                    bankName: null,
+                chronologicalTransactions.push({
+                    type: 'ADJUSTMENT_CR',
                     orderId: null,
-                    referenceId: `LOG-${log.id}`,
-                    note: log.note || 'Manual Credit Balance Adjustment',
-                    createdByName: log.createdByName || 'Admin',
+                    dateObj: new Date(logDate),
+                    billNo: `ADJ-CR-${String(log.id).slice(0, 6).toUpperCase()}`,
+                    sales: 0,
+                    purchaseCost: 0,
+                    profit: 0,
+                    cash: logAmt,
+                    bank: 0,
+                    bankReceiver: log.createdByName ? `Admin • ${log.createdByName}` : 'Admin',
+                    kupan: 0,
+                    returnVal: 0,
+                    returnNote: log.note || 'Direct Payment Received',
                     sortTime: new Date(logDate).getTime()
                 });
-            } else if (logType === 'BAKI') {
-                // Past due added / Manual Debit -> DEBIT (ઉધાર)
-                timelineEvents.push({
-                    type: 'ADJUSTMENT',
-                    voucherNo: `ADJ-DR-${String(log.id).slice(0, 8)}`,
-                    date: logDate,
-                    particulars: log.note || 'Previous Opening Balance / Due Added',
-                    debit: logAmt,
-                    credit: 0,
-                    paymentMethod: 'ADJUSTMENT',
-                    bankName: null,
+            } else if (logType === 'BAKI' || logType === 'DUE') {
+                chronologicalTransactions.push({
+                    type: 'ADJUSTMENT_DR',
                     orderId: null,
-                    referenceId: `LOG-${log.id}`,
-                    note: log.note || 'Manual Debit Balance Adjustment',
-                    createdByName: log.createdByName || 'Admin',
+                    dateObj: new Date(logDate),
+                    billNo: `OPN-${String(log.id).slice(0, 6).toUpperCase()}`,
+                    sales: logAmt,
+                    purchaseCost: 0,
+                    profit: 0,
+                    cash: 0,
+                    bank: 0,
+                    bankReceiver: '-',
+                    kupan: 0,
+                    returnVal: 0,
+                    returnNote: log.note || 'Opening Due Added',
                     sortTime: new Date(logDate).getTime()
                 });
             }
         }
 
-        // Sort events chronologically
-        timelineEvents.sort((a, b) => a.sortTime - b.sortTime);
+        // Sort all transactions chronologically
+        chronologicalTransactions.sort((a, b) => a.sortTime - b.sortTime);
 
-        // Pre-compute valid order IDs from actual user orders to protect DB foreign key
-        const validOrderIds = new Set((orders || []).map(o => o.id));
+        // Build continuous Running Ledger Rows
+        let runningBalance = 0;
+        const allBuiltRows = chronologicalTransactions.map((tx, idx) => {
+            const dt = formatLedgerDateTime(tx.dateObj);
+            const openingBalance = runningBalance;
+            const totalAmount = parseFloat((openingBalance + tx.sales).toFixed(2));
+            const creditsTotal = tx.cash + tx.bank + tx.kupan + tx.returnVal;
+            const closingBalance = parseFloat((totalAmount - creditsTotal).toFixed(2));
 
-        // Compute running balance step-by-step
-        let currentRunningBalance = 0;
-        const processedEntries = timelineEvents.map(evt => {
-            const debit = parseFloat(evt.debit || 0);
-            const credit = parseFloat(evt.credit || 0);
-            currentRunningBalance = parseFloat((currentRunningBalance + debit - credit).toFixed(2));
+            runningBalance = closingBalance;
 
             return {
-                userId,
-                orderId: (evt.orderId && validOrderIds.has(evt.orderId)) ? evt.orderId : null,
-                voucherNo: evt.voucherNo,
-                voucherType: evt.type,
-                date: evt.date,
-                particulars: evt.particulars,
-                debit: debit.toFixed(2),
-                credit: credit.toFixed(2),
-                runningBalance: currentRunningBalance.toFixed(2),
-                paymentMethod: evt.paymentMethod || null,
-                bankName: evt.bankName || null,
-                referenceId: evt.referenceId || null,
-                note: evt.note || null,
-                createdByName: evt.createdByName || 'System'
+                sr: idx + 1,
+                date: dt.dateStr,
+                time: dt.timeStr,
+                isoDate: dt.isoDate,
+                dateObj: tx.dateObj,
+                billNo: tx.billNo,
+                orderId: tx.orderId,
+                openingBalance: parseFloat(openingBalance.toFixed(2)),
+                sales: parseFloat(tx.sales.toFixed(2)),
+                totalAmount: totalAmount,
+                purchaseCost: parseFloat(tx.purchaseCost.toFixed(2)),
+                profit: parseFloat(tx.profit.toFixed(2)),
+                cash: parseFloat(tx.cash.toFixed(2)),
+                bank: parseFloat(tx.bank.toFixed(2)),
+                bankReceiver: tx.bankReceiver,
+                kupan: parseFloat(tx.kupan.toFixed(2)),
+                returnVal: parseFloat(tx.returnVal.toFixed(2)),
+                returnNote: tx.returnNote,
+                closingBalance: closingBalance
             };
         });
 
-        // Persist to `party_ledgers` table
-        if (forceRebuild) {
-            await PartyLedger.destroy({ where: { userId }, transaction });
-            if (processedEntries.length > 0) {
-                await PartyLedger.bulkCreate(processedEntries, { transaction });
-            }
-        } else {
-            // Upsert / idempotent save by referenceId
-            for (const entry of processedEntries) {
-                if (entry.referenceId) {
-                    const existing = await PartyLedger.findOne({
-                        where: { userId, referenceId: entry.referenceId },
-                        transaction
-                    });
-                    if (existing) {
-                        await existing.update(entry, { transaction });
-                    } else {
-                        await PartyLedger.create(entry, { transaction });
-                    }
-                } else {
-                    await PartyLedger.create(entry, { transaction });
-                }
-            }
-        }
-
-        // Calculate Totals
-        const totalDebit = processedEntries.reduce((sum, e) => sum + parseFloat(e.debit || 0), 0);
-        const totalCredit = processedEntries.reduce((sum, e) => sum + parseFloat(e.credit || 0), 0);
-        const netOutstandingDue = Math.max(0, currentRunningBalance);
-        const advanceJama = currentRunningBalance < 0 ? Math.abs(currentRunningBalance) : 0;
-        const balanceType = currentRunningBalance > 0 ? 'DUE' : (currentRunningBalance < 0 ? 'JAMA' : 'CLEAR');
+        // Synchronize User Model closingBalance as single source of truth
+        const latestClosingBalance = runningBalance;
 
         if (user) {
             try {
-                user.advanceJama = advanceJama;
-                user.balanceType = balanceType;
+                user.closingBalance = latestClosingBalance;
                 await user.save({ transaction });
             } catch (uErr) {
                 logger.warn(`[syncPartyLedger User update warning]: ${uErr.message}`);
@@ -403,25 +369,18 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             user: {
                 id: user.id,
                 fullname: user.fullname,
-                shopName: user.businessProfile?.businessName || user.fullname,
-                phone: user.number,
-                area: user.businessProfile?.area || user.city || '',
-                address: user.businessProfile?.address || '',
+                shopName: user.businessProfile?.shopName || user.businessProfile?.shopNameAlt || user.fullname,
+                mobile: user.number ? `+91 ${user.number}` : '',
+                route: user.city || 'Main Route (A1)',
+                kycStatus: user.kycverification === 'verified' ? 'KYC Verified' : 'KYC Pending',
                 creditline: parseFloat(user.creditline || 0),
-                currentDue: netOutstandingDue,
-                advanceJama: advanceJama,
-                balanceType: balanceType
+                closingBalance: latestClosingBalance,
+                currentDue: latestClosingBalance > 0 ? latestClosingBalance : 0,
+                advanceJama: latestClosingBalance < 0 ? Math.abs(latestClosingBalance) : 0,
+                balanceType: latestClosingBalance > 0 ? 'DUE' : (latestClosingBalance < 0 ? 'JAMA' : 'CLEAR')
             },
-            summary: {
-                totalBilled: parseFloat(totalDebit.toFixed(2)),
-                totalReceived: parseFloat(totalCredit.toFixed(2)),
-                currentBalance: parseFloat(currentRunningBalance.toFixed(2)),
-                totalDue: parseFloat(netOutstandingDue.toFixed(2)),
-                totalAdvanceJama: parseFloat(advanceJama.toFixed(2)),
-                totalOrdersCount: orders.length,
-                totalEntriesCount: processedEntries.length
-            },
-            entries: processedEntries
+            ledgerRows: allBuiltRows,
+            closingBalance: latestClosingBalance
         };
     } catch (error) {
         logger.error(`[syncPartyLedger Error for userId ${userId}]: ${error.message}`);
@@ -430,145 +389,107 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 };
 
 /**
- * Get Party Ledger with date filtering, search, and pagination.
+ * Get Party Ledger with date filtering, search, and UI-accurate summary cards.
  *
- * @param {string} userId - UUID of customer
- * @param {Object} query - { startDate, endDate, search, limit, page, refresh }
+ * @param {string} userId - UUID or Phone of customer
+ * @param {Object} query - { startDate, endDate, search, limit, page }
  * @returns {Promise<Object>}
  */
 export const getPartyLedger = async (userId, query = {}) => {
     try {
-        const { startDate, endDate, search, limit = 500, refresh = false } = query;
+        const { startDate, endDate, search } = query;
 
-        let user = null;
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId).trim());
-        if (isUUID) {
-            user = await User.findByPk(userId, {
-                include: [{ model: BusinessProfile, as: 'businessProfile' }]
-            });
-        } else {
-            const cleanPhone = String(userId).replace(/\D/g, '').slice(-10);
-            if (cleanPhone) {
-                user = await User.findOne({
-                    where: { number: { [Op.like]: `%${cleanPhone}` } },
-                    include: [{ model: BusinessProfile, as: 'businessProfile' }]
-                });
+        const synced = await syncPartyLedger(userId, { forceRebuild: true });
+        const allRows = synced.ledgerRows || [];
+
+        // Apply Date Range Filter if provided
+        let startTimestamp = null;
+        let endTimestamp = null;
+        if (startDate) {
+            startTimestamp = new Date(`${startDate}T00:00:00.000Z`).getTime();
+        }
+        if (endDate) {
+            endTimestamp = new Date(`${endDate}T23:59:59.999Z`).getTime();
+        }
+
+        let filteredRows = allRows;
+        let periodOpeningBalance = 0;
+
+        if (startTimestamp || endTimestamp) {
+            const priorRows = allRows.filter(r => startTimestamp ? r.dateObj.getTime() < startTimestamp : false);
+            if (priorRows.length > 0) {
+                periodOpeningBalance = priorRows[priorRows.length - 1].closingBalance;
             }
+
+            filteredRows = allRows.filter(r => {
+                const t = r.dateObj.getTime();
+                if (startTimestamp && t < startTimestamp) return false;
+                if (endTimestamp && t > endTimestamp) return false;
+                return true;
+            });
+        } else if (allRows.length > 0) {
+            periodOpeningBalance = allRows[0].openingBalance;
         }
 
-        if (!user) throw new Error(`User not found: ${userId}`);
-
-        // Always force-rebuild from real Orders every time to ensure 100% accuracy
-        // This ensures no stale/dummy data is served - ledger is always fresh from DB
-        await syncPartyLedger(user.id, { forceRebuild: true });
-
-        // Build query conditions
-        const where = { userId: user.id };
-
-        if (startDate && endDate) {
-            where.date = {
-                [Op.between]: [
-                    new Date(`${startDate}T00:00:00.000Z`),
-                    new Date(`${endDate}T23:59:59.999Z`)
-                ]
-            };
-        } else if (startDate) {
-            where.date = { [Op.gte]: new Date(`${startDate}T00:00:00.000Z`) };
-        } else if (endDate) {
-            where.date = { [Op.lte]: new Date(`${endDate}T23:59:59.999Z`) };
-        }
-
+        // Apply Bill Search Filter if provided
         if (search && search.trim()) {
-            const s = search.trim();
-            where[Op.or] = [
-                { voucherNo: { [Op.iLike]: `%${s}%` } },
-                { particulars: { [Op.iLike]: `%${s}%` } },
-                { paymentMethod: { [Op.iLike]: `%${s}%` } },
-                { note: { [Op.iLike]: `%${s}%` } }
-            ];
+            const q = search.toLowerCase().trim();
+            filteredRows = filteredRows.filter(r =>
+                r.billNo.toLowerCase().includes(q) ||
+                (r.bankReceiver && r.bankReceiver.toLowerCase().includes(q)) ||
+                (r.returnNote && r.returnNote.toLowerCase().includes(q))
+            );
         }
 
-        // Calculate Opening Balance if startDate is filtered
-        let openingBalance = 0;
-        if (startDate) {
-            const priorEntries = await PartyLedger.findAll({
-                where: {
-                    userId: user.id,
-                    date: { [Op.lt]: new Date(`${startDate}T00:00:00.000Z`) }
-                },
-                attributes: ['debit', 'credit']
-            });
+        // Re-index SR for filtered view
+        filteredRows = filteredRows.map((r, idx) => ({
+            ...r,
+            sr: idx + 1
+        }));
 
-            const priorDebit = priorEntries.reduce((acc, r) => acc + parseFloat(r.debit || 0), 0);
-            const priorCredit = priorEntries.reduce((acc, r) => acc + parseFloat(r.credit || 0), 0);
-            openingBalance = priorDebit - priorCredit;
-        }
-
-        // Fetch records for this view
-        const dbEntries = await PartyLedger.findAll({
-            where,
-            order: [['date', 'ASC'], ['createdAt', 'ASC']],
-            limit: parseInt(limit, 10) || 500
+        // Compute Summary Totals for UI Cards
+        const totals = filteredRows.reduce((acc, r) => {
+            acc.periodSales += r.sales || 0;
+            acc.totalAmount += r.totalAmount || 0;
+            acc.purchaseCost += r.purchaseCost || 0;
+            acc.profit += r.profit || 0;
+            acc.cash += r.cash || 0;
+            acc.bank += r.bank || 0;
+            acc.kupan += r.kupan || 0;
+            acc.returnVal += r.returnVal || 0;
+            return acc;
+        }, {
+            periodSales: 0,
+            totalAmount: 0,
+            purchaseCost: 0,
+            profit: 0,
+            cash: 0,
+            bank: 0,
+            kupan: 0,
+            returnVal: 0
         });
 
-        const entries = dbEntries.map(e => e.toJSON ? e.toJSON() : e);
-
-        // Prepend opening balance record if viewing a filtered date range
-        if (startDate) {
-            entries.unshift({
-                id: 'OPENING_BALANCE',
-                userId: user.id,
-                voucherNo: 'OPN-BAL',
-                voucherType: 'OPENING_BALANCE',
-                date: new Date(`${startDate}T00:00:00.000Z`),
-                particulars: 'Opening Balance (શરૂઆતની બાકી)',
-                debit: openingBalance > 0 ? openingBalance.toFixed(2) : '0.00',
-                credit: openingBalance < 0 ? Math.abs(openingBalance).toFixed(2) : '0.00',
-                runningBalance: openingBalance.toFixed(2),
-                paymentMethod: 'NONE',
-                isOpeningBalance: true
-            });
-        }
-
-        // Compute totals for this filtered range
-        const periodDebit = entries.reduce((acc, r) => acc + parseFloat(r.debit || 0), 0);
-        const periodCredit = entries.reduce((acc, r) => acc + parseFloat(r.credit || 0), 0);
-        const periodClosingBalance = openingBalance + periodDebit - periodCredit;
-
-        // Compute overall lifetime balance for party header
-        const allEntries = await PartyLedger.findAll({
-            where: { userId: user.id },
-            attributes: ['debit', 'credit']
-        });
-        const lifetimeDebit = allEntries.reduce((acc, r) => acc + parseFloat(r.debit || 0), 0);
-        const lifetimeCredit = allEntries.reduce((acc, r) => acc + parseFloat(r.credit || 0), 0);
-        const lifetimeBalance = lifetimeDebit - lifetimeCredit;
+        const periodClosingBalance = filteredRows.length > 0
+            ? filteredRows[filteredRows.length - 1].closingBalance
+            : periodOpeningBalance;
 
         return {
-            user: {
-                id: user.id,
-                fullname: user.fullname,
-                shopName: user.businessProfile?.businessName || user.fullname,
-                phone: user.number,
-                area: user.businessProfile?.area || user.city || '',
-                address: user.businessProfile?.address || '',
-                creditline: parseFloat(user.creditline || 0),
-                currentDue: Math.max(0, lifetimeBalance),
-                advanceJama: lifetimeBalance < 0 ? Math.abs(lifetimeBalance) : 0,
-                balanceType: lifetimeBalance > 0 ? 'DUE' : (lifetimeBalance < 0 ? 'JAMA' : 'CLEAR')
-            },
+            user: synced.user,
             summary: {
-                openingBalance: parseFloat(openingBalance.toFixed(2)),
-                totalDebit: parseFloat(periodDebit.toFixed(2)),
-                totalCredit: parseFloat(periodCredit.toFixed(2)),
-                closingBalance: parseFloat(periodClosingBalance.toFixed(2)),
-                lifetimeTotalBilled: parseFloat(lifetimeDebit.toFixed(2)),
-                lifetimeTotalReceived: parseFloat(lifetimeCredit.toFixed(2)),
-                lifetimeNetDue: parseFloat(Math.max(0, lifetimeBalance).toFixed(2)),
-                lifetimeAdvanceJama: parseFloat((lifetimeBalance < 0 ? Math.abs(lifetimeBalance) : 0).toFixed(2)),
-                count: entries.length
+                openingBalance: parseFloat(periodOpeningBalance.toFixed(2)),
+                periodSales: parseFloat(totals.periodSales.toFixed(2)),
+                totalAmount: parseFloat(totals.totalAmount.toFixed(2)),
+                purchaseCost: parseFloat(totals.purchaseCost.toFixed(2)),
+                profit: parseFloat(totals.profit.toFixed(2)),
+                cash: parseFloat(totals.cash.toFixed(2)),
+                bank: parseFloat(totals.bank.toFixed(2)),
+                kupan: parseFloat(totals.kupan.toFixed(2)),
+                returnVal: parseFloat(totals.returnVal.toFixed(2)),
+                closingBalance: parseFloat(synced.closingBalance.toFixed(2)),
+                periodClosingBalance: parseFloat(periodClosingBalance.toFixed(2)),
+                totalRows: filteredRows.length
             },
-            entries
+            ledgerRows: filteredRows
         };
     } catch (error) {
         logger.error(`[getPartyLedger Error]: ${error.message}`);
@@ -577,71 +498,34 @@ export const getPartyLedger = async (userId, query = {}) => {
 };
 
 /**
- * Record a manual debit/credit ledger adjustment for a party.
- *
- * @param {Object} data
- * @returns {Promise<Object>}
+ * Add manual Debit / Credit voucher to party ledger
  */
 export const recordManualPartyEntry = async ({
     userId,
-    entryType, // 'DEBIT' | 'CREDIT'
+    entryType,
     amount,
     date = new Date(),
-    particulars,
+    particulars = '',
     paymentMethod = 'CASH',
-    note = null,
+    note = '',
     createdById = null,
     createdByName = 'Admin'
 }) => {
-    try {
-        const parsedAmt = parseFloat(amount || 0);
-        if (parsedAmt <= 0) throw new Error('Amount must be greater than 0');
+    const isCredit = entryType === 'CREDIT' || entryType === 'JAMA' || entryType === 'PAYMENT';
+    const logType = isCredit ? 'JAMA' : 'BAKI';
 
-        const isDebit = entryType.toUpperCase() === 'DEBIT';
-        const debit = isDebit ? parsedAmt : 0;
-        const credit = !isDebit ? parsedAmt : 0;
+    const log = await PartyBalanceLog.create({
+        userId,
+        orderId: null,
+        type: logType,
+        amount: Math.max(0, parseFloat(amount || 0)),
+        previousBalance: 0,
+        newBalance: 0,
+        note: note || particulars || (isCredit ? 'Manual Credit Entry' : 'Manual Debit Entry'),
+        createdById,
+        createdByName
+    });
 
-        // Fetch last balance
-        const lastEntry = await PartyLedger.findOne({
-            where: { userId },
-            order: [['date', 'DESC'], ['createdAt', 'DESC']]
-        });
-
-        const prevBal = lastEntry ? parseFloat(lastEntry.runningBalance || 0) : 0;
-        const newBal = prevBal + debit - credit;
-
-        const voucherNo = `${isDebit ? 'DR' : 'CR'}-${Date.now().toString().slice(-6)}`;
-
-        const entry = await PartyLedger.create({
-            userId,
-            voucherNo,
-            voucherType: isDebit ? 'DEBIT_NOTE' : 'CREDIT_NOTE',
-            date,
-            particulars: particulars || (isDebit ? 'Manual Debit Adjustment' : 'Manual Credit Adjustment'),
-            debit,
-            credit,
-            runningBalance: newBal,
-            paymentMethod,
-            note,
-            createdById,
-            createdByName
-        });
-
-        // Also record in PartyBalanceLog for system consistency
-        await PartyBalanceLog.create({
-            userId,
-            type: isDebit ? 'BAKI' : 'JAMA',
-            amount: parsedAmt,
-            previousBalance: prevBal,
-            newBalance: newBal,
-            note: particulars || note || 'Manual Ledger Entry',
-            createdById,
-            createdByName
-        });
-
-        return entry;
-    } catch (error) {
-        logger.error(`[recordManualPartyEntry Error]: ${error.message}`);
-        throw error;
-    }
+    await syncPartyLedger(userId, { forceRebuild: true });
+    return log;
 };
