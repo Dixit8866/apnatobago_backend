@@ -78,7 +78,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         const orders = await Order.findAll({
             where: { [Op.or]: orderOrConds },
-            attributes: ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'payableAmount', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt'],
+            attributes: ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt'],
             include: [
                 {
                     model: OrderPayment,
@@ -93,13 +93,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 {
                     model: SalesReturn,
                     as: 'returns',
-                    attributes: ['id', 'orderId', 'returnAmount', 'quantity', 'price', 'reason', 'status'],
+                    attributes: ['id', 'orderId', 'returnAmount', 'quantity', 'price', 'reason'],
                     required: false
                 },
                 {
                     model: OrderItem,
                     as: 'items',
-                    attributes: ['id', 'orderId', 'quantity', 'price', 'purchasePrice', 'variantId'],
+                    attributes: ['id', 'orderId', 'quantity', 'price', 'variantId'],
                     required: false,
                     include: [
                         {
@@ -118,10 +118,9 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         const standaloneReturns = await SalesReturn.findAll({
             where: {
                 userId: user.id,
-                orderId: null,
-                status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                orderId: null
             },
-            attributes: ['id', 'userId', 'returnNumber', 'returnAmount', 'quantity', 'price', 'reason', 'status', 'createdAt'],
+            attributes: ['id', 'userId', 'returnAmount', 'quantity', 'price', 'reason', 'createdAt'],
             order: [['createdAt', 'ASC']],
             transaction
         });
