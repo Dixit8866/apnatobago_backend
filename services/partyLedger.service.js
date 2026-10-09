@@ -83,10 +83,10 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 {
                     model: OrderPayment,
                     as: 'payments',
-                    attributes: ['id', 'orderId', 'amount', 'cashAmount', 'onlineAmount', 'paymentMethod', 'bankAccountId', 'deliveryBoyId', 'createdAt'],
+                    attributes: ['id', 'orderId', 'amount', 'paymentMethod', 'bankSettingId', 'deliveryBoyId', 'createdAt'],
                     required: false,
                     include: [
-                        { model: BankSetting, as: 'bankAccount', attributes: ['id', 'bankName', 'accountHolderName'] },
+                        { model: BankSetting, as: 'bankAccount', attributes: ['id', 'bankName', 'accountName'] },
                         { model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name'] }
                     ]
                 },
@@ -153,13 +153,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const salesAmt = parseFloat(
                 fin.totalAmount > 0
                     ? fin.totalAmount
-                    : (parseFloat(ord.totalAmount || ord.payableAmount || 0) || 0)
+                    : (parseFloat(ord.totalAmount || 0) || 0)
             );
 
             // Purchase Cost = sum(item.quantity * variant.purchasePrice)
             const purchaseCost = orderItemsList.reduce((sum, it) => {
                 const qty = parseFloat(it.quantity || 0);
-                const cost = parseFloat(it.variant?.purchasePrice || it.purchasePrice || 0);
+                const cost = parseFloat(it.variant?.purchasePrice || 0);
                 return sum + (qty * cost);
             }, 0);
 
@@ -174,22 +174,17 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             orderPaymentsList.forEach(p => {
                 const method = String(p.paymentMethod || '').toUpperCase();
                 const pAmt = parseFloat(p.amount || 0);
-                const pCash = parseFloat(p.cashAmount || 0);
-                const pOnline = parseFloat(p.onlineAmount || 0);
 
                 if (method === 'CREDIT') return;
 
-                if (pCash > 0 || pOnline > 0) {
-                    cashCollected += pCash;
-                    bankCollected += pOnline;
-                } else if (method === 'CASH') {
+                if (method === 'CASH') {
                     cashCollected += pAmt;
                 } else {
                     bankCollected += pAmt;
                 }
 
                 if (p.bankAccount?.bankName) {
-                    const holder = p.bankAccount.accountHolderName ? ` • ${p.bankAccount.accountHolderName}` : '';
+                    const holder = p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : '';
                     receiverNames.push(`${p.bankAccount.bankName}${holder}`);
                 } else if (p.deliveryBoy?.name) {
                     receiverNames.push(p.deliveryBoy.name);
