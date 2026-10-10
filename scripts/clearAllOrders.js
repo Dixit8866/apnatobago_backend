@@ -1,16 +1,33 @@
 import dotenv from 'dotenv';
-dotenv.config();
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import fs from 'fs';
 
-import sequelize from '../config/db.js';
-import { 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const backendRoot = join(__dirname, '..');
+const envPath = join(backendRoot, '.env');
+const envProdPath = join(backendRoot, '.env.production');
+
+if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+} else if (fs.existsSync(envProdPath)) {
+    dotenv.config({ path: envProdPath });
+} else {
+    dotenv.config();
+}
+
+const { default: sequelize } = await import('../config/db.js');
+const { 
     Order, 
     OrderItem, 
     OrderPayment, 
     OrderAssignment, 
     SalesReturn, 
     PartyBalanceLog,
-    User
-} from '../models/index.js';
+    User 
+} = await import('../models/index.js');
 import { Op } from 'sequelize';
 
 /**
