@@ -77,6 +77,8 @@ export const calculateOrderFinancials = (order, payments = null) => {
             const amt = parseFloat(p.amount || 0);
             if (m === 'CREDIT') {
                 creditPaymentSum += amt;
+            } else if (m === 'COUPON' || m === 'DISCOUNT') {
+                // COUPON is already accounted for in couponDisc; do NOT add to nonCreditPaid
             } else {
                 nonCreditPaid += amt;
                 if (m === 'CASH') cashSum += amt;
