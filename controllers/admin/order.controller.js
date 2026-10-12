@@ -1631,6 +1631,15 @@ export const updateOrderStatus = async (req, res) => {
         });
 
         if (orderStatus && orderStatus !== prevStatus) {
+            // Synchronize Party Ledger immediately when order status changes (e.g. moved to Packaging)
+            if (order.userId) {
+                try {
+                    await syncPartyLedger(order.userId, { forceRebuild: true });
+                } catch (lErr) {
+                    logger.warn(`[Sync Ledger in updateOrderStatus]: ${lErr.message}`);
+                }
+            }
+
             try {
                 const freshOrder = await Order.findByPk(order.id, {
                     include: [
@@ -1840,6 +1849,16 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             }
         } catch (sErr) {
             logger.error(`[Socket Broadcast Error in bulkUpdateOrderStatus]: ${sErr.message}`);
+        }
+
+        // Synchronize Party Ledger for all affected users
+        try {
+            const affectedUserIds = [...new Set((freshOrders || []).map(o => o.userId).filter(Boolean))];
+            for (const uId of affectedUserIds) {
+                await syncPartyLedger(uId, { forceRebuild: true });
+            }
+        } catch (lErr) {
+            logger.warn(`[Sync Ledger in bulkUpdateOrderStatus]: ${lErr.message}`);
         }
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Orders status updated successfully.");

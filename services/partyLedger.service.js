@@ -78,7 +78,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         const orders = await Order.findAll({
             where: { [Op.or]: orderOrConds },
-            attributes: ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt'],
+            attributes: ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt', 'packagingAt'],
             include: [
                 {
                     model: OrderPayment,
@@ -139,11 +139,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // 1. Process Orders
         for (const ord of orders) {
             const st = String(ord.orderStatus || '').toLowerCase();
-            if (st.includes('cancel') || st.includes('reject')) continue;
+            // Skip cancelled, rejected, and pending orders
+            // Business Rule: Party orders only enter Party Ledger / All Date Report once accepted/moved to Packaging or beyond
+            if (st.includes('cancel') || st.includes('reject') || st === 'pending') continue;
 
             const billNo = ord.orderId || String(ord.id).slice(0, 8);
             const fin = calculateOrderFinancials(ord, ord.payments);
-            const orderDate = ord.createdAt || new Date();
+            const orderDate = ord.packagingAt || ord.createdAt || new Date();
 
             const orderPaymentsList = ord.payments || [];
             const orderItemsList = ord.items || [];
