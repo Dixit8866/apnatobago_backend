@@ -1030,24 +1030,37 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
     // Clean and sanitize items to prevent payload bloat (strip unused product, variant, and pricing fields)
     const cleanItems = (data.order?.items || []).map(item => {
+        const p = item.product || {};
         const v = item.variant || {};
         const vi = item.variantInfo || {};
+
+        let pName = p.name;
+        if (typeof pName === 'object' && pName !== null) {
+            pName = pName.en || Object.values(pName)[0] || 'Product';
+        } else if (!pName) {
+            pName = typeof vi.productName === 'object' ? (vi.productName?.en || 'Product') : (vi.productName || item.productName || 'Product');
+        }
+
+        const volStr = typeof vi.volume === 'string' ? vi.volume : (v.volumeRef?.name || v.volume || '1');
+        const itemVol = typeof volStr === 'object' ? (volStr.en || Object.values(volStr)[0] || '1') : String(volStr);
+
+        const baseUnit = vi.baseUnitLabel || v.baseUnitRef?.name || v.baseUnitLabel || 'Unit';
+        const imgUrl = vi.image || v.image || p.thumbnail || item.thumbnail || '';
 
         return {
             id: item.id,
             productId: item.productId,
             variantId: item.variantId,
-            productName: item.productName || (typeof item.product?.name === 'string' ? item.product.name : (item.product?.name?.en || 'Product')),
             quantity: item.quantity,
             price: item.price,
             couponPoints: item.couponPoints || 0,
             couponPrice: item.couponPrice || '0.00',
             variantInfo: {
-                volume: typeof vi.volume === 'object' ? (vi.volume?.en || Object.values(vi.volume)[0] || '') : (vi.volume || ''),
+                image: imgUrl,
+                productName: typeof vi.productName === 'object' && vi.productName !== null ? vi.productName : { en: pName },
+                baseUnitLabel: typeof baseUnit === 'object' ? (baseUnit.en || Object.values(baseUnit)[0] || 'Unit') : String(baseUnit),
+                volume: itemVol,
                 extra: vi.extra || v.extra || ''
-            },
-            variant: {
-                extra: v.extra || vi.extra || ''
             },
             productVolumes: (item.productVolumes || []).map(pv => ({
                 id: pv.id,
@@ -1077,7 +1090,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
         data.order.dueAmount = netOrderCollectible.toFixed(2);
         data.order.totalAmount = fullTotal.toFixed(2);
 
-        // Clean user in order (strip unused keys)
+        // Clean user in order (strip unused keys & direct shopName/shopAddress)
         if (data.order.user) {
             data.order.user = {
                 id: data.order.user.id,
@@ -1091,9 +1104,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                 businessProfile: data.order.user.businessProfile ? {
                     shopName: data.order.user.businessProfile.shopName || '',
                     shopAddress: data.order.user.businessProfile.shopAddress || ''
-                } : null,
-                shopName: data.order.user.shopName || '',
-                shopAddress: data.order.user.shopAddress || ''
+                } : null
             };
         }
 
@@ -1160,7 +1171,15 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     delete data.userCreditline;
     delete data.payableAmount;
 
-    data.pastDueOrders = pastDueOrders;
+    // Prune pastDueOrders to only needed keys: id, orderId, totalAmount, dueAmount, paymentStatus
+    data.pastDueOrders = (pastDueOrders || []).map(p => ({
+        id: p.id,
+        orderId: p.orderId,
+        totalAmount: parseFloat(p.totalAmount || 0),
+        dueAmount: parseFloat(p.dueAmount || 0),
+        paymentStatus: p.paymentStatus || 'Partial'
+    }));
+
     data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
     data.currentOrderAmount = netOrderCollectible.toFixed(2);
     data.netPayableAmount = netPayableVal.toFixed(2);
