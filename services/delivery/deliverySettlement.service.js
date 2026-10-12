@@ -316,6 +316,19 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
             pOrder.notes = pOrder.notes ? `${pOrder.notes} | ${pastNote}` : pastNote;
             await pOrder.save({ transaction: t });
 
+            // Record explicit OrderPayment on the past order for ledger audit trail
+            await OrderPayment.create({
+                orderId: pOrder.id,
+                deliveryBoyId,
+                amount: clearAmt,
+                paymentMethod: (inputOnline > 0 && inputCash === 0) ? 'ONLINE' : 'CASH',
+                isSubmitted: true,
+                submittedAt: new Date(),
+                notes: `Past due cleared by delivery boy during delivery of Order #${assignment.order?.orderId || assignment.order.id}`,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            }, { transaction: t });
+
             await restoreUserCreditFromPayment(pOrder.id, clearAmt, user, t);
         }
 

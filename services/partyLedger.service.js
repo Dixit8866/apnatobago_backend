@@ -128,7 +128,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Fetch manual balance logs (Opening dues, Adjustments)
         const balanceLogs = await PartyBalanceLog.findAll({
             where: { userId: user.id },
-            attributes: ['id', 'userId', 'type', 'amount', 'note', 'createdByName', 'createdAt'],
+            attributes: ['id', 'userId', 'orderId', 'type', 'amount', 'note', 'createdByName', 'createdAt'],
             order: [['createdAt', 'ASC']],
             transaction
         });
@@ -169,39 +169,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const profit = Math.max(0, salesAmt - purchaseCost);
 
             // Payment Breakdown
-            let cashCollected = 0;
-            let bankCollected = 0;
-            const receiverNames = [];
-
-            orderPaymentsList.forEach(p => {
+            const validPayments = orderPaymentsList.filter(p => {
                 const method = String(p.paymentMethod || '').toUpperCase();
-                const pAmt = parseFloat(p.amount || 0);
-
-                if (method === 'CREDIT') return;
-
-                if (method === 'CASH') {
-                    cashCollected += pAmt;
-                } else {
-                    bankCollected += pAmt;
-                }
-
-                if (p.bankAccount?.bankName) {
-                    const holder = p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : '';
-                    receiverNames.push(`${p.bankAccount.bankName}${holder}`);
-                } else if (p.deliveryBoy?.name) {
-                    receiverNames.push(p.deliveryBoy.name);
-                }
+                return method !== 'CREDIT' && parseFloat(p.amount || 0) > 0;
             });
 
-            // Fallback: If marked Paid or has paidAmount without individual OrderPayment record
-            if (orderPaymentsList.length === 0 && fin.paidAmount > 0) {
-                const fallbackMethod = String(ord.paymentMethod || 'CASH').toUpperCase();
-                if (fallbackMethod === 'CASH') {
-                    cashCollected = parseFloat(fin.paidAmount);
-                } else {
-                    bankCollected = parseFloat(fin.paidAmount);
-                }
-            }
+            const formattedBillNo = billNo.startsWith('B-') || billNo.startsWith('#') ? billNo.replace(/^#/, '') : `B-${billNo}`;
+            const orderTimestamp = new Date(orderDate).getTime();
 
             // Coupon Discount
             const couponDiscount = parseFloat(fin.couponDiscount || ord.couponDiscount || 0);
@@ -212,21 +186,100 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             }, 0);
             const returnNote = attachedReturns.map(r => r.reason).filter(Boolean).join(', ') || '-';
 
+            // Distinguish payments made at delivery/order time vs subsequent payments:
+            let initialCash = 0;
+            let initialBank = 0;
+            const initialReceivers = [];
+            const subsequentPayments = [];
+
+            if (validPayments.length <= 1) {
+                // Single or zero payments on this order
+                validPayments.forEach(p => {
+                    const method = String(p.paymentMethod || '').toUpperCase();
+                    const pAmt = parseFloat(p.amount || 0);
+                    if (method === 'CASH') initialCash += pAmt;
+                    else initialBank += pAmt;
+                    const rName = p.bankAccount?.bankName
+                        ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
+                        : (p.deliveryBoy?.name || null);
+                    if (rName) initialReceivers.push(rName);
+                });
+            } else {
+                // Multiple payments: sort chronologically
+                validPayments.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+                const firstPayTime = new Date(validPayments[0].createdAt).getTime();
+
+                validPayments.forEach((p, pIdx) => {
+                    const pTime = new Date(p.createdAt).getTime();
+                    const method = String(p.paymentMethod || '').toUpperCase();
+                    const pAmt = parseFloat(p.amount || 0);
+                    const rName = p.bankAccount?.bankName
+                        ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
+                        : (p.deliveryBoy?.name || null);
+
+                    // First payment or payments made within 2 minutes of the initial payment belong to initial bill settlement
+                    if (pIdx === 0 || Math.abs(pTime - firstPayTime) <= 120000) {
+                        if (method === 'CASH') initialCash += pAmt;
+                        else initialBank += pAmt;
+                        if (rName) initialReceivers.push(rName);
+                    } else {
+                        // Subsequent payments on the same order get their own ledger row with the same billNo
+                        subsequentPayments.push({
+                            pAmt,
+                            method,
+                            rName,
+                            pTime
+                        });
+                    }
+                });
+            }
+
+            // Fallback: If marked Paid or has paidAmount without individual OrderPayment record
+            if (validPayments.length === 0 && fin.paidAmount > 0) {
+                const fallbackMethod = String(ord.paymentMethod || 'CASH').toUpperCase();
+                if (fallbackMethod === 'CASH') {
+                    initialCash = parseFloat(fin.paidAmount);
+                } else {
+                    initialBank = parseFloat(fin.paidAmount);
+                }
+            }
+
+            // 1a. Add the primary ORDER invoice row
             chronologicalTransactions.push({
                 type: 'ORDER',
                 orderId: ord.id,
                 dateObj: new Date(orderDate),
-                billNo: billNo.startsWith('B-') || billNo.startsWith('#') ? billNo.replace(/^#/, '') : `B-${billNo}`,
+                billNo: formattedBillNo,
                 sales: salesAmt,
                 purchaseCost: parseFloat(purchaseCost.toFixed(2)),
                 profit: parseFloat(profit.toFixed(2)),
-                cash: parseFloat(cashCollected.toFixed(2)),
-                bank: parseFloat(bankCollected.toFixed(2)),
-                bankReceiver: receiverNames.length > 0 ? Array.from(new Set(receiverNames)).join(', ') : '-',
+                cash: parseFloat(initialCash.toFixed(2)),
+                bank: parseFloat(initialBank.toFixed(2)),
+                bankReceiver: initialReceivers.length > 0 ? Array.from(new Set(initialReceivers)).join(', ') : '-',
                 kupan: parseFloat(couponDiscount.toFixed(2)),
                 returnVal: parseFloat(returnTotal.toFixed(2)),
                 returnNote: returnNote,
-                sortTime: new Date(orderDate).getTime()
+                sortTime: orderTimestamp
+            });
+
+            // 1b. Add separate rows for any SUBSEQUENT payments on this same bill
+            subsequentPayments.forEach((sp, spIdx) => {
+                chronologicalTransactions.push({
+                    type: 'ORDER_PAYMENT',
+                    orderId: ord.id,
+                    dateObj: new Date(sp.pTime),
+                    billNo: formattedBillNo, // Bill number stays the same!
+                    sales: 0, // Sales is 0 for payment receipt
+                    purchaseCost: 0,
+                    profit: 0,
+                    cash: sp.method === 'CASH' ? parseFloat(sp.pAmt.toFixed(2)) : 0,
+                    bank: sp.method !== 'CASH' ? parseFloat(sp.pAmt.toFixed(2)) : 0,
+                    bankReceiver: sp.rName || '-',
+                    kupan: 0,
+                    returnVal: 0,
+                    returnNote: '-', // Never put return note on payment!
+                    sortTime: sp.pTime + 1 + spIdx
+                });
             });
         }
 
@@ -255,7 +308,9 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         });
 
         // 3. Process Independent Manual Adjustments (PartyBalanceLog)
+        // ONLY genuine manual adjustments not linked to an order should be processed here!
         for (const log of balanceLogs) {
+            // NEVER process logs linked to an order! Order dues/credits are handled through Order itself.
             if (log.orderId) continue;
 
             const autoNote = String(log.note || '').toLowerCase();
@@ -264,7 +319,17 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 autoNote.includes('credit jama on order') ||
                 autoNote.includes('jama balance') ||
                 autoNote.includes('cash/online overpayment') ||
-                autoNote.includes('admin settlement')
+                autoNote.includes('admin settlement') ||
+                autoNote.includes('delivery settlement') ||
+                autoNote.includes('delivery boy settlement') ||
+                autoNote.includes('credit (baki)') ||
+                autoNote.includes('goods given on credit') ||
+                autoNote.includes('order #') ||
+                autoNote.includes('on order') ||
+                autoNote.includes('advance jama on order') ||
+                autoNote.includes('advance jama used on order') ||
+                autoNote.includes('past due cleared') ||
+                autoNote.includes('settled during delivery')
             ) {
                 continue;
             }
@@ -280,7 +345,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     type: 'ADJUSTMENT_CR',
                     orderId: null,
                     dateObj: new Date(logDate),
-                    billNo: `ADJ-CR-${String(log.id).slice(0, 6).toUpperCase()}`,
+                    billNo: `PAY-${String(log.id).slice(0, 6).toUpperCase()}`,
                     sales: 0,
                     purchaseCost: 0,
                     profit: 0,
@@ -289,7 +354,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     bankReceiver: log.createdByName ? `Admin • ${log.createdByName}` : 'Admin',
                     kupan: 0,
                     returnVal: 0,
-                    returnNote: log.note || 'Direct Payment Received',
+                    returnNote: '-', // Never place automatic return note!
                     sortTime: new Date(logDate).getTime()
                 });
             } else if (logType === 'BAKI' || logType === 'DUE') {
@@ -306,7 +371,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     bankReceiver: '-',
                     kupan: 0,
                     returnVal: 0,
-                    returnNote: log.note || 'Opening Due Added',
+                    returnNote: '-', // Never place automatic return note!
                     sortTime: new Date(logDate).getTime()
                 });
             }
@@ -415,6 +480,8 @@ export const getPartyLedger = async (userId, query = {}) => {
             const priorRows = allRows.filter(r => startTimestamp ? r.dateObj.getTime() < startTimestamp : false);
             if (priorRows.length > 0) {
                 periodOpeningBalance = priorRows[priorRows.length - 1].closingBalance;
+            } else if (allRows.length > 0) {
+                periodOpeningBalance = allRows[0].openingBalance;
             }
 
             filteredRows = allRows.filter(r => {
