@@ -927,25 +927,11 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
                 couponProducts.push({
                     id: itemData.productId,
-                    productId: itemData.productId,
                     itemId: itemData.id,
-                    variantId: itemData.variantId,
                     name: pName || itemData.productName || 'Product',
-                    productName: pName || itemData.productName || 'Product',
                     image: p.thumbnail || itemData.thumbnail || '',
-                    thumbnail: p.thumbnail || itemData.thumbnail || '',
-                    volume: itemVolName,
-                    volumeName: itemVolName,
-                    quantity: itemData.quantity,
-                    sellUnit: itemData.sellUnit || 'Base',
-                    baseUnitsPerPack: itemData.baseUnitsPerPack || 1,
-                    sellingVolume: itemData.sellingVolume || 1,
-                    packUnits: itemData.packUnits || 1,
-                    hasCoupon: isItemCouponApplied,
                     couponPoints: isItemCouponApplied ? Number(itemData.couponPoints || masterPts) : masterPts,
-                    couponPrice: isItemCouponApplied ? parseFloat(itemData.couponPrice || masterPrice).toFixed(2) : masterPrice.toFixed(2),
-                    masterCouponPoints: masterPts,
-                    masterCouponPrice: masterPrice.toFixed(2)
+                    couponPrice: isItemCouponApplied ? parseFloat(itemData.couponPrice || masterPrice).toFixed(2) : masterPrice.toFixed(2)
                 });
             }
         });
@@ -1042,47 +1028,26 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     const baseCreditLimit = creditFinancials.baseCreditLimit || userCreditVal;
     const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - totalCustomerDue).toFixed(2)));
 
-    // Clean and sanitize items to prevent bloat and sensitive leaks (purchasePrice, internal flags)
+    // Clean and sanitize items to prevent payload bloat (strip unused product, variant, and pricing fields)
     const cleanItems = (data.order?.items || []).map(item => {
-        const p = item.product || {};
         const v = item.variant || {};
+        const vi = item.variantInfo || {};
+
         return {
             id: item.id,
-            orderId: item.orderId,
             productId: item.productId,
             variantId: item.variantId,
+            productName: item.productName || (typeof item.product?.name === 'string' ? item.product.name : (item.product?.name?.en || 'Product')),
             quantity: item.quantity,
             price: item.price,
-            sellUnit: item.sellUnit || 'Base',
-            discount: item.discount || '0.00',
-            hasCoupon: item.hasCoupon || false,
             couponPoints: item.couponPoints || 0,
             couponPrice: item.couponPrice || '0.00',
-            baseUnitsPerPack: item.baseUnitsPerPack || 1,
-            sellingVolume: item.sellingVolume || 1,
-            packUnits: item.packUnits || 1,
-            singleUnitPrice: item.singleUnitPrice || 0,
-            unitPrice: item.unitPrice || 0,
-            totalUnits: item.totalUnits || 0,
-            variantInfo: item.variantInfo || {},
-            product: {
-                id: p.id,
-                name: p.name,
-                thumbnail: p.thumbnail,
-                hasCoupon: p.hasCoupon,
-                couponPoints: p.couponPoints,
-                couponPrice: p.couponPrice
+            variantInfo: {
+                volume: typeof vi.volume === 'object' ? (vi.volume?.en || Object.values(vi.volume)[0] || '') : (vi.volume || ''),
+                extra: vi.extra || v.extra || ''
             },
             variant: {
-                id: v.id,
-                productId: v.productId,
-                volume: v.volume,
-                image: v.image,
-                baseUnitsPerPack: v.baseUnitsPerPack,
-                sellingVolume: v.sellingVolume,
-                volumeRef: v.volumeRef,
-                baseUnitRef: v.baseUnitRef,
-                innerUnitRef: v.innerUnitRef
+                extra: v.extra || vi.extra || ''
             },
             productVolumes: (item.productVolumes || []).map(pv => ({
                 id: pv.id,
@@ -1094,12 +1059,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                 sellingVolume: pv.sellingVolume,
                 unitsPerPack: pv.unitsPerPack,
                 singleUnitPrice: pv.singleUnitPrice,
-                price: pv.price,
-                hasCoupon: pv.hasCoupon,
-                couponPoints: pv.couponPoints,
-                couponPrice: pv.couponPrice,
-                singleUnitCouponPoints: pv.singleUnitCouponPoints,
-                singleUnitCouponPrice: pv.singleUnitCouponPrice
+                price: pv.price
             }))
         };
     });
@@ -1111,21 +1071,13 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     };
 
     if (data.order) {
-        data.order.couponPoints = savedCouponPts;
-        data.order.couponDiscount = savedCouponDisc.toFixed(2);
-        data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (assignment.order?.discountType || 'Coupon Discount') : null;
         data.order.items = cleanItems;
         data.order.couponProducts = couponProducts;
-        data.order.payableAmount = netOrderCollectible.toFixed(2);
-        data.order.netPayableAmount = netOrderCollectible.toFixed(2);
         data.order.paidAmount = paidAmount.toFixed(2);
         data.order.dueAmount = netOrderCollectible.toFixed(2);
-        data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.order.duePayment = totalPastDueAmount.toFixed(2);
         data.order.totalAmount = fullTotal.toFixed(2);
-        data.order.salesReturnCalculation = salesReturnCalc;
 
-        // Clean user in order
+        // Clean user in order (strip unused keys)
         if (data.order.user) {
             data.order.user = {
                 id: data.order.user.id,
@@ -1135,58 +1087,85 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                 postcode: data.order.user.postcode,
                 latitude: data.order.user.latitude,
                 longitude: data.order.user.longitude,
-                creditline: data.order.user.creditline,
-                blockcredit: data.order.user.blockcredit,
-                businessProfile: data.order.user.businessProfile,
-                shopName: data.order.user.shopName,
-                shopAddress: data.order.user.shopAddress,
-                availableCredit: availableCredit.toFixed(2),
-                creditLimit: baseCreditLimit.toFixed(2),
-                usedCredit: totalCustomerDue.toFixed(2),
-                totalDue: totalCustomerDue.toFixed(2),
-                advanceJama: userAdvanceJama.toFixed(2),
-                balanceType: userBalanceType
+                userCreditline: parseFloat(data.order.user.creditline || 0).toFixed(2),
+                businessProfile: data.order.user.businessProfile ? {
+                    shopName: data.order.user.businessProfile.shopName || '',
+                    shopAddress: data.order.user.businessProfile.shopAddress || ''
+                } : null,
+                shopName: data.order.user.shopName || '',
+                shopAddress: data.order.user.shopAddress || ''
             };
         }
 
-        // Remove unused / duplicate keys from order
-        delete data.order.deletedAt;
+        // Remove unused / duplicate keys from order level
+        delete data.order.customerName;
+        delete data.order.customerNumber;
+        delete data.order.paymentCollectStatus;
+        delete data.order.shippingAddress;
+        delete data.order.razorpayOrderId;
+        delete data.order.razorpayPaymentId;
+        delete data.order.deliveryNotice;
+        delete data.order.deliveryRoundId;
+        delete data.order.deliveryRoundTiming;
+        delete data.order.orderDate;
+        delete data.order.deliveryDate;
+        delete data.order.deliveredAt;
+        delete data.order.packagingAt;
+        delete data.order.packedAt;
+        delete data.order.shippingAt;
+        delete data.order.routeCategoryId;
+        delete data.order.discount;
+        delete data.order.couponPoints;
+        delete data.order.couponDiscount;
+        delete data.order.discountType;
+        delete data.order.isMerged;
         delete data.order.godownId;
         delete data.order.createdByAdminId;
         delete data.order.verifiedByAdminId;
-        delete data.order.isMerged;
-        delete data.order.razorpayOrderId;
-        delete data.order.razorpayPaymentId;
-        delete data.order.shippingAddress;
+        delete data.order.pastDueCollected;
+        delete data.order.updatedAt;
+        delete data.order.deletedAt;
+        delete data.order.netPayableAmount;
+        delete data.order.totalPastDueAmount;
+        delete data.order.duePayment;
+        delete data.order.payableAmount;
+        delete data.order.salesReturnCalculation;
         delete data.order.creditLimit;
         delete data.order.creditAmount;
         delete data.order.availableCredit;
         delete data.order.baseCreditLimit;
+        delete data.order.returns;
     }
 
-    // Clean root data payload
+    // Clean root data payload (strip unused / duplicate keys)
+    delete data.deliveryBoyId;
+    delete data.position;
+    delete data.createdAt;
+    delete data.updatedAt;
     delete data.deletedAt;
-    delete data.userCreditline;
+    delete data.duePayment;
+    delete data.pastDueAmount;
+    delete data.currentPayment;
+    delete data.totalAmount;
+    delete data.availableCredit;
     delete data.availableDue;
+    delete data.creditLimit;
     delete data.creditAmount;
     delete data.baseCreditLimit;
+    delete data.usedCredit;
+    delete data.totalDue;
     delete data.totalUnpaidDue;
+    delete data.totalCustomerDue;
+    delete data.balanceType;
+    delete data.userCreditline;
+    delete data.payableAmount;
 
     data.pastDueOrders = pastDueOrders;
     data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-    data.duePayment = totalPastDueAmount.toFixed(2);
-    data.pastDueAmount = totalPastDueAmount.toFixed(2);
-    data.currentPayment = netOrderCollectible.toFixed(2);
+    data.currentOrderAmount = netOrderCollectible.toFixed(2);
     data.netPayableAmount = netPayableVal.toFixed(2);
-    data.totalAmount = netPayableVal.toFixed(2);
-    data.jamaAmount = jamaAmountVal.toFixed(2);
-    data.availableCredit = availableCredit.toFixed(2);
-    data.creditLimit = baseCreditLimit.toFixed(2);
-    data.usedCredit = totalCustomerDue.toFixed(2);
-    data.totalDue = totalCustomerDue.toFixed(2);
-    data.totalCustomerDue = totalCustomerDue.toFixed(2);
     data.advanceJama = userAdvanceJama.toFixed(2);
-    data.balanceType = userBalanceType;
+    data.jamaAmount = jamaAmountVal.toFixed(2);
     data.salesReturnCalculation = salesReturnCalc;
 
     return data;
