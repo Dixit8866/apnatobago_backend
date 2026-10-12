@@ -20,6 +20,7 @@ import { roundTotal } from '../../utils/roundHelper.js';
 import { sendToDevice } from '../notification.service.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered } from '../socketEvent.service.js';
 import { calculateOrderFinancials, syncPartyDeliveryNotice, getCustomerCreditFinancials } from '../financialSettlement.service.js';
+import { syncPartyLedger } from '../partyLedger.service.js';
 import { getTodayRangeIST } from '../../controllers/delivery/dashboard.controller.js';
 
 /**
@@ -149,7 +150,6 @@ export const enrichItemsWithProductVolumes = async (items) => {
                 unitsPerPack: vPackUnits,
                 singleUnitPrice: parseFloat(singleUnitPrice.toFixed(2)),
                 price: calculatedPrice > 0 ? calculatedPrice : parseFloat(v.purchasePrice || 0),
-                purchasePrice: parseFloat(v.purchasePrice || 0),
                 hasCoupon: masterHasCoupon,
                 couponPoints: vCouponPts,
                 couponPrice: vCouponPrice.toFixed(2),
@@ -367,7 +367,7 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                             attributes: ['id', 'orderId', 'amount', 'paymentMethod']
                         }
                     ],
-                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'creditAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
                     order: [['createdAt', 'DESC']]
                 }).then(res => { candidateOrders = res; })
             );
@@ -482,18 +482,24 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     if (!isEarlier) return;
 
                     const fin = calculateOrderFinancials(uo, uo.payments);
-                    const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+                    let due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+                    if (due <= 0 && parseFloat(uo.creditAmount || 0) > 0) {
+                        due = parseFloat(uo.creditAmount);
+                    }
+                    if (due <= 0 && parseFloat(uo.dueAmount || 0) > 0 && String(uo.paymentStatus || '').toLowerCase() !== 'paid') {
+                        due = parseFloat(uo.dueAmount);
+                    }
 
                     if (due > 0) {
                         unpaidOrdersSum += due;
                         pastDueOrders.push({
                             id: uo.id,
                             orderId: uo.orderId,
-                            totalAmount: fin.totalAmount,
+                            totalAmount: parseFloat(uo.totalAmount || fin.totalAmount || 0),
                             couponDiscount: fin.couponDiscount,
-                            paidAmount: parseFloat(fin.paidAmount),
-                            dueAmount: due,
-                            paymentStatus: fin.paymentStatus,
+                            paidAmount: parseFloat(fin.paidAmount || uo.paidAmount || 0),
+                            dueAmount: parseFloat(due.toFixed(2)),
+                            paymentStatus: fin.paymentStatus === 'Paid' ? 'Partial' : fin.paymentStatus,
                             orderStatus: uo.orderStatus,
                             createdAt: uo.createdAt
                         });
@@ -505,12 +511,15 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 const unsettledPastReturnAmount = uId ? (unsettledReturnsMap[uId] || 0) : 0;
                 const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
 
-                const userAdvanceJama = parseFloat(data.order?.user?.advanceJama || 0);
-                const userCreditVal = parseFloat(data.order?.user?.creditline || 0);
-                const userBalanceType = data.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
-                const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
+                const userClosingBal = parseFloat(data.order?.user?.closingBalance || 0);
+                let totalPastDueAmount = Math.max(unpaidOrdersSum, userClosingBal > 0 ? userClosingBal : 0);
 
-                let totalPastDueAmount = unpaidOrdersSum;
+                const userAdvanceJama = (userClosingBal < 0)
+                    ? Math.abs(userClosingBal)
+                    : parseFloat(data.order?.user?.advanceJama || 0);
+                const userCreditVal = parseFloat(data.order?.user?.creditline || 0);
+                const userBalanceType = data.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || totalPastDueAmount > 0 ? 'DUE' : 'CLEAR'));
+                const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
 
                 const currentPayments = paymentsMap[data.order?.id] || [];
                 const currentFin = calculateOrderFinancials(data.order, currentPayments);
@@ -662,7 +671,7 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
 export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId }) => {
     const assignment = await OrderAssignment.findOne({
         where: { id: assignmentId, deliveryBoyId },
-        attributes: { exclude: ['orderId'] },
+        attributes: { exclude: ['orderId', 'deletedAt'] },
         include: [
             {
                 model: Order,
@@ -671,7 +680,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                     {
                         model: User,
                         as: 'user',
-                        attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit', 'advanceJama', 'balanceType'],
+                        attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'latitude', 'longitude', 'creditline', 'blockcredit', 'advanceJama', 'balanceType', 'closingBalance'],
                         include: [
                             {
                                 model: BusinessProfile,
@@ -689,6 +698,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                             {
                                 model: ProductVariant,
                                 as: 'variant',
+                                attributes: ['id', 'productId', 'volume', 'volumeId', 'image', 'baseUnitsPerPack', 'sellingVolume'],
                                 include: [
                                     { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
                                     { model: Volume, as: 'baseUnitRef', attributes: ['id', 'name'] },
@@ -718,6 +728,26 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     let pastDueOrders = [];
     let unpaidOrdersSum = 0;
     let candidateOrders = [];
+    let priorClosingBalance = 0;
+
+    // Fetch authoritative Closing Balance from Party Ledger (Single Source of Truth)
+    if (userId) {
+        try {
+            const syncedLedger = await syncPartyLedger(userId, { forceRebuild: true });
+            if (syncedLedger && Array.isArray(syncedLedger.ledgerRows)) {
+                const curIdx = syncedLedger.ledgerRows.findIndex(r => r.orderId && String(r.orderId) === String(currentOrderDbId));
+                if (curIdx > 0) {
+                    priorClosingBalance = parseFloat(syncedLedger.ledgerRows[curIdx].openingBalance || 0);
+                } else if (curIdx === 0) {
+                    priorClosingBalance = parseFloat(syncedLedger.ledgerRows[0].openingBalance || 0);
+                } else {
+                    priorClosingBalance = parseFloat(syncedLedger.closingBalance || 0);
+                }
+            }
+        } catch (ledgerErr) {
+            logger.warn(`[getAssignmentDetailsService] syncPartyLedger warning: ${ledgerErr.message}`);
+        }
+    }
 
     if (userId || userPhoneClean) {
         const userOrConditions = [];
@@ -730,7 +760,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
             where: {
                 [Op.or]: userOrConditions,
                 id: { [Op.ne]: currentOrderDbId },
-                orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+                orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed', 'Shipping'] }
             },
             include: [
                 {
@@ -740,7 +770,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                     attributes: ['id', 'amount', 'paymentMethod']
                 }
             ],
-            attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+            attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'creditAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
             order: [['createdAt', 'DESC']]
         });
 
@@ -754,23 +784,74 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
             if (!isEarlier) return;
 
             const fin = calculateOrderFinancials(uo, uo.payments);
-            const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+            let due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+            if (due <= 0 && parseFloat(uo.creditAmount || 0) > 0) {
+                due = parseFloat(uo.creditAmount);
+            }
+            if (due <= 0 && parseFloat(uo.dueAmount || 0) > 0 && String(uo.paymentStatus || '').toLowerCase() !== 'paid') {
+                due = parseFloat(uo.dueAmount);
+            }
 
-            if (due > 0) {
+            if (due > 0.01) {
                 unpaidOrdersSum += due;
                 pastDueOrders.push({
                     id: uo.id,
                     orderId: uo.orderId,
-                    totalAmount: fin.totalAmount,
+                    totalAmount: parseFloat(uo.totalAmount || fin.totalAmount || 0),
                     couponDiscount: fin.couponDiscount,
-                    paidAmount: parseFloat(fin.paidAmount),
-                    dueAmount: due,
-                    paymentStatus: fin.paymentStatus,
+                    paidAmount: parseFloat(fin.paidAmount || uo.paidAmount || 0),
+                    dueAmount: parseFloat(due.toFixed(2)),
+                    paymentStatus: fin.paymentStatus === 'Paid' ? 'Partial' : fin.paymentStatus,
                     orderStatus: uo.orderStatus,
                     createdAt: uo.createdAt
                 });
             }
         });
+
+        // Ensure Closing Amount from previous bill / party ledger is accurately sent as Due
+        if (priorClosingBalance > 0.01) {
+            if (pastDueOrders.length === 0) {
+                const latestPriorOrder = candidateOrders.find(co => {
+                    const num = parseInt(String(co.orderId || '').replace(/\D/g, ''), 10) || 0;
+                    return (num > 0 && currentOrderNum > 0) ? (num < currentOrderNum) : (new Date(co.createdAt).getTime() <= currentOrderCreated);
+                });
+
+                if (latestPriorOrder) {
+                    unpaidOrdersSum = priorClosingBalance;
+                    pastDueOrders.push({
+                        id: latestPriorOrder.id,
+                        orderId: latestPriorOrder.orderId,
+                        totalAmount: parseFloat(latestPriorOrder.totalAmount || 0),
+                        couponDiscount: parseFloat(latestPriorOrder.couponDiscount || 0),
+                        paidAmount: Math.max(0, parseFloat(latestPriorOrder.totalAmount || 0) - priorClosingBalance),
+                        dueAmount: parseFloat(priorClosingBalance.toFixed(2)),
+                        paymentStatus: 'Partial',
+                        orderStatus: latestPriorOrder.orderStatus,
+                        createdAt: latestPriorOrder.createdAt
+                    });
+                    Order.update({
+                        dueAmount: priorClosingBalance,
+                        creditAmount: priorClosingBalance,
+                        paymentStatus: 'Partial'
+                    }, { where: { id: latestPriorOrder.id } }).catch(() => {});
+                } else {
+                    unpaidOrdersSum = priorClosingBalance;
+                    pastDueOrders.push({
+                        id: 'prior-due',
+                        orderId: 'Previous Due',
+                        totalAmount: priorClosingBalance,
+                        couponDiscount: 0,
+                        paidAmount: 0,
+                        dueAmount: parseFloat(priorClosingBalance.toFixed(2)),
+                        paymentStatus: 'Pending',
+                        orderStatus: 'Delivered',
+                        createdAt: assignment.order?.createdAt || new Date()
+                    });
+                }
+            } else if (unpaidOrdersSum < priorClosingBalance) {
+                unpaidOrdersSum = priorClosingBalance;
+            }
+        }
     }
 
     const data = assignment.toJSON();
@@ -838,8 +919,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                     couponPoints: isItemCouponApplied ? Number(itemData.couponPoints || masterPts) : masterPts,
                     couponPrice: isItemCouponApplied ? parseFloat(itemData.couponPrice || masterPrice).toFixed(2) : masterPrice.toFixed(2),
                     masterCouponPoints: masterPts,
-                    masterCouponPrice: masterPrice.toFixed(2),
-                    productVolumes: itemData.productVolumes || []
+                    masterCouponPrice: masterPrice.toFixed(2)
                 });
             }
         });
@@ -854,17 +934,6 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     const savedCouponPts = Number(assignment.order?.couponPoints || 0);
 
     delete data.payableAmount;
-
-    if (data.order) {
-        data.order.couponPoints = savedCouponPts;
-        data.order.couponDiscount = savedCouponDisc.toFixed(2);
-        data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (assignment.order?.discountType || 'Coupon Discount') : null;
-        data.order.couponProducts = couponProducts;
-        data.order.payableAmount = payableAmt.toFixed(2);
-        data.order.paidAmount = paidAmount.toFixed(2);
-        data.order.dueAmount = calculatedDueAmt.toFixed(2);
-        data.order.totalAmount = fullTotal.toFixed(2);
-    }
 
     if (data.order && data.order.payments) {
         const payments = data.order.payments || [];
@@ -906,12 +975,16 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
     const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
 
-    const userAdvanceJama = parseFloat(assignment.order?.user?.advanceJama || 0);
-    const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
-    const userBalanceType = assignment.order?.user?.balanceType || (userAdvanceJama > 0 ? 'JAMA' : (userCreditVal > 0 || unpaidOrdersSum > 0 ? 'DUE' : 'CLEAR'));
-    const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
+    let totalPastDueAmount = Math.max(unpaidOrdersSum, priorClosingBalance > 0 ? priorClosingBalance : 0);
 
-    let totalPastDueAmount = unpaidOrdersSum;
+    const userAdvanceJama = (priorClosingBalance < 0)
+        ? Math.abs(priorClosingBalance)
+        : parseFloat(assignment.order?.user?.advanceJama || 0);
+    const userCreditVal = parseFloat(assignment.order?.user?.creditline || 0);
+    const userBalanceType = (totalPastDueAmount > 0)
+        ? 'DUE'
+        : (userAdvanceJama > 0 ? 'JAMA' : 'CLEAR');
+    const jamaAmountVal = (userBalanceType === 'JAMA' && userAdvanceJama > 0) ? userAdvanceJama : 0;
 
     const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
     const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(assignment.order?.orderStatus);
@@ -935,15 +1008,143 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
         excludeOrderId: currentOrderDbId
     });
 
-    let totalCustomerDue = creditFinancials.totalPendingDue || creditFinancials.usedCredit;
+    let totalCustomerDue = Math.max(totalPastDueAmount, creditFinancials.totalPendingDue || creditFinancials.usedCredit);
     if (isDelivered && calculatedDueAmt > 0) {
         totalCustomerDue += calculatedDueAmt;
     }
 
-    const baseCreditLimit = creditFinancials.baseCreditLimit;
-    const advanceJamaForCredit = parseFloat(creditFinancials.advanceJama || 0);
-    // Include advanceJama so delivery app shows: baseCreditLimit + advanceJama - usedDue
-    const availableCredit = Math.max(0, parseFloat((baseCreditLimit + advanceJamaForCredit - totalCustomerDue).toFixed(2)));
+    const baseCreditLimit = creditFinancials.baseCreditLimit || userCreditVal;
+    const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - totalCustomerDue).toFixed(2)));
+
+    // Clean and sanitize items to prevent bloat and sensitive leaks (purchasePrice, internal flags)
+    const cleanItems = (data.order?.items || []).map(item => {
+        const p = item.product || {};
+        const v = item.variant || {};
+        return {
+            id: item.id,
+            orderId: item.orderId,
+            productId: item.productId,
+            variantId: item.variantId,
+            quantity: item.quantity,
+            price: item.price,
+            sellUnit: item.sellUnit || 'Base',
+            discount: item.discount || '0.00',
+            hasCoupon: item.hasCoupon || false,
+            couponPoints: item.couponPoints || 0,
+            couponPrice: item.couponPrice || '0.00',
+            baseUnitsPerPack: item.baseUnitsPerPack || 1,
+            sellingVolume: item.sellingVolume || 1,
+            packUnits: item.packUnits || 1,
+            singleUnitPrice: item.singleUnitPrice || 0,
+            unitPrice: item.unitPrice || 0,
+            totalUnits: item.totalUnits || 0,
+            variantInfo: item.variantInfo || {},
+            product: {
+                id: p.id,
+                name: p.name,
+                thumbnail: p.thumbnail,
+                hasCoupon: p.hasCoupon,
+                couponPoints: p.couponPoints,
+                couponPrice: p.couponPrice
+            },
+            variant: {
+                id: v.id,
+                productId: v.productId,
+                volume: v.volume,
+                image: v.image,
+                baseUnitsPerPack: v.baseUnitsPerPack,
+                sellingVolume: v.sellingVolume,
+                volumeRef: v.volumeRef,
+                baseUnitRef: v.baseUnitRef,
+                innerUnitRef: v.innerUnitRef
+            },
+            productVolumes: (item.productVolumes || []).map(pv => ({
+                id: pv.id,
+                variantId: pv.variantId,
+                volumeId: pv.volumeId,
+                volumeName: pv.volumeName,
+                volume: pv.volume,
+                baseUnitsPerPack: pv.baseUnitsPerPack,
+                sellingVolume: pv.sellingVolume,
+                unitsPerPack: pv.unitsPerPack,
+                singleUnitPrice: pv.singleUnitPrice,
+                price: pv.price,
+                hasCoupon: pv.hasCoupon,
+                couponPoints: pv.couponPoints,
+                couponPrice: pv.couponPrice,
+                singleUnitCouponPoints: pv.singleUnitCouponPoints,
+                singleUnitCouponPrice: pv.singleUnitCouponPrice
+            }))
+        };
+    });
+
+    const salesReturnCalc = {
+        billAmount: roundedFullTotal,
+        returnAmount: totalSalesReturnDeduction,
+        netToCollect: netOrderCollectible
+    };
+
+    if (data.order) {
+        data.order.couponPoints = savedCouponPts;
+        data.order.couponDiscount = savedCouponDisc.toFixed(2);
+        data.order.discountType = (savedCouponPts > 0 || savedCouponDisc > 0) ? (assignment.order?.discountType || 'Coupon Discount') : null;
+        data.order.items = cleanItems;
+        data.order.couponProducts = couponProducts;
+        data.order.payableAmount = netOrderCollectible.toFixed(2);
+        data.order.netPayableAmount = netOrderCollectible.toFixed(2);
+        data.order.paidAmount = paidAmount.toFixed(2);
+        data.order.dueAmount = netOrderCollectible.toFixed(2);
+        data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
+        data.order.duePayment = totalPastDueAmount.toFixed(2);
+        data.order.totalAmount = fullTotal.toFixed(2);
+        data.order.salesReturnCalculation = salesReturnCalc;
+
+        // Clean user in order
+        if (data.order.user) {
+            data.order.user = {
+                id: data.order.user.id,
+                fullname: data.order.user.fullname,
+                number: data.order.user.number,
+                city: data.order.user.city,
+                postcode: data.order.user.postcode,
+                latitude: data.order.user.latitude,
+                longitude: data.order.user.longitude,
+                creditline: data.order.user.creditline,
+                blockcredit: data.order.user.blockcredit,
+                businessProfile: data.order.user.businessProfile,
+                shopName: data.order.user.shopName,
+                shopAddress: data.order.user.shopAddress,
+                availableCredit: availableCredit.toFixed(2),
+                creditLimit: baseCreditLimit.toFixed(2),
+                usedCredit: totalCustomerDue.toFixed(2),
+                totalDue: totalCustomerDue.toFixed(2),
+                advanceJama: userAdvanceJama.toFixed(2),
+                balanceType: userBalanceType
+            };
+        }
+
+        // Remove unused / duplicate keys from order
+        delete data.order.deletedAt;
+        delete data.order.godownId;
+        delete data.order.createdByAdminId;
+        delete data.order.verifiedByAdminId;
+        delete data.order.isMerged;
+        delete data.order.razorpayOrderId;
+        delete data.order.razorpayPaymentId;
+        delete data.order.shippingAddress;
+        delete data.order.creditLimit;
+        delete data.order.creditAmount;
+        delete data.order.availableCredit;
+        delete data.order.baseCreditLimit;
+    }
+
+    // Clean root data payload
+    delete data.deletedAt;
+    delete data.userCreditline;
+    delete data.availableDue;
+    delete data.creditAmount;
+    delete data.baseCreditLimit;
+    delete data.totalUnpaidDue;
 
     data.pastDueOrders = pastDueOrders;
     data.totalPastDueAmount = totalPastDueAmount.toFixed(2);
@@ -953,51 +1154,14 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     data.netPayableAmount = netPayableVal.toFixed(2);
     data.totalAmount = netPayableVal.toFixed(2);
     data.jamaAmount = jamaAmountVal.toFixed(2);
-    data.userCreditline = availableCredit.toFixed(2);
     data.availableCredit = availableCredit.toFixed(2);
-    data.availableDue = availableCredit.toFixed(2);
-    data.creditLimit = availableCredit.toFixed(2);
-    data.creditAmount = availableCredit.toFixed(2);
-    data.baseCreditLimit = baseCreditLimit.toFixed(2);
+    data.creditLimit = baseCreditLimit.toFixed(2);
     data.usedCredit = totalCustomerDue.toFixed(2);
     data.totalDue = totalCustomerDue.toFixed(2);
-    data.totalUnpaidDue = totalCustomerDue.toFixed(2);
     data.totalCustomerDue = totalCustomerDue.toFixed(2);
     data.advanceJama = userAdvanceJama.toFixed(2);
     data.balanceType = userBalanceType;
-    data.salesReturnCalculation = {
-        billAmount: roundedFullTotal,
-        returnAmount: totalSalesReturnDeduction,
-        netToCollect: netOrderCollectible
-    };
-
-    if (data.order) {
-        data.order.netPayableAmount = netOrderCollectible.toFixed(2);
-        data.order.payableAmount = netOrderCollectible.toFixed(2);
-        data.order.dueAmount = netOrderCollectible.toFixed(2);
-        data.order.totalPastDueAmount = totalPastDueAmount.toFixed(2);
-        data.order.duePayment = totalPastDueAmount.toFixed(2);
-        data.order.salesReturnCalculation = data.salesReturnCalculation;
-        data.order.creditLimit = availableCredit.toFixed(2);
-        data.order.creditAmount = availableCredit.toFixed(2);
-        data.order.availableCredit = availableCredit.toFixed(2);
-        data.order.baseCreditLimit = baseCreditLimit.toFixed(2);
-    }
-
-    if (data.order && data.order.user) {
-        data.order.user.creditline = availableCredit.toFixed(2);
-        data.order.user.availableCredit = availableCredit.toFixed(2);
-        data.order.user.availableDue = availableCredit.toFixed(2);
-        data.order.user.creditLimit = availableCredit.toFixed(2);
-        data.order.user.creditAmount = availableCredit.toFixed(2);
-        data.order.user.baseCreditLimit = baseCreditLimit.toFixed(2);
-        data.order.user.usedCredit = totalCustomerDue.toFixed(2);
-        data.order.user.totalDue = totalCustomerDue.toFixed(2);
-        data.order.user.totalUnpaidDue = totalCustomerDue.toFixed(2);
-        data.order.user.advanceJama = userAdvanceJama.toFixed(2);
-        data.order.user.balanceType = userBalanceType;
-        data.order.user.jamaAmount = jamaAmountVal.toFixed(2);
-    }
+    data.salesReturnCalculation = salesReturnCalc;
 
     return data;
 };

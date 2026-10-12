@@ -1940,7 +1940,7 @@ export const verifyAndSettleOrder = async (req, res) => {
         const parsedCash = parseFloat(cashAmount) || 0;
         const parsedOnline = parseFloat(onlineAmount) || 0;
         const parsedCoupon = parseFloat(couponAmount) || 0;
-        const parsedCredit = parseFloat(creditAmount) || 0;
+        const parsedCredit = parseFloat(req.body.dueAmount !== undefined ? req.body.dueAmount : creditAmount) || 0;
         const parsedPrevReturn = parseFloat(previousReturnCredit) || 0;
         let totalReturnDeduction = 0;
 
@@ -2038,15 +2038,17 @@ export const verifyAndSettleOrder = async (req, res) => {
         }
 
         // Update Order Settlement Fields (Bill total stays intact as requested!)
+        const finalDue = parseFloat(req.body.dueAmount !== undefined ? req.body.dueAmount : creditAmount) || 0;
+
         order.orderStatus = 'Payment Verify';
         order.paymentCollectStatus = 'Verified';
         order.cashAmount = parsedCash;
         order.onlineAmount = parsedOnline;
-        order.creditAmount = parsedCredit;
-        order.paymentMethod = parsedCoupon > 0 ? (parsedCash > 0 || parsedOnline > 0 ? 'MIXED' : 'COUPON') : (parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (parsedCredit > 0 ? 'CREDIT' : 'CASH'));
-        order.paidAmount = parsedCash + parsedOnline + parsedCoupon;
-        order.dueAmount = parsedCredit; // Credit Amount represents THIS order's unpaid bill due amount
-        order.paymentStatus = parsedCredit > 0 ? 'Partial' : 'Paid';
+        order.creditAmount = finalDue;
+        order.dueAmount = finalDue; // Due Amount represents THIS order's unpaid bill due amount (closing amount)
+        order.paymentMethod = parsedCoupon > 0 ? (parsedCash > 0 || parsedOnline > 0 ? 'MIXED' : 'COUPON') : (parsedOnline > 0 ? (parsedCash > 0 ? 'MIXED' : 'ONLINE') : (finalDue > 0 ? 'CREDIT' : 'CASH'));
+        order.paidAmount = parsedCash + parsedOnline; // Collected amount is actual cash + online collected
+        order.paymentStatus = finalDue > 0 ? 'Partial' : 'Paid';
         order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
         if (req.body.pastDueCollected !== undefined && !isNaN(parseFloat(req.body.pastDueCollected))) {
             order.pastDueCollected = parseFloat(req.body.pastDueCollected);

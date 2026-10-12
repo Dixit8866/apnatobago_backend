@@ -113,6 +113,12 @@ export const calculateOrderFinancials = (order, payments = null) => {
     if (creditPaymentSum > 0) {
         dueAmt = creditPaymentSum;
         paidAmt = Math.min(netPayable, Math.max(0, netPayable - creditPaymentSum));
+    } else if (order.creditAmount !== undefined && order.creditAmount !== null && parseFloat(order.creditAmount) > 0) {
+        dueAmt = parseFloat(order.creditAmount);
+        paidAmt = Math.max(0, netPayable - dueAmt);
+    } else if (order.dueAmount !== undefined && order.dueAmount !== null && parseFloat(order.dueAmount) > 0 && !isExplicitlyPaid) {
+        dueAmt = parseFloat(order.dueAmount);
+        paidAmt = Math.max(0, netPayable - dueAmt);
     } else if (nonCreditPaidForThisBill >= netPayable - 0.01 || isExplicitlyPaid || isDueZero) {
         dueAmt = 0;
         paidAmt = netPayable;
@@ -135,7 +141,7 @@ export const calculateOrderFinancials = (order, payments = null) => {
         paymentStatus = 'Paid';
         dueAmt = 0;
         paidAmt = netPayable;
-    } else if (creditPaymentSum > 0.01) {
+    } else if (creditPaymentSum > 0.01 || parseFloat(order.creditAmount || 0) > 0.01 || parseFloat(order.dueAmount || 0) > 0.01) {
         paymentStatus = paidAmt > 0 ? 'Partial' : 'Pending';
     } else if (paidAmt > 0) {
         paymentStatus = 'Partial';
