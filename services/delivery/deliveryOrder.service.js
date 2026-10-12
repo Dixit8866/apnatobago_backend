@@ -482,11 +482,15 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     if (!isEarlier) return;
 
                     const fin = calculateOrderFinancials(uo, uo.payments);
-                    let due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-                    if (due <= 0 && parseFloat(uo.creditAmount || 0) > 0) {
-                        due = parseFloat(uo.creditAmount);
+                    let due = parseFloat(fin.dueAmount || 0);
+                    if (due <= 0) {
+                        const netPayable = parseFloat(fin.netPayable || 0);
+                        const nonCreditPaid = parseFloat(fin.nonCreditPaid || 0);
+                        if (netPayable > nonCreditPaid + 0.01) {
+                            due = parseFloat((netPayable - nonCreditPaid).toFixed(2));
+                        }
                     }
-                    if (due <= 0 && parseFloat(uo.dueAmount || 0) > 0 && String(uo.paymentStatus || '').toLowerCase() !== 'paid') {
+                    if (due <= 0 && parseFloat(uo.dueAmount || 0) > 0) {
                         due = parseFloat(uo.dueAmount);
                     }
 
@@ -512,7 +516,15 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
 
                 const userClosingBal = parseFloat(data.order?.user?.closingBalance || 0);
-                let totalPastDueAmount = Math.max(unpaidOrdersSum, userClosingBal > 0 ? userClosingBal : 0);
+                let totalPastDueAmount = unpaidOrdersSum;
+                if (totalPastDueAmount <= 0.01 && userClosingBal > 0) {
+                    const curOrderAmt = parseFloat(data.order?.totalAmount || 0);
+                    if (userClosingBal > curOrderAmt) {
+                        totalPastDueAmount = parseFloat((userClosingBal - curOrderAmt).toFixed(2));
+                    } else {
+                        totalPastDueAmount = userClosingBal;
+                    }
+                }
 
                 const userAdvanceJama = (userClosingBal < 0)
                     ? Math.abs(userClosingBal)
@@ -735,13 +747,25 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
         try {
             const syncedLedger = await syncPartyLedger(userId, { forceRebuild: true });
             if (syncedLedger && Array.isArray(syncedLedger.ledgerRows)) {
-                const curIdx = syncedLedger.ledgerRows.findIndex(r => r.orderId && String(r.orderId) === String(currentOrderDbId));
+                const curOrderIdStr = String(assignment.order?.orderId || '').replace(/\D/g, '');
+                const curIdx = syncedLedger.ledgerRows.findIndex(r => {
+                    if (r.orderId && String(r.orderId) === String(currentOrderDbId)) return true;
+                    const rBillNum = String(r.billNo || '').replace(/\D/g, '');
+                    if (curOrderIdStr && rBillNum && curOrderIdStr === rBillNum) return true;
+                    return false;
+                });
                 if (curIdx > 0) {
                     priorClosingBalance = parseFloat(syncedLedger.ledgerRows[curIdx].openingBalance || 0);
                 } else if (curIdx === 0) {
                     priorClosingBalance = parseFloat(syncedLedger.ledgerRows[0].openingBalance || 0);
                 } else {
-                    priorClosingBalance = parseFloat(syncedLedger.closingBalance || 0);
+                    const curBill = parseFloat(assignment.order?.totalAmount || 0);
+                    const closeBal = parseFloat(syncedLedger.closingBalance || 0);
+                    if (closeBal > curBill) {
+                        priorClosingBalance = parseFloat((closeBal - curBill).toFixed(2));
+                    } else {
+                        priorClosingBalance = closeBal;
+                    }
                 }
             }
         } catch (ledgerErr) {
@@ -784,11 +808,15 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
             if (!isEarlier) return;
 
             const fin = calculateOrderFinancials(uo, uo.payments);
-            let due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
-            if (due <= 0 && parseFloat(uo.creditAmount || 0) > 0) {
-                due = parseFloat(uo.creditAmount);
+            let due = parseFloat(fin.dueAmount || 0);
+            if (due <= 0) {
+                const netPayable = parseFloat(fin.netPayable || 0);
+                const nonCreditPaid = parseFloat(fin.nonCreditPaid || 0);
+                if (netPayable > nonCreditPaid + 0.01) {
+                    due = parseFloat((netPayable - nonCreditPaid).toFixed(2));
+                }
             }
-            if (due <= 0 && parseFloat(uo.dueAmount || 0) > 0 && String(uo.paymentStatus || '').toLowerCase() !== 'paid') {
+            if (due <= 0 && parseFloat(uo.dueAmount || 0) > 0) {
                 due = parseFloat(uo.dueAmount);
             }
 
@@ -975,7 +1003,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
     const totalSalesReturnDeduction = Math.round(directReturnAmount + unsettledPastReturnAmount);
 
-    let totalPastDueAmount = Math.max(unpaidOrdersSum, priorClosingBalance > 0 ? priorClosingBalance : 0);
+    let totalPastDueAmount = unpaidOrdersSum > 0 ? unpaidOrdersSum : (priorClosingBalance > 0 ? priorClosingBalance : 0);
 
     const userAdvanceJama = (priorClosingBalance < 0)
         ? Math.abs(priorClosingBalance)
@@ -1281,8 +1309,9 @@ export const getUserPreviousBillsService = async ({ userId, currentOrderId }) =>
         const fin = calculateOrderFinancials(ordData, ordData.payments);
 
         const isPaid = fin.paymentStatus === 'Paid';
-        const displayDue = isPaid ? '0.00' : fin.dueAmount;
-        const displayPaid = isPaid ? fin.payableAmount : fin.paidAmount;
+        const trueDue = parseFloat(fin.dueAmount || 0);
+        const displayDue = trueDue > 0.01 ? trueDue.toFixed(2) : (isPaid ? '0.00' : fin.payableAmount);
+        const displayPaid = trueDue > 0.01 ? (Math.max(0, fin.netPayable - trueDue)).toFixed(2) : (isPaid ? fin.payableAmount : fin.paidAmount);
 
         const couponDiscNum = fin.couponDiscount;
         const couponPtsNum = Number(ordData.couponPoints || 0);

@@ -505,7 +505,10 @@ export const getCustomerCreditFinancials = async ({
                 }
 
                 const fin = calculateOrderFinancials(ord, payments);
-                const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+                let due = parseFloat(fin.dueAmount || 0);
+                if (due <= 0 && fin.netPayable > fin.nonCreditPaid + 0.01) {
+                    due = parseFloat((fin.netPayable - fin.nonCreditPaid).toFixed(2));
+                }
 
                 if (due > 0.01) {
                     totalUnpaidDue += due;
