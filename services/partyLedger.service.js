@@ -39,6 +39,39 @@ const formatLedgerDateTime = (d) => {
 };
 
 /**
+ * Filter out automatic system-generated notes so RETURN NOTE only displays genuine manual user remarks.
+ */
+const sanitizeReturnNote = (rawNotes) => {
+    if (!rawNotes) return '-';
+    const notesArr = Array.isArray(rawNotes) ? rawNotes : [rawNotes];
+    const filtered = notesArr
+        .map(n => String(n || '').trim())
+        .filter(n => {
+            if (!n || n === '-' || n === 'null' || n === 'undefined') return false;
+            // Clean prefixes like [Base], [Inner]
+            const clean = n.replace(/^\[(Base|Inner)\]\s*/i, '').trim().toLowerCase();
+            if (!clean) return false;
+            // Ignore generic automatic/system notes
+            const genericNotes = [
+                'return',
+                'customer return',
+                'customer return at delivery',
+                'goods returned',
+                'sales return',
+                'return item',
+                'base return',
+                'inner return'
+            ];
+            if (genericNotes.includes(clean)) return false;
+            if (clean.startsWith('return from previous bill')) return false;
+            return true;
+        })
+        .map(n => n.replace(/^\[(Base|Inner)\]\s*/i, '').trim());
+
+    return filtered.length > 0 ? Array.from(new Set(filtered)).join(', ') : '-';
+};
+
+/**
  * Reconstruct and synchronize the entire ledger history for a party.
  *
  * @param {string} userId - UUID or phone of customer
@@ -168,10 +201,15 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             // Profit = Sales - Purchase Cost
             const profit = Math.max(0, salesAmt - purchaseCost);
 
-            // Payment Breakdown
+            // Distinguish payment methods:
+            const isCashMethod = (m) => String(m || '').toUpperCase() === 'CASH';
+            const isBankMethod = (m) => ['ONLINE', 'BANK', 'CHEQUE', 'UPI', 'NEFT', 'RTGS'].includes(String(m || '').toUpperCase());
+
+            // Payment Breakdown - Only CASH and BANK/ONLINE payments belong to Cash and Bank columns
+            // Exclude CREDIT, SALES_RETURN, JAMA_CREDIT, COUPON (these are tracked in their own dedicated columns or balances)
             const validPayments = orderPaymentsList.filter(p => {
                 const method = String(p.paymentMethod || '').toUpperCase();
-                return method !== 'CREDIT' && parseFloat(p.amount || 0) > 0;
+                return (isCashMethod(method) || isBankMethod(method)) && parseFloat(p.amount || 0) > 0;
             });
 
             const formattedBillNo = billNo.startsWith('B-') || billNo.startsWith('#') ? billNo.replace(/^#/, '') : `B-${billNo}`;
@@ -184,7 +222,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const returnTotal = attachedReturns.reduce((sum, r) => {
                 return sum + parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0);
             }, 0);
-            const returnNote = attachedReturns.map(r => r.reason).filter(Boolean).join(', ') || '-';
+            const returnNote = sanitizeReturnNote(attachedReturns.map(r => r.reason));
 
             // Distinguish payments made at delivery/order time vs subsequent payments:
             let initialCash = 0;
@@ -197,12 +235,15 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 validPayments.forEach(p => {
                     const method = String(p.paymentMethod || '').toUpperCase();
                     const pAmt = parseFloat(p.amount || 0);
-                    if (method === 'CASH') initialCash += pAmt;
-                    else initialBank += pAmt;
-                    const rName = p.bankAccount?.bankName
-                        ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
-                        : (p.deliveryBoy?.name || null);
-                    if (rName) initialReceivers.push(rName);
+                    if (isCashMethod(method)) {
+                        initialCash += pAmt;
+                    } else if (isBankMethod(method)) {
+                        initialBank += pAmt;
+                        const rName = p.bankAccount?.bankName
+                            ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
+                            : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null);
+                        if (rName) initialReceivers.push(rName);
+                    }
                 });
             } else {
                 // Multiple payments: sort chronologically
@@ -215,19 +256,22 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     const pAmt = parseFloat(p.amount || 0);
                     const rName = p.bankAccount?.bankName
                         ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
-                        : (p.deliveryBoy?.name || null);
+                        : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null);
 
                     // First payment or payments made within 2 minutes of the initial payment belong to initial bill settlement
                     if (pIdx === 0 || Math.abs(pTime - firstPayTime) <= 120000) {
-                        if (method === 'CASH') initialCash += pAmt;
-                        else initialBank += pAmt;
-                        if (rName) initialReceivers.push(rName);
+                        if (isCashMethod(method)) {
+                            initialCash += pAmt;
+                        } else if (isBankMethod(method)) {
+                            initialBank += pAmt;
+                            if (rName) initialReceivers.push(rName);
+                        }
                     } else {
                         // Subsequent payments on the same order get their own ledger row with the same billNo
                         subsequentPayments.push({
                             pAmt,
                             method,
-                            rName,
+                            rName: isBankMethod(method) ? rName : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null),
                             pTime
                         });
                     }
@@ -237,9 +281,9 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             // Fallback: If marked Paid or has paidAmount without individual OrderPayment record
             if (validPayments.length === 0 && fin.paidAmount > 0) {
                 const fallbackMethod = String(ord.paymentMethod || 'CASH').toUpperCase();
-                if (fallbackMethod === 'CASH') {
+                if (isCashMethod(fallbackMethod)) {
                     initialCash = parseFloat(fin.paidAmount);
-                } else {
+                } else if (isBankMethod(fallbackMethod)) {
                     initialBank = parseFloat(fin.paidAmount);
                 }
             }
@@ -272,8 +316,8 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     sales: 0, // Sales is 0 for payment receipt
                     purchaseCost: 0,
                     profit: 0,
-                    cash: sp.method === 'CASH' ? parseFloat(sp.pAmt.toFixed(2)) : 0,
-                    bank: sp.method !== 'CASH' ? parseFloat(sp.pAmt.toFixed(2)) : 0,
+                    cash: isCashMethod(sp.method) ? parseFloat(sp.pAmt.toFixed(2)) : 0,
+                    bank: isBankMethod(sp.method) ? parseFloat(sp.pAmt.toFixed(2)) : 0,
                     bankReceiver: sp.rName || '-',
                     kupan: 0,
                     returnVal: 0,
@@ -301,7 +345,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                     bankReceiver: '-',
                     kupan: 0,
                     returnVal: parseFloat(retAmt.toFixed(2)),
-                    returnNote: ret.reason || 'Goods returned',
+                    returnNote: sanitizeReturnNote(ret.reason),
                     sortTime: new Date(retDate).getTime() + 15 + rIdx
                 });
             }

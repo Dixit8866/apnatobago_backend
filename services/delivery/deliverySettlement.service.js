@@ -342,7 +342,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
                     const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
                     // Always attach return to current delivery order being settled so it reduces and appears on this bill
                     const targetOrderId = assignment.order.id;
-                    const returnReason = rItem.reason || (rItem.orderId && String(rItem.orderId) !== String(assignment.order.id) ? `Return from previous bill (${rItem.orderNumber || rItem.orderId})` : 'Customer Return at Delivery');
+                    const returnReason = (rItem.reason && rItem.reason.trim() && !['return', 'customer return'].includes(rItem.reason.trim().toLowerCase()))
+                        ? rItem.reason.trim()
+                        : null;
                     await SalesReturn.create({
                         orderId: targetOrderId,
                         userId: assignment.order.userId,
@@ -864,7 +866,9 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                             const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
                             // Always attach return to current delivery order being settled so it reduces and appears on this bill
                             const targetOrderId = order.id;
-                            const returnReason = rItem.reason || (rItem.orderId && String(rItem.orderId) !== String(order.id) ? `Return from previous bill (${rItem.orderNumber || rItem.orderId})` : 'Customer Return at Delivery');
+                            const returnReason = (rItem.reason && rItem.reason.trim() && !['return', 'customer return'].includes(rItem.reason.trim().toLowerCase()))
+                                ? rItem.reason.trim()
+                                : null;
                             await SalesReturn.create({
                                 orderId: targetOrderId,
                                 userId: order.userId,

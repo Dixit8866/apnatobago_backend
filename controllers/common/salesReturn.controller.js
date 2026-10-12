@@ -219,6 +219,10 @@ export const createSalesReturn = async (req, res) => {
 
             // E. Create SalesReturn Record with PENDING status
             const sellUnitPrefix = orderItem.sellUnit === 'Inner' ? '[Inner]' : '[Base]';
+            const rawNote = (rootReason || itemReason || '').trim();
+            const isGeneric = !rawNote || ['return', 'customer return'].includes(rawNote.toLowerCase());
+            const returnReasonStr = isGeneric ? null : `${sellUnitPrefix} ${rawNote}`;
+
             const salesReturnEntry = await SalesReturn.create({
                 orderId: order.id,
                 userId: order.userId,
@@ -229,7 +233,7 @@ export const createSalesReturn = async (req, res) => {
                 quantity: returnQty,
                 price: itemPrice,
                 returnAmount,
-                reason: `${sellUnitPrefix} ${rootReason || itemReason || "Customer Return"}`,
+                reason: returnReasonStr,
                 status: "Pending",
                 creditProcessed: false
             }, { transaction: t });
@@ -888,8 +892,10 @@ export const createAdminSalesReturn = async (req, res) => {
             totalReturnAmount += returnAmt;
 
             const itemCond = itemCondition || globalCondition || 'GOOD'; // 'GOOD' | 'DAMAGED'
-            const itemNoteReason = itemReason || globalReason || 'Customer Return';
+            const rawNote = (itemReason || globalReason || '').trim();
+            const isGeneric = !rawNote || ['return', 'customer return'].includes(rawNote.toLowerCase());
             const unitPrefix = (sellUnit || orderItem.sellUnit) === 'Inner' ? '[Inner]' : '[Base]';
+            const returnReasonStr = isGeneric ? null : `${unitPrefix} ${rawNote}`;
 
             // Create Sales Return Record with Approved status
             const salesReturn = await SalesReturn.create({
@@ -902,7 +908,7 @@ export const createAdminSalesReturn = async (req, res) => {
                 quantity: returnQty,
                 price: itemPrice,
                 returnAmount: returnAmt,
-                reason: `${unitPrefix} ${itemNoteReason}`,
+                reason: returnReasonStr,
                 condition: itemCond,
                 creditProcessed: true,
                 status: 'Approved'
