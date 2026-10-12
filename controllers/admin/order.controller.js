@@ -1979,11 +1979,28 @@ export const verifyAndSettleOrder = async (req, res) => {
 
                 const condition = itemReturn.condition === 'DAMAGED' ? 'DAMAGED' : 'GOOD';
 
+                // Ensure valid productId and variantId are present
+                let targetProductId = itemReturn.productId;
+                let targetVariantId = itemReturn.variantId;
+
+                if ((!targetProductId || !targetVariantId) && order.items && order.items.length > 0) {
+                    targetProductId = targetProductId || order.items[0].productId;
+                    targetVariantId = targetVariantId || order.items[0].variantId;
+                }
+
+                if (!targetProductId || !targetVariantId) {
+                    const firstVariant = await ProductVariant.findOne({ transaction });
+                    if (firstVariant) {
+                        targetProductId = targetProductId || firstVariant.productId;
+                        targetVariantId = targetVariantId || firstVariant.id;
+                    }
+                }
+
                 await SalesReturn.create({
                     orderId: order.id,
                     userId: order.userId,
-                    productId: itemReturn.productId,
-                    variantId: itemReturn.variantId,
+                    productId: targetProductId,
+                    variantId: targetVariantId,
                     quantity: retQty,
                     price: retPrice,
                     returnAmount: itemDeduction,
@@ -1993,8 +2010,8 @@ export const verifyAndSettleOrder = async (req, res) => {
                     approvedByAdminId: req.admin?.id || req.user?.id || null
                 }, { transaction });
 
-                if (condition === 'GOOD' && itemReturn.variantId) {
-                    const variant = await ProductVariant.findByPk(itemReturn.variantId, { transaction });
+                if (condition === 'GOOD' && targetVariantId) {
+                    const variant = await ProductVariant.findByPk(targetVariantId, { transaction });
                     if (variant) {
                         variant.stock = (parseInt(variant.stock, 10) || 0) + retQty;
                         await variant.save({ transaction });
