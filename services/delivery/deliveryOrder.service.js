@@ -367,7 +367,7 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                             attributes: ['id', 'orderId', 'amount', 'paymentMethod']
                         }
                     ],
-                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'creditAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+                    attributes: ['id', 'orderId', 'userId', 'customerNumber', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
                     order: [['createdAt', 'DESC']]
                 }).then(res => { candidateOrders = res; })
             );
@@ -770,7 +770,7 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                     attributes: ['id', 'amount', 'paymentMethod']
                 }
             ],
-            attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'creditAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
+            attributes: ['id', 'orderId', 'totalAmount', 'couponDiscount', 'paidAmount', 'dueAmount', 'paymentStatus', 'orderStatus', 'createdAt'],
             order: [['createdAt', 'DESC']]
         });
 
