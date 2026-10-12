@@ -722,7 +722,17 @@ export const getAllOrders = async (req, res) => {
                     unpaidOrdersStore = unpaidOrdersList.map(uo => {
                         // Centralized financial calculation for unpaid orders
                         const fin = calculateOrderFinancials(uo, uo.payments);
-                        const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
+                        let due = parseFloat(fin.dueAmount || 0);
+                        if (due <= 0 && uo.dueAmount !== undefined && uo.dueAmount !== null) {
+                            due = parseFloat(uo.dueAmount) || 0;
+                        }
+                        if (due <= 0) {
+                            const nonCreditPaid = parseFloat(fin.nonCreditPaid || 0);
+                            const netPayable = parseFloat(fin.netPayable || 0);
+                            if (netPayable > nonCreditPaid + 0.01) {
+                                due = parseFloat((netPayable - nonCreditPaid).toFixed(2));
+                            }
+                        }
 
                         const uPhone = String(uo.user?.number || uo.customerNumber || uo.customerPhone || '').replace(/\D/g, '').slice(-10);
                         const uShop = String(uo.user?.businessProfile?.shopName || '').toLowerCase().trim();
@@ -800,6 +810,15 @@ export const getAllOrders = async (req, res) => {
                     return sum;
                 }, 0);
 
+                let effectivePrevUnpaidDue = prevUnpaidDue;
+                if (effectivePrevUnpaidDue <= 0 && order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
+                    const userClose = parseFloat(order.user.closingBalance || 0);
+                    const currBill = parseFloat(order.totalAmount || 0);
+                    if (userClose > currBill) {
+                        effectivePrevUnpaidDue = parseFloat((userClose - currBill).toFixed(2));
+                    }
+                }
+
                 let totalCustomerDue = 0;
                 if (Array.isArray(unpaidOrdersStore)) {
                     unpaidOrdersStore.forEach(uo => {
@@ -849,7 +868,7 @@ export const getAllOrders = async (req, res) => {
                 order.setDataValue('totalCustomerDue', totalCustomerDue);
                 order.setDataValue('userAdvanceJama', userAdvanceJama);
                 order.setDataValue('userBalanceType', userBalanceType);
-                order.setDataValue('previousUnpaidDue', prevUnpaidDue);
+                order.setDataValue('previousUnpaidDue', effectivePrevUnpaidDue);
                 order.setDataValue('items', itemsMap[order.id] || []);
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
@@ -858,7 +877,7 @@ export const getAllOrders = async (req, res) => {
                 if (adjusted) {
                     adjusted.deliveryNotice = activeDeliveryNotice || null;
                     adjusted.partyActiveNotice = activeDeliveryNotice || null;
-                    adjusted.previousUnpaidDue = prevUnpaidDue;
+                    adjusted.previousUnpaidDue = effectivePrevUnpaidDue;
                     adjusted.userCreditline = availableCredit;
                     adjusted.availableCredit = availableCredit;
                     adjusted.availableDue = availableCredit;
@@ -870,7 +889,7 @@ export const getAllOrders = async (req, res) => {
                     adjusted.userBalanceType = userBalanceType;
                     if (adjusted.user) {
                         adjusted.user.deliveryNotice = activeDeliveryNotice || null;
-                        adjusted.user.previousUnpaidDue = prevUnpaidDue;
+                        adjusted.user.previousUnpaidDue = effectivePrevUnpaidDue;
                         adjusted.user.creditline = availableCredit;
                         adjusted.user.availableCredit = availableCredit;
                         adjusted.user.availableDue = availableCredit;

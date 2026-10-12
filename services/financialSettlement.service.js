@@ -116,19 +116,22 @@ export const calculateOrderFinancials = (order, payments = null) => {
     } else if (order.creditAmount !== undefined && order.creditAmount !== null && parseFloat(order.creditAmount) > 0) {
         dueAmt = parseFloat(order.creditAmount);
         paidAmt = Math.max(0, netPayable - dueAmt);
-    } else if (order.dueAmount !== undefined && order.dueAmount !== null && parseFloat(order.dueAmount) > 0 && !isExplicitlyPaid) {
+    } else if (order.dueAmount !== undefined && order.dueAmount !== null && parseFloat(order.dueAmount) > 0) {
         dueAmt = parseFloat(order.dueAmount);
         paidAmt = Math.max(0, netPayable - dueAmt);
-    } else if (nonCreditPaidForThisBill >= netPayable - 0.01 || isExplicitlyPaid || isDueZero) {
+    } else if (nonCreditPaidForThisBill >= netPayable - 0.01) {
         dueAmt = 0;
         paidAmt = netPayable;
-    } else if (isDelivered && order.dueAmount !== undefined && order.dueAmount !== null && order.dueAmount !== '') {
-        const rawDue = parseFloat(order.dueAmount);
-        if (!isNaN(rawDue)) {
-            dueAmt = Math.max(0, rawDue);
-            paidAmt = Math.max(0, netPayable - dueAmt);
-        } else {
+    } else if (isDelivered) {
+        if (nonCreditPaidForThisBill > 0) {
             dueAmt = Math.max(0, netPayable - nonCreditPaidForThisBill);
+            paidAmt = nonCreditPaidForThisBill;
+        } else if (isExplicitlyPaid || isDueZero) {
+            dueAmt = 0;
+            paidAmt = netPayable;
+        } else {
+            dueAmt = netPayable;
+            paidAmt = 0;
         }
     } else {
         // For in-flight / non-delivered orders, due is the remaining unpaid portion of net bill!
@@ -397,6 +400,8 @@ export const adjustOrderResponse = (order) => {
     rowData.creditAmount = financials.creditAmount;
     rowData.paidAmount = financials.paidAmount;
     rowData.paymentStatus = financials.paymentStatus;
+    rowData.cashAmount = financials.cashSum;
+    rowData.onlineAmount = financials.onlineSum;
     rowData.couponDiscount = financials.couponDiscount.toFixed(2);
     rowData.couponPoints = Number(rowData.couponPoints || 0);
     rowData.discountType = (rowData.couponPoints > 0 || financials.couponDiscount > 0) 
