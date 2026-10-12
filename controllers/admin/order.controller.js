@@ -287,16 +287,7 @@ export const getAllOrders = async (req, res) => {
                 if (status === 'Delivered') {
                     baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
                 } else if (status === 'Payment Collect' || status === 'Payment Confirm') {
-                    baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect'] };
-                    baseWhere[Op.and] = [
-                        {
-                            [Op.or]: [
-                                { paymentCollectStatus: null },
-                                { paymentCollectStatus: { [Op.ne]: 'Verified' } }
-                            ]
-                        },
-                        { orderStatus: { [Op.ne]: 'Payment Verify' } }
-                    ];
+                    baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
                 } else if (status === 'Payment Verify') {
                     baseWhere[Op.or] = [
                         { orderStatus: 'Payment Verify' },
@@ -983,16 +974,7 @@ export const getAllOrders = async (req, res) => {
         const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
         const paymentCollectCountWhere = {
             ...countWhere,
-            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
-            [Op.and]: [
-                {
-                    [Op.or]: [
-                        { paymentCollectStatus: null },
-                        { paymentCollectStatus: { [Op.ne]: 'Verified' } }
-                    ]
-                },
-                { orderStatus: { [Op.ne]: 'Payment Verify' } }
-            ]
+            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] }
         };
         const paymentVerifyCountWhere = {
             ...countWhere,
