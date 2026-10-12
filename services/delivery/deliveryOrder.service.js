@@ -517,12 +517,10 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
 
                 const userClosingBal = parseFloat(data.order?.user?.closingBalance || 0);
                 let totalPastDueAmount = unpaidOrdersSum;
-                if (totalPastDueAmount <= 0.01 && userClosingBal > 0) {
+                if (totalPastDueAmount <= 0.01 && userClosingBal > 0 && currentOrderNum > 100001) {
                     const curOrderAmt = parseFloat(data.order?.totalAmount || 0);
                     if (userClosingBal > curOrderAmt) {
                         totalPastDueAmount = parseFloat((userClosingBal - curOrderAmt).toFixed(2));
-                    } else {
-                        totalPastDueAmount = userClosingBal;
                     }
                 }
 
