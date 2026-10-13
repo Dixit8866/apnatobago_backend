@@ -602,12 +602,16 @@ export const getPartyLedger = async (userId, query = {}) => {
             ? filteredRows[filteredRows.length - 1].closingBalance
             : periodOpeningBalance;
 
+        const latestRowOpening = filteredRows.length > 0
+            ? filteredRows[filteredRows.length - 1].openingBalance
+            : periodOpeningBalance;
+
         return {
             user: synced.user,
             summary: {
-                openingBalance: parseFloat(periodOpeningBalance.toFixed(2)),
+                openingBalance: parseFloat(latestRowOpening.toFixed(2)),
                 periodSales: parseFloat(totals.periodSales.toFixed(2)),
-                totalAmount: parseFloat((periodOpeningBalance + totals.periodSales).toFixed(2)),
+                totalAmount: parseFloat((latestRowOpening + totals.periodSales).toFixed(2)),
                 purchaseCost: parseFloat(totals.purchaseCost.toFixed(2)),
                 profit: parseFloat(totals.profit.toFixed(2)),
                 cash: parseFloat(totals.cash.toFixed(2)),
