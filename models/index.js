@@ -24,6 +24,7 @@ import OTP from './user/Otp.js';
 import PartyCalling from './user/PartyCalling.js';
 import PartyBalanceLog from './user/PartyBalanceLog.js';
 import PartyLedger from './user/PartyLedger.js';
+import PartyLedgerEditLog from './user/PartyLedgerEditLog.js';
 import Vendor from './superadmin-models/Vendor.js';
 import VendorOrder from './superadmin-models/VendorOrder.js';
 import PurchaseBill from './superadmin-models/PurchaseBill.js';
@@ -286,6 +287,12 @@ User.hasMany(PartyLedger, { foreignKey: 'userId', as: 'partyLedgers' });
 PartyLedger.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 Order.hasMany(PartyLedger, { foreignKey: 'orderId', as: 'partyLedgers', constraints: false });
 PartyLedger.belongsTo(Order, { foreignKey: 'orderId', as: 'order', constraints: false });
+
+// PartyLedgerEditLog Associations
+User.hasMany(PartyLedgerEditLog, { foreignKey: 'userId', as: 'partyLedgerEditLogs' });
+PartyLedgerEditLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Order.hasMany(PartyLedgerEditLog, { foreignKey: 'orderId', as: 'partyLedgerEditLogs', constraints: false });
+PartyLedgerEditLog.belongsTo(Order, { foreignKey: 'orderId', as: 'order', constraints: false });
 
 Product.hasMany(SalesReturn, { foreignKey: 'productId', as: 'returns' });
 SalesReturn.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
@@ -552,6 +559,9 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "godownId" UUID REFERENCES godowns(id) ON DELETE SET NULL ON UPDATE CASCADE');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(50) DEFAULT \'DUE\'');
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "openingBalance" DECIMAL(12, 2) DEFAULT 0.00');
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "openingBalanceType" VARCHAR(10) DEFAULT \'CR\'');
+            await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "isOpeningBalanceSet" BOOLEAN DEFAULT false');
         } catch (e) { console.log('[Migration Warning] Users godownId/dues column failed:', e.message); }
 
         try {
@@ -600,6 +610,10 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TABLE party_ledgers DROP CONSTRAINT IF EXISTS "party_ledgers_orderId_fkey";');
             await sequelize.query('ALTER TABLE party_ledgers DROP CONSTRAINT IF EXISTS party_ledgers_orderId_fkey;');
         } catch (e) { console.log('[Migration Warning] PartyLedger sync / constraint drop failed:', e.message); }
+
+        try {
+            await PartyLedgerEditLog.sync();
+        } catch (e) { console.log('[Migration Warning] PartyLedgerEditLog sync failed:', e.message); }
 
         try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(20) DEFAULT \'DUE\'');
@@ -827,6 +841,7 @@ export {
     DailyReconciliation,
     PartyBalanceLog,
     PartyLedger,
+    PartyLedgerEditLog,
     AppNoticeSetting,
     runManualMigrations
 };

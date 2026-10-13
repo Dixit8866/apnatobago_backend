@@ -49,6 +49,18 @@ const User = sequelize.define('User', {
         type: DataTypes.DECIMAL(12, 2),
         defaultValue: 0.00,
     },
+    openingBalance: {
+        type: DataTypes.DECIMAL(12, 2),
+        defaultValue: 0.00,
+    },
+    openingBalanceType: {
+        type: DataTypes.STRING,
+        defaultValue: 'CR', // 'DR' (Debit/Jama/Advance) | 'CR' (Credit/Baki/Due)
+    },
+    isOpeningBalanceSet: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
     blockcredit: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,

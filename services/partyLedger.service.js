@@ -8,6 +8,7 @@ import {
     SalesReturn,
     PartyBalanceLog,
     PartyLedger,
+    PartyLedgerEditLog,
     BankSetting,
     DeliveryBoy,
     ProductVariant
@@ -421,11 +422,15 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             }
         }
 
-        // Sort all transactions chronologically
-        chronologicalTransactions.sort((a, b) => a.sortTime - b.sortTime);
+        // Initial Opening Balance for Party
+        const rawOpeningAmt = Math.max(0, parseFloat(user.openingBalance || 0));
+        const opType = String(user.openingBalanceType || 'CR').toUpperCase();
+        // CR = Baki / Due (Positive balance: customer owes admin)
+        // DR = Jama / Advance (Negative balance: customer has advance deposit with admin)
+        const initialPartyOpeningBalance = opType === 'DR' ? -rawOpeningAmt : rawOpeningAmt;
 
         // Build continuous Running Ledger Rows
-        let runningBalance = 0;
+        let runningBalance = initialPartyOpeningBalance;
         const allBuiltRows = chronologicalTransactions.map((tx, idx) => {
             const dt = formatLedgerDateTime(tx.dateObj);
             const openingBalance = runningBalance;
@@ -504,7 +509,10 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 closingBalance: latestClosingBalance,
                 currentDue: latestClosingBalance > 0 ? latestClosingBalance : 0,
                 advanceJama: latestClosingBalance < 0 ? Math.abs(latestClosingBalance) : 0,
-                balanceType: latestClosingBalance > 0 ? 'DUE' : (latestClosingBalance < 0 ? 'JAMA' : 'CLEAR')
+                balanceType: latestClosingBalance > 0 ? 'DUE' : (latestClosingBalance < 0 ? 'JAMA' : 'CLEAR'),
+                openingBalance: rawOpeningAmt,
+                openingBalanceType: opType,
+                isOpeningBalanceSet: Boolean(user.isOpeningBalanceSet)
             },
             ledgerRows: allBuiltRows,
             closingBalance: latestClosingBalance
@@ -539,8 +547,12 @@ export const getPartyLedger = async (userId, query = {}) => {
             endTimestamp = new Date(`${endDate}T23:59:59.999Z`).getTime();
         }
 
+        const rawOpeningAmt = Math.max(0, parseFloat(synced.user?.openingBalance || 0));
+        const opType = String(synced.user?.openingBalanceType || 'CR').toUpperCase();
+        const initialPartyOpeningBalance = opType === 'DR' ? -rawOpeningAmt : rawOpeningAmt;
+
         let filteredRows = allRows;
-        let periodOpeningBalance = 0;
+        let periodOpeningBalance = initialPartyOpeningBalance;
 
         if (startTimestamp || endTimestamp) {
             const priorRows = allRows.filter(r => startTimestamp ? r.dateObj.getTime() < startTimestamp : false);
@@ -548,6 +560,8 @@ export const getPartyLedger = async (userId, query = {}) => {
                 periodOpeningBalance = priorRows[priorRows.length - 1].closingBalance;
             } else if (allRows.length > 0) {
                 periodOpeningBalance = allRows[0].openingBalance;
+            } else {
+                periodOpeningBalance = initialPartyOpeningBalance;
             }
 
             filteredRows = allRows.filter(r => {
@@ -558,6 +572,8 @@ export const getPartyLedger = async (userId, query = {}) => {
             });
         } else if (allRows.length > 0) {
             periodOpeningBalance = allRows[0].openingBalance;
+        } else {
+            periodOpeningBalance = initialPartyOpeningBalance;
         }
 
         // Apply Bill Search Filter if provided
@@ -610,6 +626,9 @@ export const getPartyLedger = async (userId, query = {}) => {
             user: synced.user,
             summary: {
                 openingBalance: parseFloat(latestRowOpening.toFixed(2)),
+                initialOpeningBalance: rawOpeningAmt,
+                initialOpeningBalanceType: opType,
+                isOpeningBalanceSet: Boolean(synced.user?.isOpeningBalanceSet),
                 periodSales: parseFloat(totals.periodSales.toFixed(2)),
                 totalAmount: parseFloat((latestRowOpening + totals.periodSales).toFixed(2)),
                 purchaseCost: parseFloat(totals.purchaseCost.toFixed(2)),
@@ -661,4 +680,361 @@ export const recordManualPartyEntry = async ({
 
     await syncPartyLedger(userId, { forceRebuild: true });
     return log;
+};
+
+/**
+ * Retrieve edit audit history for a specific bill or transaction
+ */
+export const getPartyLedgerEditHistory = async (userId, billNo) => {
+    try {
+        const cleanBill = String(billNo || '').replace(/^#/, '');
+        const rawBill = cleanBill.replace(/^B-/, '');
+        const whereCond = {
+            [Op.or]: [
+                { billNo: cleanBill },
+                { billNo: rawBill },
+                { billNo: `B-${rawBill}` }
+            ]
+        };
+        if (userId) {
+            whereCond.userId = userId;
+        }
+        const history = await PartyLedgerEditLog.findAll({
+            where: whereCond,
+            order: [['createdAt', 'DESC']],
+            limit: 50
+        });
+        return history.map((h, idx) => {
+            const dt = formatLedgerDateTime(h.createdAt);
+            return {
+                id: h.id,
+                sr: idx + 1,
+                date: dt.dateStr,
+                time: dt.timeStr,
+                dateTimeStr: `${dt.dateStr} ${dt.timeStr}`,
+                updatedBy: h.updatedByName || 'Admin',
+                field: h.field,
+                oldValue: h.oldValue,
+                newValue: h.newValue,
+                reason: h.reason || '-'
+            };
+        });
+    } catch (err) {
+        logger.error(`[getPartyLedgerEditHistory Error]: ${err.message}`);
+        return [];
+    }
+};
+
+/**
+ * Update transaction payments (Cash, Bank, Kupan, Return, Bank Receiver, Return Note, Remarks)
+ * and persist audit edit history (Previous vs Updated Values)
+ */
+export const updatePartyLedgerTransaction = async ({
+    userId,
+    billNo,
+    orderId = null,
+    cash = 0,
+    bank = 0,
+    kupan = 0,
+    returnVal = 0,
+    bankReceiver = '',
+    bankSettingId = null,
+    returnNote = '',
+    remarks = '',
+    adminUser = null
+}) => {
+    try {
+        if (!userId) throw new Error('User ID is required');
+
+        const user = await User.findByPk(userId);
+        if (!user) throw new Error('Customer user not found');
+
+        let order = null;
+        if (orderId) {
+            order = await Order.findByPk(orderId, {
+                include: [
+                    { model: OrderPayment, as: 'payments' },
+                    { model: SalesReturn, as: 'returns' }
+                ]
+            });
+        }
+        if (!order && billNo) {
+            const rawBill = String(billNo).replace(/^B-|^#/, '');
+            order = await Order.findOne({
+                where: {
+                    [Op.or]: [
+                        { orderId: rawBill },
+                        { orderId: `B-${rawBill}` },
+                        { orderId: billNo },
+                        { id: rawBill }
+                    ]
+                },
+                include: [
+                    { model: OrderPayment, as: 'payments' },
+                    { model: SalesReturn, as: 'returns' }
+                ]
+            });
+        }
+
+        const formattedBillNo = billNo || (order ? (order.orderId ? `B-${order.orderId}` : String(order.id).slice(0, 8)) : 'B-UNKNOWN');
+        const updatedByName = adminUser?.name || adminUser?.fullname || 'Admin';
+        const updatedById = adminUser?.id || null;
+
+        if (order) {
+            const payments = order.payments || [];
+            const currentCash = payments
+                .filter(p => String(p.paymentMethod || '').toUpperCase() === 'CASH')
+                .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+
+            const currentBank = payments
+                .filter(p => ['ONLINE', 'BANK', 'CHEQUE', 'UPI', 'NEFT', 'RTGS'].includes(String(p.paymentMethod || '').toUpperCase()))
+                .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+
+            const currentKupan = parseFloat(order.couponDiscount || 0);
+            const returns = order.returns || [];
+            const currentReturn = returns.reduce((sum, r) => sum + parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0), 0);
+            const currentReturnNote = sanitizeReturnNote(returns.map(r => r.reason));
+
+            const newCashVal = Math.max(0, parseFloat(cash || 0));
+            const newBankVal = Math.max(0, parseFloat(bank || 0));
+            const newKupanVal = Math.max(0, parseFloat(kupan || 0));
+            const newReturnVal = Math.max(0, parseFloat(returnVal || 0));
+
+            const changes = [];
+            if (Math.abs(newCashVal - currentCash) > 0.009) {
+                changes.push({ field: 'Cash', oldValue: `₹${currentCash.toFixed(2)}`, newValue: `₹${newCashVal.toFixed(2)}` });
+            }
+            if (Math.abs(newBankVal - currentBank) > 0.009) {
+                changes.push({ field: 'Bank', oldValue: `₹${currentBank.toFixed(2)}`, newValue: `₹${newBankVal.toFixed(2)}` });
+            }
+            if (Math.abs(newKupanVal - currentKupan) > 0.009) {
+                changes.push({ field: 'Kupan', oldValue: `₹${currentKupan.toFixed(2)}`, newValue: `₹${newKupanVal.toFixed(2)}` });
+            }
+            if (Math.abs(newReturnVal - currentReturn) > 0.009) {
+                changes.push({ field: 'Return', oldValue: `₹${currentReturn.toFixed(2)}`, newValue: `₹${newReturnVal.toFixed(2)}` });
+            }
+            if (returnNote && returnNote !== currentReturnNote && returnNote !== '-') {
+                changes.push({ field: 'Return Note', oldValue: currentReturnNote, newValue: returnNote });
+            }
+            if (bankReceiver && bankReceiver !== '-') {
+                changes.push({ field: 'Bank Receiver', oldValue: '-', newValue: bankReceiver });
+            }
+
+            // Persist Edit Audit History
+            for (const chg of changes) {
+                await PartyLedgerEditLog.create({
+                    userId: user.id,
+                    orderId: order.id,
+                    billNo: formattedBillNo,
+                    field: chg.field,
+                    oldValue: chg.oldValue,
+                    newValue: chg.newValue,
+                    reason: remarks || 'Amount correction',
+                    updatedById,
+                    updatedByName
+                });
+            }
+
+            // Update Cash payments
+            const cashPayments = payments.filter(p => String(p.paymentMethod || '').toUpperCase() === 'CASH');
+            if (newCashVal > 0) {
+                if (cashPayments.length > 0) {
+                    const primaryCash = cashPayments[0];
+                    primaryCash.amount = newCashVal;
+                    primaryCash.notes = remarks || primaryCash.notes;
+                    await primaryCash.save();
+                    for (let i = 1; i < cashPayments.length; i++) {
+                        await cashPayments[i].destroy();
+                    }
+                } else {
+                    await OrderPayment.create({
+                        orderId: order.id,
+                        amount: newCashVal,
+                        paymentMethod: 'CASH',
+                        notes: remarks || 'Cash payment updated via Ledger'
+                    });
+                }
+            } else if (cashPayments.length > 0) {
+                for (const cp of cashPayments) {
+                    await cp.destroy();
+                }
+            }
+
+            // Update Bank / Online payments
+            const bankPayments = payments.filter(p => ['ONLINE', 'BANK', 'CHEQUE', 'UPI', 'NEFT', 'RTGS'].includes(String(p.paymentMethod || '').toUpperCase()));
+            if (newBankVal > 0) {
+                if (bankPayments.length > 0) {
+                    const primaryBank = bankPayments[0];
+                    primaryBank.amount = newBankVal;
+                    if (bankSettingId) primaryBank.bankSettingId = bankSettingId;
+                    primaryBank.notes = remarks || primaryBank.notes;
+                    await primaryBank.save();
+                    for (let i = 1; i < bankPayments.length; i++) {
+                        await bankPayments[i].destroy();
+                    }
+                } else {
+                    await OrderPayment.create({
+                        orderId: order.id,
+                        amount: newBankVal,
+                        paymentMethod: 'ONLINE',
+                        bankSettingId: bankSettingId || null,
+                        notes: remarks || 'Bank payment updated via Ledger'
+                    });
+                }
+            } else if (bankPayments.length > 0) {
+                for (const bp of bankPayments) {
+                    await bp.destroy();
+                }
+            }
+
+            // Update Coupon discount
+            order.couponDiscount = newKupanVal;
+
+            // Update Sales Return
+            if (newReturnVal > 0) {
+                if (returns.length > 0) {
+                    const primaryReturn = returns[0];
+                    primaryReturn.returnAmount = newReturnVal;
+                    primaryReturn.price = newReturnVal;
+                    if (returnNote) primaryReturn.reason = returnNote;
+                    await primaryReturn.save();
+                    for (let i = 1; i < returns.length; i++) {
+                        await returns[i].destroy();
+                    }
+                } else {
+                    await SalesReturn.create({
+                        orderId: order.id,
+                        userId: user.id,
+                        returnAmount: newReturnVal,
+                        price: newReturnVal,
+                        quantity: 1,
+                        reason: returnNote || 'Return recorded via Ledger'
+                    });
+                }
+            } else if (returns.length > 0) {
+                for (const ret of returns) {
+                    await ret.destroy();
+                }
+            }
+
+            // Update Order paid amount
+            order.paidAmount = newCashVal + newBankVal;
+            await order.save();
+        } else {
+            // For manual ledger rows / balance adjustments
+            const newCashVal = Math.max(0, parseFloat(cash || 0));
+            const newBankVal = Math.max(0, parseFloat(bank || 0));
+            const totalCredits = newCashVal + newBankVal;
+
+            if (totalCredits > 0) {
+                await PartyBalanceLog.create({
+                    userId: user.id,
+                    orderId: null,
+                    type: 'JAMA',
+                    amount: totalCredits,
+                    previousBalance: 0,
+                    newBalance: 0,
+                    note: remarks || `Ledger adjustment for ${formattedBillNo}`,
+                    createdById: updatedById,
+                    createdByName: updatedByName
+                });
+            }
+
+            await PartyLedgerEditLog.create({
+                userId: user.id,
+                orderId: null,
+                billNo: formattedBillNo,
+                field: 'Adjustment',
+                oldValue: '-',
+                newValue: `Cash: ₹${newCashVal.toFixed(2)}, Bank: ₹${newBankVal.toFixed(2)}`,
+                reason: remarks || 'Manual entry update',
+                updatedById,
+                updatedByName
+            });
+        }
+
+        // Re-sync authoritative party ledger and closing balance
+        const updatedLedger = await syncPartyLedger(user.id, { forceRebuild: true });
+        const updatedHistory = await getPartyLedgerEditHistory(user.id, formattedBillNo);
+
+        return {
+            success: true,
+            message: 'Transaction updated successfully',
+            ledger: updatedLedger,
+            history: updatedHistory
+        };
+    } catch (error) {
+        logger.error(`[updatePartyLedgerTransaction Error]: ${error.message}`);
+        throw error;
+    }
+};
+
+/**
+ * Update one-time party opening balance (DR = Debit / Jama / Advance, CR = Credit / Baki / Due)
+ */
+export const updatePartyOpeningBalance = async ({ userId, amount, type, adminUser }) => {
+    try {
+        if (!userId) throw new Error('User ID is required');
+
+        let user = null;
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId).trim());
+        if (isUUID) {
+            user = await User.findByPk(userId);
+        } else {
+            const cleanPhone = String(userId).replace(/\D/g, '').slice(-10);
+            if (cleanPhone) {
+                user = await User.findOne({
+                    where: { number: { [Op.like]: `%${cleanPhone}` } }
+                });
+            }
+        }
+
+        if (!user) throw new Error(`User not found: ${userId}`);
+
+        const numAmount = Math.max(0, parseFloat(amount || 0));
+        const balType = String(type || 'CR').toUpperCase();
+        if (!['DR', 'CR'].includes(balType)) {
+            throw new Error('Type must be DR or CR');
+        }
+
+        const prevAmount = parseFloat(user.openingBalance || 0);
+        const prevType = user.openingBalanceType || 'CR';
+
+        user.openingBalance = numAmount;
+        user.openingBalanceType = balType;
+        user.isOpeningBalanceSet = true;
+        await user.save();
+
+        // Audit log in PartyLedgerEditLog
+        try {
+            await PartyLedgerEditLog.create({
+                userId: user.id,
+                orderId: null,
+                billNo: 'OPN-BALANCE',
+                field: 'Opening Balance',
+                oldValue: `₹${prevAmount.toFixed(2)} (${prevType})`,
+                newValue: `₹${numAmount.toFixed(2)} (${balType})`,
+                reason: `Initial Opening Balance set to ₹${numAmount.toFixed(2)} (${balType})`,
+                updatedById: adminUser?.id || null,
+                updatedByName: adminUser?.name || 'Admin'
+            });
+        } catch (logErr) {
+            logger.warn(`[PartyLedgerEditLog error on opening balance]: ${logErr.message}`);
+        }
+
+        // Force rebuild running ledger with new opening baseline
+        const updatedLedger = await syncPartyLedger(user.id, { forceRebuild: true });
+        const updatedStatement = await getPartyLedger(user.id, {});
+
+        return {
+            success: true,
+            message: 'Party opening balance updated successfully',
+            user: updatedStatement.user,
+            summary: updatedStatement.summary,
+            ledgerRows: updatedStatement.ledgerRows
+        };
+    } catch (error) {
+        logger.error(`[updatePartyOpeningBalance Error]: ${error.message}`);
+        throw error;
+    }
 };

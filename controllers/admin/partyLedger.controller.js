@@ -4,7 +4,10 @@ import logger from '../../logger/apiLogger.js';
 import {
     getPartyLedger,
     syncPartyLedger,
-    recordManualPartyEntry
+    recordManualPartyEntry,
+    getPartyLedgerEditHistory,
+    updatePartyLedgerTransaction,
+    updatePartyOpeningBalance
 } from '../../services/partyLedger.service.js';
 
 /**
@@ -85,6 +88,88 @@ export const addManualPartyEntryHandler = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Manual ledger entry recorded successfully', { entry, ledger: updatedData });
     } catch (error) {
         logger.error(`[addManualPartyEntryHandler Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Get edit history for a specific transaction in party ledger
+ * @route   GET /api/admin/party-ledger/:userId/history/:billNo
+ * @access  Private (Admin)
+ */
+export const getPartyLedgerEditHistoryHandler = async (req, res) => {
+    try {
+        const { userId, billNo } = req.params;
+        const history = await getPartyLedgerEditHistory(userId, billNo);
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Transaction edit history retrieved successfully', history);
+    } catch (error) {
+        logger.error(`[getPartyLedgerEditHistoryHandler Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Update party ledger transaction (Cash, Bank, Kupan, Return, Bank Receiver, Remarks)
+ * @route   PUT /api/admin/party-ledger/:userId/transaction
+ * @access  Private (Admin)
+ */
+export const updatePartyLedgerTransactionHandler = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { billNo, orderId, cash, bank, kupan, returnVal, bankReceiver, bankSettingId, returnNote, remarks } = req.body;
+
+        if (!userId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'User ID is required');
+        }
+
+        const adminUser = req.admin || req.user;
+        const result = await updatePartyLedgerTransaction({
+            userId,
+            billNo,
+            orderId,
+            cash: parseFloat(cash || 0),
+            bank: parseFloat(bank || 0),
+            kupan: parseFloat(kupan || 0),
+            returnVal: parseFloat(returnVal || 0),
+            bankReceiver,
+            bankSettingId,
+            returnNote,
+            remarks,
+            adminUser
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Transaction updated successfully', result);
+    } catch (error) {
+        logger.error(`[updatePartyLedgerTransactionHandler Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Update one-time party opening balance (DR / CR)
+ * @route   PUT /api/admin/party-ledger/:userId/opening-balance
+ * @access  Private (Admin)
+ */
+export const updatePartyOpeningBalanceHandler = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { amount, type } = req.body;
+
+        if (!userId) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'User ID is required');
+        }
+
+        const adminUser = req.admin || req.user;
+        const result = await updatePartyOpeningBalance({
+            userId,
+            amount: parseFloat(amount || 0),
+            type: String(type || 'CR').toUpperCase(),
+            adminUser
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Party opening balance updated successfully', result);
+    } catch (error) {
+        logger.error(`[updatePartyOpeningBalanceHandler Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };
