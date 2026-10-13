@@ -494,7 +494,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'creditline', 'advanceJama', 'balanceType'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'creditline', 'advanceJama', 'balanceType', 'closingBalance'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -516,7 +516,7 @@ export const getAllOrders = async (req, res) => {
                     model: User,
                     as: 'user',
                     required: false,
-                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'routeCategoryId', 'deliveryNotice', 'billPrintTime'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'routeCategoryId', 'deliveryNotice', 'billPrintTime', 'closingBalance'],
                     include: [
                         {
                             model: BusinessProfile,
@@ -692,7 +692,7 @@ export const getAllOrders = async (req, res) => {
                                 model: User,
                                 as: 'user',
                                 required: false,
-                                attributes: ['id', 'number', 'fullname', 'deliveryNotice'],
+                                attributes: ['id', 'number', 'fullname', 'deliveryNotice', 'closingBalance'],
                                 include: [
                                     {
                                         model: BusinessProfile,
@@ -782,62 +782,56 @@ export const getAllOrders = async (req, res) => {
                 const orderTime = new Date(order.createdAt).getTime();
                 const currOrderNum = parseInt(String(order.orderId || '').replace(/\D/g, ''), 10) || 0;
 
-                // Calculate sum of dues from other credit/delivered orders of the SAME customer created BEFORE this order
-                const prevUnpaidDue = unpaidOrdersStore.reduce((sum, uo) => {
-                    if (String(uo.id) !== String(order.id) && String(uo.orderId || '') !== String(order.orderId || '')) {
-                        const uoOrderNum = parseInt(String(uo.orderId || '').replace(/\D/g, ''), 10) || 0;
-                        const isEarlier = (uoOrderNum > 0 && currOrderNum > 0)
-                            ? (uoOrderNum < currOrderNum)
-                            : (uo.createdAt < orderTime || (uo.createdAt <= orderTime && String(uo.orderId || '') < String(order.orderId || '')));
-
-                        if (isEarlier) {
-                            let isSameCustomer = false;
-                            if (uId && uo.userId && String(uId) === String(uo.userId)) {
-                                isSameCustomer = true;
-                            } else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) {
-                                isSameCustomer = true;
-                            } else if (oShop && uo.shopName && oShop.length >= 3 && oShop === uo.shopName) {
-                                isSameCustomer = true;
-                            } else if (oName && uo.name && oName.length >= 3 && oName === uo.name) {
-                                isSameCustomer = true;
-                            }
-
-                            if (isSameCustomer) {
-                                return sum + uo.due;
-                            }
-                        }
+                // Find candidate earlier delivered orders of the SAME customer created BEFORE this order
+                const earlierOrders = unpaidOrdersStore.filter(uo => {
+                    if (String(uo.id) === String(order.id) || String(uo.orderId || '') === String(order.orderId || '')) {
+                        return false;
                     }
-                    return sum;
-                }, 0);
+                    const uoOrderNum = parseInt(String(uo.orderId || '').replace(/\D/g, ''), 10) || 0;
+                    const isEarlier = (uoOrderNum > 0 && currOrderNum > 0)
+                        ? (uoOrderNum < currOrderNum)
+                        : (uo.createdAt < orderTime || (uo.createdAt <= orderTime && String(uo.orderId || '') < String(order.orderId || '')));
 
-                let effectivePrevUnpaidDue = prevUnpaidDue;
+                    if (!isEarlier) return false;
+
+                    let isSameCustomer = false;
+                    if (uId && uo.userId && String(uId) === String(uo.userId)) {
+                        isSameCustomer = true;
+                    } else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) {
+                        isSameCustomer = true;
+                    } else if (oShop && uo.shopName && oShop.length >= 3 && oShop === uo.shopName) {
+                        isSameCustomer = true;
+                    } else if (oName && uo.name && oName.length >= 3 && oName === uo.name) {
+                        isSameCustomer = true;
+                    }
+                    return isSameCustomer;
+                });
+
+                // In a running ledger, past due is the customer's LAST closing balance (NOT the sum of all past orders)
+                let lastClosingDue = 0;
                 if (order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
                     const userClose = parseFloat(order.user.closingBalance || 0);
                     if (userClose > 0) {
-                        effectivePrevUnpaidDue = userClose;
+                        lastClosingDue = userClose;
                     }
                 }
+
+                if (lastClosingDue <= 0 && earlierOrders.length > 0) {
+                    // earlierOrders is sorted DESC by createdAt (most recent earlier order first)
+                    const latestEarlier = earlierOrders.find(uo => uo.due > 0);
+                    if (latestEarlier) {
+                        lastClosingDue = latestEarlier.due;
+                    }
+                }
+
+                const effectivePrevUnpaidDue = lastClosingDue;
 
                 let totalCustomerDue = 0;
                 if (order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
                     const userClose = parseFloat(order.user.closingBalance || 0);
                     totalCustomerDue = userClose > 0 ? userClose : 0;
-                } else if (Array.isArray(unpaidOrdersStore)) {
-                    unpaidOrdersStore.forEach(uo => {
-                        let isSameCustomer = false;
-                        if (uId && uo.userId && String(uId) === String(uo.userId)) {
-                            isSameCustomer = true;
-                        } else if (oPhone && uo.phone && oPhone.length >= 7 && oPhone === uo.phone) {
-                            isSameCustomer = true;
-                        } else if (oShop && uo.shopName && oShop.length >= 3 && oShop === uo.shopName) {
-                            isSameCustomer = true;
-                        } else if (oName && uo.name && oName.length >= 3 && oName === uo.name) {
-                            isSameCustomer = true;
-                        }
-                        if (isSameCustomer && uo.due > 0) {
-                            totalCustomerDue += uo.due;
-                        }
-                    });
+                } else if (lastClosingDue > 0) {
+                    totalCustomerDue = lastClosingDue;
                 }
 
                 const baseCreditLimit = parseFloat(order.user?.creditline || 0);

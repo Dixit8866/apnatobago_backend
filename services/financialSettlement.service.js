@@ -439,7 +439,7 @@ export const getCustomerCreditFinancials = async ({
         let customerUser = user;
         if (!customerUser && userId) {
             customerUser = await User.findByPk(userId, {
-                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'closingBalance'],
                 transaction
             });
         }
@@ -451,7 +451,7 @@ export const getCustomerCreditFinancials = async ({
         if (!customerUser && cleanPhone && cleanPhone.length >= 7) {
             customerUser = await User.findOne({
                 where: { number: { [Op.like]: `%${cleanPhone}` } },
-                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit'],
+                attributes: ['id', 'fullname', 'number', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'closingBalance'],
                 transaction
             });
         }
