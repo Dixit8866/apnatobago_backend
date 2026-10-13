@@ -2634,15 +2634,19 @@ export const getOrderDetails = async (req, res) => {
                 if (uId) {
                     syncedLedger = await syncPartyLedger(uId);
                     const rows = syncedLedger?.ledgerRows || [];
-                    const cleanOrdId = String(adjustedOrder.orderId || adjustedOrder.id || '').replace(/^[#B-]/, '').trim();
+                    const normalizeBillNo = (v) => String(v || '').replace(/^#/, '').replace(/^b-?/i, '').trim().toLowerCase();
+                    const targetBill = normalizeBillNo(adjustedOrder.orderId || adjustedOrder.id);
                     const matchedRow = rows.find(r => 
                         (r.orderId && String(r.orderId) === String(adjustedOrder.id)) ||
-                        (cleanOrdId && String(r.billNo || '').replace(/^[#B-]/, '').trim() === cleanOrdId)
+                        (targetBill && normalizeBillNo(r.billNo) === targetBill)
                     );
                     if (matchedRow) {
                         adjustedOrder.ledgerRow = matchedRow;
                         adjustedOrder.openingBalance = matchedRow.openingBalance;
                         adjustedOrder.closingBalance = matchedRow.closingBalance;
+                    } else if (rows.length > 0) {
+                        adjustedOrder.openingBalance = parseFloat(rows[rows.length - 1].closingBalance || 0);
+                        adjustedOrder.closingBalance = parseFloat(syncedLedger?.closingBalance || 0);
                     }
                     totalCustomerDue = parseFloat(syncedLedger?.user?.currentDue ?? 0);
                 }
