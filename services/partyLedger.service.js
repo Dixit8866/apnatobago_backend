@@ -470,6 +470,28 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             }
         }
 
+        // Synchronize Order dueAmount so running ledger and order records remain 100% consistent
+        const orderRows = allBuiltRows.filter(r => r.orderId);
+        if (orderRows.length > 0) {
+            const lastOrderRow = orderRows[orderRows.length - 1];
+            for (const r of orderRows) {
+                try {
+                    const isLast = r.orderId === lastOrderRow.orderId;
+                    const targetDue = isLast ? (latestClosingBalance > 0 ? latestClosingBalance : 0) : 0;
+                    await Order.update(
+                        {
+                            dueAmount: targetDue,
+                            creditAmount: targetDue,
+                            paymentStatus: targetDue <= 1e-7 ? 'Paid' : 'Partial'
+                        },
+                        { where: { id: r.orderId }, transaction }
+                    );
+                } catch (ordErr) {
+                    logger.warn(`[syncPartyLedger Order update warning]: ${ordErr.message}`);
+                }
+            }
+        }
+
         return {
             user: {
                 id: user.id,

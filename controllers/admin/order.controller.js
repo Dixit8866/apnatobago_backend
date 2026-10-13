@@ -811,16 +811,18 @@ export const getAllOrders = async (req, res) => {
                 }, 0);
 
                 let effectivePrevUnpaidDue = prevUnpaidDue;
-                if (effectivePrevUnpaidDue <= 0 && order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
+                if (order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
                     const userClose = parseFloat(order.user.closingBalance || 0);
-                    const currBill = parseFloat(order.totalAmount || 0);
-                    if (userClose > currBill) {
-                        effectivePrevUnpaidDue = parseFloat((userClose - currBill).toFixed(2));
+                    if (userClose > 0) {
+                        effectivePrevUnpaidDue = userClose;
                     }
                 }
 
                 let totalCustomerDue = 0;
-                if (Array.isArray(unpaidOrdersStore)) {
+                if (order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
+                    const userClose = parseFloat(order.user.closingBalance || 0);
+                    totalCustomerDue = userClose > 0 ? userClose : 0;
+                } else if (Array.isArray(unpaidOrdersStore)) {
                     unpaidOrdersStore.forEach(uo => {
                         let isSameCustomer = false;
                         if (uId && uo.userId && String(uId) === String(uo.userId)) {
@@ -2122,11 +2124,12 @@ export const verifyAndSettleOrder = async (req, res) => {
         const orderCouponDisc = parsedCoupon > 0 ? parsedCoupon : (parseFloat(order.couponDiscount || 0));
         const netRequiredBill = Math.max(0, parseFloat(order.totalAmount || 0) - orderCouponDisc - totalReturnDeduction - parsedPrevReturn - parsedAdvanceJama);
         const totalPaidCashOnline = parsedCash + parsedOnline;
-        const parsedJama = Math.max(0, totalPaidCashOnline - netRequiredBill);
+        // When there is an unpaid closing due (finalDue > 0), excess jama cannot exist on this bill!
+        const parsedJama = finalDue > 0 ? 0 : Math.max(0, totalPaidCashOnline - netRequiredBill);
         const parsedBaki = parsedCredit;
 
-        // If excess payment was collected, credit it to user's Advance Jama balance
-        if (parsedJama > 0 && order.userId) {
+        // If excess payment was collected and there is NO due remaining, credit it to user's Advance Jama balance
+        if (parsedJama > 0 && finalDue <= 0 && order.userId) {
             const user = await User.findByPk(order.userId, { transaction });
             if (user) {
                 const prevJama = parseFloat(user.advanceJama || 0);
@@ -2145,6 +2148,14 @@ export const verifyAndSettleOrder = async (req, res) => {
                     note: `Overpayment on Order #${order.orderId || order.id}: +₹${parsedJama.toFixed(2)} added to Advance Jama Balance (Admin Settlement)`,
                     createdByName: req.admin?.name || req.user?.name || 'Admin Settlement'
                 }, { transaction });
+            }
+        } else if (finalDue > 0 && order.userId) {
+            // Party has unpaid due (baki): reset any bogus advance jama
+            const user = await User.findByPk(order.userId, { transaction });
+            if (user && parseFloat(user.advanceJama || 0) > 0) {
+                user.advanceJama = 0;
+                user.balanceType = 'DUE';
+                await user.save({ transaction });
             }
         }
 
@@ -2617,27 +2628,42 @@ export const getOrderDetails = async (req, res) => {
         const adjustedOrder = adjustOrderPayments(order);
         if (adjustedOrder && adjustedOrder.user) {
             const uId = adjustedOrder.userId || adjustedOrder.user?.id;
-            const creditFinancials = await getCustomerCreditFinancials({ userId: uId });
             let totalCustomerDue = 0;
-            if (uId) {
-                const uOrders = await Order.findAll({
-                    where: {
-                        userId: uId,
-                        dueAmount: { [Op.gt]: 0 },
-                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-                    },
-                    attributes: ['id', 'dueAmount']
-                });
-                totalCustomerDue = uOrders.reduce((sum, o) => sum + parseFloat(o.dueAmount || 0), 0);
+            let syncedLedger = null;
+            try {
+                if (uId) {
+                    syncedLedger = await syncPartyLedger(uId);
+                    const rows = syncedLedger?.ledgerRows || [];
+                    const cleanOrdId = String(adjustedOrder.orderId || adjustedOrder.id || '').replace(/^[#B-]/, '').trim();
+                    const matchedRow = rows.find(r => 
+                        (r.orderId && String(r.orderId) === String(adjustedOrder.id)) ||
+                        (cleanOrdId && String(r.billNo || '').replace(/^[#B-]/, '').trim() === cleanOrdId)
+                    );
+                    if (matchedRow) {
+                        adjustedOrder.ledgerRow = matchedRow;
+                        adjustedOrder.openingBalance = matchedRow.openingBalance;
+                        adjustedOrder.closingBalance = matchedRow.closingBalance;
+                    }
+                    totalCustomerDue = parseFloat(syncedLedger?.user?.currentDue ?? 0);
+                }
+            } catch (lErr) {
+                logger.warn(`[getOrderDetails syncPartyLedger warning]: ${lErr.message}`);
+                totalCustomerDue = parseFloat(adjustedOrder.user.closingBalance ?? adjustedOrder.user.currentDue ?? 0);
+                if (totalCustomerDue < 0) totalCustomerDue = 0;
             }
+
             const baseCreditLimit = parseFloat(adjustedOrder.user.creditline || 0);
-            const availableCredit = Math.max(0, baseCreditLimit - totalCustomerDue);
+            const userAdvanceJama = syncedLedger?.user?.advanceJama !== undefined ? syncedLedger.user.advanceJama : parseFloat(adjustedOrder.user.advanceJama || 0);
+            const availableCredit = Math.max(0, baseCreditLimit + userAdvanceJama - totalCustomerDue);
 
             adjustedOrder.user.creditLimit = baseCreditLimit.toFixed(2);
             adjustedOrder.user.baseCreditLimit = baseCreditLimit.toFixed(2);
             adjustedOrder.user.usedCredit = totalCustomerDue.toFixed(2);
             adjustedOrder.user.totalDue = totalCustomerDue.toFixed(2);
             adjustedOrder.user.totalUnpaidDue = totalCustomerDue.toFixed(2);
+            adjustedOrder.user.closingBalance = syncedLedger?.user?.closingBalance !== undefined ? syncedLedger.user.closingBalance : adjustedOrder.user.closingBalance;
+            adjustedOrder.user.advanceJama = userAdvanceJama;
+            adjustedOrder.user.balanceType = syncedLedger?.user?.balanceType || adjustedOrder.user.balanceType;
             adjustedOrder.user.availableCredit = availableCredit.toFixed(2);
             adjustedOrder.user.availableDue = availableCredit.toFixed(2);
             adjustedOrder.user.creditline = availableCredit.toFixed(2);
