@@ -44,7 +44,7 @@ const formatLedgerDateTime = (d) => {
  * CR = Baki / Due (positive: party owes admin), DR = Jama / Advance (negative: admin owes party).
  * null when there is no balance.
  */
-const getBalanceType = (balance) => {
+export const getBalanceType = (balance) => {
     if (balance === null || balance === undefined) return null;
     const n = parseFloat(balance);
     if (n > 0.005) return 'CR';

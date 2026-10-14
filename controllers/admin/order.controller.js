@@ -13,7 +13,7 @@ import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered, broadcastUserUpdated } from '../../services/socketEvent.service.js';
 import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
-import { getPartyLedger as getPartyLedgerFromService, syncPartyLedger, getLedgerBillReturns } from '../../services/partyLedger.service.js';
+import { getPartyLedger as getPartyLedgerFromService, syncPartyLedger, getLedgerBillReturns, getBalanceType } from '../../services/partyLedger.service.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -898,6 +898,34 @@ export const getAllOrders = async (req, res) => {
                 }
                 return adjusted;
             });
+
+            // Party Ledger jama (DR), e.g. bill 98 paid 100 -> closing -2: shown on the party's latest verified bill,
+            // same bill that carries the baki (CR) as dueAmount. Ledger read only for parties whose closing is DR.
+            const jamaUserIds = Array.from(new Set(result.rows
+                .filter(o => o && getBalanceType(o.user?.closingBalance) === 'DR')
+                .map(o => o.userId || o.user?.id)
+                .filter(Boolean)));
+            if (jamaUserIds.length > 0) {
+                const jamaByOrderId = new Map();
+                await Promise.all(jamaUserIds.map(async (uid) => {
+                    try {
+                        const led = await syncPartyLedger(uid, { persist: false });
+                        const verifiedRows = (led?.ledgerRows || []).filter(r => r.orderId && r.isPaymentVerified);
+                        const latestVerified = verifiedRows[verifiedRows.length - 1];
+                        if (latestVerified && getBalanceType(led.closingBalance) === 'DR') {
+                            jamaByOrderId.set(String(latestVerified.orderId), parseFloat(led.closingBalance.toFixed(2)));
+                        }
+                    } catch (ledErr) {
+                        logger.warn(`[getAllOrders party ledger jama warning]: ${ledErr.message}`);
+                    }
+                }));
+                result.rows.forEach(o => {
+                    if (o && jamaByOrderId.has(String(o.id))) {
+                        o.closingBalance = jamaByOrderId.get(String(o.id));
+                        o.closingBalanceType = 'DR';
+                    }
+                });
+            }
         }
 
         // ── Smart Fast Bypass for Print / Customer-Specific Dues Queries ───────────
