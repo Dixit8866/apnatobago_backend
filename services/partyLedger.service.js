@@ -40,6 +40,19 @@ const formatLedgerDateTime = (d) => {
 };
 
 /**
+ * DR / CR flag of a balance (same convention as party opening balance):
+ * CR = Baki / Due (positive: party owes admin), DR = Jama / Advance (negative: admin owes party).
+ * null when there is no balance.
+ */
+const getBalanceType = (balance) => {
+    if (balance === null || balance === undefined) return null;
+    const n = parseFloat(balance);
+    if (n > 0.005) return 'CR';
+    if (n < -0.005) return 'DR';
+    return null;
+};
+
+/**
  * Filter out automatic system-generated notes so RETURN NOTE only displays genuine manual user remarks.
  */
 const sanitizeReturnNote = (rawNotes) => {
@@ -581,6 +594,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 attachedReturnVal: parseFloat((tx.attachedReturnVal || tx.returnVal || 0).toFixed(2)),
                 returnNote: tx.returnNote,
                 closingBalance: closingBalance,
+                closingBalanceType: getBalanceType(closingBalance),
                 isPaymentVerified: tx.isPaymentVerified !== false
             };
         });
@@ -761,7 +775,9 @@ export const getPartyLedger = async (userId, query = {}) => {
                 kupan: parseFloat(totals.kupan.toFixed(2)),
                 returnVal: parseFloat(totals.returnVal.toFixed(2)),
                 closingBalance: parseFloat(synced.closingBalance.toFixed(2)),
+                closingBalanceType: getBalanceType(synced.closingBalance),
                 periodClosingBalance: parseFloat(periodClosingBalance.toFixed(2)),
+                periodClosingBalanceType: getBalanceType(periodClosingBalance),
                 totalRows: filteredRows.length
             },
             ledgerRows: filteredRows
