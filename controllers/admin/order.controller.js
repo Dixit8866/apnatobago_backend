@@ -2015,6 +2015,7 @@ export const verifyAndSettleOrder = async (req, res) => {
                 if (!pQty || pQty <= 0) continue;
 
                 const pDeduction = pQty * pPrice;
+                totalReturnDeduction += pDeduction;
                 const pCondition = prevRet.condition === 'DAMAGED' ? 'DAMAGED' : 'GOOD';
 
                 await SalesReturn.create({
@@ -2039,6 +2040,26 @@ export const verifyAndSettleOrder = async (req, res) => {
                     }
                 }
             }
+        }
+
+        // Support direct returnAmount if salesReturns array was empty
+        const reqReturnAmt = parseFloat(req.body.returnAmount) || 0;
+        if (totalReturnDeduction === 0 && reqReturnAmt > 0) {
+            totalReturnDeduction = reqReturnAmt;
+            const fallbackItem = order.items && order.items.length > 0 ? order.items[0] : null;
+            await SalesReturn.create({
+                orderId: order.id,
+                userId: order.userId,
+                productId: fallbackItem?.productId || null,
+                variantId: fallbackItem?.variantId || null,
+                quantity: 1,
+                price: reqReturnAmt,
+                returnAmount: reqReturnAmt,
+                condition: 'GOOD',
+                status: 'Approved',
+                reason: req.body.returnNote || 'Payment verification sales return',
+                approvedByAdminId: req.admin?.id || req.user?.id || null
+            }, { transaction });
         }
 
         // Update Order Settlement Fields (Bill total stays intact as requested!)

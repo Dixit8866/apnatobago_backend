@@ -820,6 +820,26 @@ export const createAdminSalesReturn = async (req, res) => {
         const salesReturnEntries = [];
         const actorName = req.user ? (req.user.name || req.user.fullname || 'Admin') : 'Admin';
 
+        // Check if the selected source order has already been delivered / settled
+        const isPastClosedOrder = ['delivered', 'payment collect', 'payment verify', 'completed'].includes(String(order.orderStatus || '').toLowerCase());
+
+        // If source order is closed, check if party has a more recent active order to receive the return credit
+        let returnTargetOrderId = order.id;
+        if (isPastClosedOrder) {
+            const latestOrder = await Order.findOne({
+                where: {
+                    userId: order.userId,
+                    id: { [Op.ne]: order.id },
+                    orderStatus: { [Op.in]: ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Completed'] }
+                },
+                order: [['createdAt', 'DESC']],
+                transaction: t
+            });
+            if (latestOrder) {
+                returnTargetOrderId = latestOrder.id;
+            }
+        }
+
         // Check assigned delivery boy (and verify existence to satisfy foreign key constraint)
         const assignment = await OrderAssignment.findOne({
             where: { orderId: order.id },
@@ -897,9 +917,9 @@ export const createAdminSalesReturn = async (req, res) => {
             const unitPrefix = (sellUnit || orderItem.sellUnit) === 'Inner' ? '[Inner]' : '[Base]';
             const returnReasonStr = isGeneric ? null : `${unitPrefix} ${rawNote}`;
 
-            // Create Sales Return Record with Approved status
+            // Create Sales Return Record with Approved status attached to target order
             const salesReturn = await SalesReturn.create({
-                orderId: order.id,
+                orderId: returnTargetOrderId,
                 userId: order.userId,
                 deliveryBoyId: validDeliveryBoyId,
                 productId,
@@ -991,56 +1011,62 @@ export const createAdminSalesReturn = async (req, res) => {
                 }
             }
 
-            // Adjust Order Item
-            const remainingQty = orderedQty - returnQty;
-            if (remainingQty <= 0) {
-                await orderItem.destroy({ transaction: t });
-            } else {
-                await orderItem.update({ quantity: remainingQty }, { transaction: t });
-            }
-        }
-
-        // Recalculate Order Total Amount
-        const remainingItems = await OrderItem.findAll({
-            where: { orderId: order.id },
-            transaction: t
-        });
-
-        let newSubtotal = 0;
-        for (const item of remainingItems) {
-            newSubtotal += parseFloat(item.price) * parseFloat(item.quantity);
-        }
-
-        const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
-        const newTotalAmount = roundTotal(newSubtotal + deliveryCharge);
-        order.totalAmount = newTotalAmount;
-        order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
-        if (parseFloat(order.paidAmount || 0) > newTotalAmount) {
-            order.paidAmount = newTotalAmount;
-        }
-
-        // Adjust existing OrderPayment records if total cash/online collected exceeds new total
-        const existingPaymentsAdmin = await OrderPayment.findAll({
-            where: { orderId: order.id },
-            transaction: t
-        });
-        let runningPaySumAdmin = 0;
-        for (const p of existingPaymentsAdmin) {
-            const pAmt = parseFloat(p.amount || 0);
-            if (runningPaySumAdmin + pAmt > newTotalAmount) {
-                const allowedAmt = Math.max(0, newTotalAmount - runningPaySumAdmin);
-                if (allowedAmt === 0) {
-                    await p.destroy({ transaction: t });
+            // Adjust Order Item ONLY for in-flight/unsettled orders!
+            // Past closed orders must preserve their original delivered line items.
+            if (!isPastClosedOrder) {
+                const remainingQty = orderedQty - returnQty;
+                if (remainingQty <= 0) {
+                    await orderItem.destroy({ transaction: t });
                 } else {
-                    await p.update({ amount: allowedAmt }, { transaction: t });
-                    runningPaySumAdmin += allowedAmt;
+                    await orderItem.update({ quantity: remainingQty }, { transaction: t });
                 }
-            } else {
-                runningPaySumAdmin += pAmt;
             }
         }
 
-        await order.save({ transaction: t });
+        // Recalculate Order Total Amount ONLY for in-flight/unsettled orders!
+        // Past closed orders retain their historical bill total and opening/closing balances intact!
+        if (!isPastClosedOrder) {
+            const remainingItems = await OrderItem.findAll({
+                where: { orderId: order.id },
+                transaction: t
+            });
+
+            let newSubtotal = 0;
+            for (const item of remainingItems) {
+                newSubtotal += parseFloat(item.price) * parseFloat(item.quantity);
+            }
+
+            const deliveryCharge = parseFloat(order.deliveryCharge) || 0;
+            const newTotalAmount = roundTotal(newSubtotal + deliveryCharge);
+            order.totalAmount = newTotalAmount;
+            order.dueAmount = Math.max(0, parseFloat(order.dueAmount) - totalReturnAmount);
+            if (parseFloat(order.paidAmount || 0) > newTotalAmount) {
+                order.paidAmount = newTotalAmount;
+            }
+
+            // Adjust existing OrderPayment records if total cash/online collected exceeds new total
+            const existingPaymentsAdmin = await OrderPayment.findAll({
+                where: { orderId: order.id },
+                transaction: t
+            });
+            let runningPaySumAdmin = 0;
+            for (const p of existingPaymentsAdmin) {
+                const pAmt = parseFloat(p.amount || 0);
+                if (runningPaySumAdmin + pAmt > newTotalAmount) {
+                    const allowedAmt = Math.max(0, newTotalAmount - runningPaySumAdmin);
+                    if (allowedAmt === 0) {
+                        await p.destroy({ transaction: t });
+                    } else {
+                        await p.update({ amount: allowedAmt }, { transaction: t });
+                        runningPaySumAdmin += allowedAmt;
+                    }
+                } else {
+                    runningPaySumAdmin += pAmt;
+                }
+            }
+
+            await order.save({ transaction: t });
+        }
 
         // Calculate total Jama credit for GOOD condition returns only (if applyJamaCredit is enabled)
         let totalJamaCredit = 0;

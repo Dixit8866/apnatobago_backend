@@ -170,21 +170,104 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Build Chronological Transactions List
         const chronologicalTransactions = [];
 
-        // 1. Process Orders
-        for (const ord of orders) {
+        // Include orders from Packaging onwards (Packaging, Packed, Shipping, Delivered, Payment Collect, Payment Verify, Completed)
+        const eligibleOrders = orders.filter(ord => {
             const st = String(ord.orderStatus || '').toLowerCase();
-            // Business Rule: Party orders ONLY enter Party Ledger / Closing Balance once Delivered or Payment Collected/Verified/Completed.
-            // In-flight orders (Pending, Packaging, Packed, Shipping) have NOT been delivered to the party and payment is not verified yet.
-            const isDeliveredOrSettled = ['delivered', 'payment collect', 'payment verify', 'completed'].includes(st);
-            if (!isDeliveredOrSettled) continue;
+            return ['packaging', 'packed', 'shipping', 'delivered', 'payment collect', 'payment verify', 'completed'].includes(st);
+        });
 
+        // Fetch ALL Sales Returns for this party
+        const allUserReturns = await SalesReturn.findAll({
+            where: {
+                userId: user.id,
+                status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
+            },
+            attributes: ['id', 'userId', 'orderId', 'returnAmount', 'quantity', 'price', 'reason', 'createdAt'],
+            order: [['createdAt', 'ASC']],
+            transaction
+        });
+
+        // Map sales returns to orders:
+        // Core Running Ledger Rule: Old closed bills must NEVER be mutated!
+        // A return created during or after a subsequent bill belongs to that subsequent bill,
+        // even if the returned item was originally from a previous bill.
+        const orderReturnsMap = new Map();
+        const unassignedStandaloneReturns = [];
+
+        for (const ord of eligibleOrders) {
+            orderReturnsMap.set(ord.id, []);
+        }
+
+        for (const ret of allUserReturns) {
+            const retTime = new Date(ret.createdAt || new Date()).getTime();
+
+            if (eligibleOrders.length === 0) {
+                unassignedStandaloneReturns.push(ret);
+                continue;
+            }
+
+            let assignedOrder = null;
+
+            if (ret.orderId && orderReturnsMap.has(ret.orderId)) {
+                const targetIdx = eligibleOrders.findIndex(o => o.id === ret.orderId);
+                const nextOrder = targetIdx < eligibleOrders.length - 1 ? eligibleOrders[targetIdx + 1] : null;
+                const nextOrderTime = nextOrder ? new Date(nextOrder.deliveredAt || nextOrder.packagingAt || nextOrder.createdAt).getTime() : Infinity;
+
+                if (retTime >= nextOrderTime) {
+                    // Return occurred AFTER this order was already closed and next order was active!
+                    // Roll forward to the order active at retTime
+                    let activeOrder = eligibleOrders[eligibleOrders.length - 1];
+                    for (let j = targetIdx + 1; j < eligibleOrders.length; j++) {
+                        const curTime = new Date(eligibleOrders[j].deliveredAt || eligibleOrders[j].packagingAt || eligibleOrders[j].createdAt).getTime();
+                        const nextTime = j < eligibleOrders.length - 1
+                            ? new Date(eligibleOrders[j + 1].deliveredAt || eligibleOrders[j + 1].packagingAt || eligibleOrders[j + 1].createdAt).getTime()
+                            : Infinity;
+                        if (retTime >= curTime && retTime < nextTime) {
+                            activeOrder = eligibleOrders[j];
+                            break;
+                        }
+                    }
+                    assignedOrder = activeOrder;
+                } else {
+                    assignedOrder = eligibleOrders[targetIdx];
+                }
+            } else {
+                // Standalone return or unlinked orderId
+                const firstOrderTime = new Date(eligibleOrders[0].deliveredAt || eligibleOrders[0].packagingAt || eligibleOrders[0].createdAt).getTime();
+                if (retTime < firstOrderTime) {
+                    unassignedStandaloneReturns.push(ret);
+                    continue;
+                }
+                let activeOrder = eligibleOrders[eligibleOrders.length - 1];
+                for (let j = 0; j < eligibleOrders.length; j++) {
+                    const curTime = new Date(eligibleOrders[j].deliveredAt || eligibleOrders[j].packagingAt || eligibleOrders[j].createdAt).getTime();
+                    const nextTime = j < eligibleOrders.length - 1
+                        ? new Date(eligibleOrders[j + 1].deliveredAt || eligibleOrders[j + 1].packagingAt || eligibleOrders[j + 1].createdAt).getTime()
+                        : Infinity;
+                    if (retTime >= curTime && retTime < nextTime) {
+                        activeOrder = eligibleOrders[j];
+                        break;
+                    }
+                }
+                assignedOrder = activeOrder;
+            }
+
+            if (assignedOrder) {
+                const list = orderReturnsMap.get(assignedOrder.id) || [];
+                list.push(ret);
+                orderReturnsMap.set(assignedOrder.id, list);
+            }
+        }
+
+        // 1. Process Eligible Orders (Packaging onwards)
+        for (const ord of eligibleOrders) {
             const billNo = ord.orderId || String(ord.id).slice(0, 8);
             const fin = calculateOrderFinancials(ord, ord.payments);
             const orderDate = ord.deliveredAt || ord.packagingAt || ord.createdAt || new Date();
 
             const orderPaymentsList = ord.payments || [];
             const orderItemsList = ord.items || [];
-            const attachedReturns = ord.returns || [];
+            const attachedReturns = orderReturnsMap.get(ord.id) || [];
 
             // Sales Amount (Gross Bill)
             const salesAmt = parseFloat(
@@ -220,14 +303,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             // Coupon Discount
             const couponDiscount = parseFloat(fin.couponDiscount || ord.couponDiscount || 0);
 
-            // Sales Return on Order
+            // Sales Return on Order (Includes cross-bill returns accepted during this order)
             const returnTotal = attachedReturns.reduce((sum, r) => {
                 return sum + parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0);
             }, 0);
             const returnNote = sanitizeReturnNote(attachedReturns.map(r => r.reason));
 
             // Distinguish payments made at delivery/order time vs subsequent payments:
-            // Payments made on this order:
             let initialCash = 0;
             let initialBank = 0;
             const initialReceivers = [];
@@ -256,6 +338,10 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 }
             }
 
+            // Payment fields and closing balance are ONLY populated once payment is verified
+            const st = String(ord.orderStatus || '').toLowerCase();
+            const isPaymentVerified = ord.paymentCollectStatus === 'Verified' || ['payment verify', 'completed'].includes(st);
+
             // Exactly ONE row per ORDER in the Party Ledger - Never split orders into duplicate rows
             chronologicalTransactions.push({
                 type: 'ORDER',
@@ -265,18 +351,19 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 sales: salesAmt,
                 purchaseCost: parseFloat(purchaseCost.toFixed(2)),
                 profit: parseFloat(profit.toFixed(2)),
-                cash: parseFloat(initialCash.toFixed(2)),
-                bank: parseFloat(initialBank.toFixed(2)),
-                bankReceiver: initialReceivers.length > 0 ? Array.from(new Set(initialReceivers)).join(', ') : '-',
-                kupan: parseFloat(couponDiscount.toFixed(2)),
-                returnVal: parseFloat(returnTotal.toFixed(2)),
-                returnNote: returnNote,
+                cash: isPaymentVerified ? parseFloat(initialCash.toFixed(2)) : 0,
+                bank: isPaymentVerified ? parseFloat(initialBank.toFixed(2)) : 0,
+                bankReceiver: isPaymentVerified ? (initialReceivers.length > 0 ? Array.from(new Set(initialReceivers)).join(', ') : '-') : '-',
+                kupan: isPaymentVerified ? parseFloat(couponDiscount.toFixed(2)) : 0,
+                returnVal: isPaymentVerified ? parseFloat(returnTotal.toFixed(2)) : 0,
+                returnNote: isPaymentVerified ? returnNote : '-',
+                isPaymentVerified,
                 sortTime: orderTimestamp
             });
         }
 
         // 2. Process Standalone Sales Returns
-        standaloneReturns.forEach((ret, rIdx) => {
+        unassignedStandaloneReturns.forEach((ret, rIdx) => {
             const retDate = ret.createdAt || new Date();
             const retAmt = parseFloat(ret.returnAmount || (parseFloat(ret.quantity || 0) * parseFloat(ret.price || 0)) || 0);
             if (retAmt > 0) {
@@ -382,10 +469,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const dt = formatLedgerDateTime(tx.dateObj);
             const openingBalance = runningBalance;
             const totalAmount = parseFloat((openingBalance + tx.sales).toFixed(2));
-            const creditsTotal = tx.cash + tx.bank + tx.kupan + tx.returnVal;
-            const closingBalance = parseFloat((totalAmount - creditsTotal).toFixed(2));
 
-            runningBalance = closingBalance;
+            let closingBalance = null;
+            if (tx.isPaymentVerified !== false) {
+                const creditsTotal = tx.cash + tx.bank + tx.kupan + tx.returnVal;
+                closingBalance = parseFloat((totalAmount - creditsTotal).toFixed(2));
+                runningBalance = closingBalance;
+            }
 
             return {
                 sr: idx + 1,
@@ -406,11 +496,12 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 kupan: parseFloat(tx.kupan.toFixed(2)),
                 returnVal: parseFloat(tx.returnVal.toFixed(2)),
                 returnNote: tx.returnNote,
-                closingBalance: closingBalance
+                closingBalance: closingBalance,
+                isPaymentVerified: tx.isPaymentVerified !== false
             };
         });
 
-        // Synchronize User Model closingBalance as single source of truth
+        // Synchronize User Model closingBalance as single source of truth (from verified transactions)
         const latestClosingBalance = runningBalance;
 
         if (user) {
@@ -422,13 +513,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             }
         }
 
-        // Synchronize Order dueAmount so running ledger and order records remain 100% consistent
-        const orderRows = allBuiltRows.filter(r => r.orderId);
-        if (orderRows.length > 0) {
-            const lastOrderRow = orderRows[orderRows.length - 1];
-            for (const r of orderRows) {
+        // Synchronize Order dueAmount ONLY for verified orders
+        const verifiedOrderRows = allBuiltRows.filter(r => r.orderId && r.isPaymentVerified);
+        if (verifiedOrderRows.length > 0) {
+            const lastVerifiedOrder = verifiedOrderRows[verifiedOrderRows.length - 1];
+            for (const r of verifiedOrderRows) {
                 try {
-                    const isLast = r.orderId === lastOrderRow.orderId;
+                    const isLast = r.orderId === lastVerifiedOrder.orderId;
                     const targetDue = isLast ? (latestClosingBalance > 0 ? latestClosingBalance : 0) : 0;
                     await Order.update(
                         {
@@ -561,8 +652,9 @@ export const getPartyLedger = async (userId, query = {}) => {
             returnVal: 0
         });
 
-        const periodClosingBalance = filteredRows.length > 0
-            ? filteredRows[filteredRows.length - 1].closingBalance
+        const verifiedFiltered = filteredRows.filter(r => r.closingBalance !== null && r.closingBalance !== undefined);
+        const periodClosingBalance = verifiedFiltered.length > 0
+            ? verifiedFiltered[verifiedFiltered.length - 1].closingBalance
             : periodOpeningBalance;
 
         const latestRowOpening = filteredRows.length > 0
