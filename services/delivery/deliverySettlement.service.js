@@ -301,36 +301,9 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
         const totalCashOnlineCollected = inputCash + inputOnline;
         const pastDueSettled = Math.min(totalPastDue, Math.max(0, totalCashOnlineCollected - currentBillCashOnlineNeeded));
 
-        // Settle past due orders
-        let remainingToClearPast = pastDueSettled;
-        for (const pOrder of pastDueOrders) {
-            if (remainingToClearPast <= 0) break;
-            const pDue = parseFloat(pOrder.dueAmount);
-            if (pDue <= 0) continue;
-            const clearAmt = Math.min(pDue, remainingToClearPast);
-            remainingToClearPast -= clearAmt;
-            pOrder.dueAmount = Math.max(0, pDue - clearAmt);
-            pOrder.paidAmount = parseFloat(pOrder.paidAmount || 0) + clearAmt;
-            pOrder.paymentStatus = pOrder.dueAmount <= 1e-7 ? 'Paid' : 'Partial';
-            const pastNote = `[Past Due Cleared]: ₹${clearAmt.toFixed(2)} settled during delivery of Order #${assignment.order?.orderId || assignment.orderId}`;
-            pOrder.notes = pOrder.notes ? `${pOrder.notes} | ${pastNote}` : pastNote;
-            await pOrder.save({ transaction: t });
-
-            // Record explicit OrderPayment on the past order for ledger audit trail
-            await OrderPayment.create({
-                orderId: pOrder.id,
-                deliveryBoyId,
-                amount: clearAmt,
-                paymentMethod: (inputOnline > 0 && inputCash === 0) ? 'ONLINE' : 'CASH',
-                isSubmitted: true,
-                submittedAt: new Date(),
-                notes: `Past due cleared by delivery boy during delivery of Order #${assignment.order?.orderId || assignment.order.id}`,
-                createdAt: new Date(),
-                updatedAt: new Date()
-            }, { transaction: t });
-
-            await restoreUserCreditFromPayment(pOrder.id, clearAmt, user, t);
-        }
+        // Running Ledger Rule: Never mutate past closed bills or inject payments into old orders.
+        // All payments and returns collected today belong to today's delivery order (assignment.order.id).
+        // The running ledger carries forward past closing as today's opening balance, so today's payment automatically settles the running balance!
 
         // Create Sales Return records if provided
         const returnItemsList = salesReturnItems || returnItems;
@@ -800,6 +773,50 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
             remainingSalesReturn = Math.round(unadjustedReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0));
         }
 
+        // Sales Return Rule: All return items and deductions belong strictly to the CURRENT delivery order, NEVER past orders!
+        const currentOrder = orders[orders.length - 1];
+        const returnItemsList = salesReturnItems || returnItems;
+        if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
+            for (const rItem of returnItemsList) {
+                if (rItem.productId && Number(rItem.quantity) > 0) {
+                    const rPrice = parseFloat(rItem.price || 0);
+                    const rQty = Number(rItem.quantity);
+                    const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
+                    const returnReason = (rItem.reason && rItem.reason.trim() && !['return', 'customer return'].includes(rItem.reason.trim().toLowerCase()))
+                        ? rItem.reason.trim()
+                        : null;
+                    await SalesReturn.create({
+                        orderId: currentOrder.id,
+                        userId: currentOrder.userId,
+                        deliveryBoyId,
+                        productId: rItem.productId,
+                        variantId: rItem.variantId || null,
+                        volumeId: rItem.volumeId || null,
+                        quantity: rQty,
+                        price: rPrice,
+                        returnAmount: rAmt,
+                        reason: returnReason,
+                        status: 'Pending',
+                        creditProcessed: true
+                    }, { transaction: t });
+                }
+            }
+        }
+
+        if (user && remainingSalesReturn > 0) {
+            await SalesReturn.update(
+                { creditProcessed: true },
+                {
+                    where: {
+                        userId: user.id,
+                        creditProcessed: false,
+                        status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
+                    },
+                    transaction: t
+                }
+            );
+        }
+
         for (const order of orders) {
             let due = parseFloat(order.dueAmount);
             if (due <= 0) continue;
@@ -814,7 +831,7 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                 due -= jamaDeduction;
                 order.paidAmount = parseFloat(order.paidAmount) + jamaDeduction;
                 orderNotes.push(`Paid ₹${jamaDeduction.toFixed(2)} via Advance Jama`);
-                paymentMethodsUsed.push('CASH'); // treat as cash for method tracking
+                paymentMethodsUsed.push('CASH');
 
                 await OrderPayment.create({
                     orderId: order.id,
@@ -827,7 +844,8 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                 await restoreUserCreditFromPayment(order.id, jamaDeduction, user, t);
             }
 
-            if (remainingSalesReturn > 0 && due > 0) {
+            // Apply Sales Return ONLY to the current delivery order, never to past orders!
+            if (order.id === currentOrder.id && remainingSalesReturn > 0 && due > 0) {
                 const returnDeduction = Math.min(remainingSalesReturn, due);
                 remainingSalesReturn -= returnDeduction;
                 due -= returnDeduction;
@@ -842,50 +860,6 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                     paymentMethod: 'SALES_RETURN',
                     notes: `Adjusted ₹${returnDeduction.toFixed(2)} from Sales Return (Bill: ₹${order.totalAmount})`
                 }, { transaction: t });
-
-                if (user) {
-                    await SalesReturn.update(
-                        { creditProcessed: true },
-                        {
-                            where: {
-                                userId: user.id,
-                                creditProcessed: false,
-                                status: { [Op.notIn]: ['Rejected', 'Cancelled'] }
-                            },
-                            transaction: t
-                        }
-                    );
-                }
-
-                const returnItemsList = salesReturnItems || returnItems;
-                if (Array.isArray(returnItemsList) && returnItemsList.length > 0) {
-                    for (const rItem of returnItemsList) {
-                        if (rItem.productId && Number(rItem.quantity) > 0) {
-                            const rPrice = parseFloat(rItem.price || 0);
-                            const rQty = Number(rItem.quantity);
-                            const rAmt = parseFloat(rItem.returnAmount || (rPrice * rQty));
-                            // Always attach return to current delivery order being settled so it reduces and appears on this bill
-                            const targetOrderId = order.id;
-                            const returnReason = (rItem.reason && rItem.reason.trim() && !['return', 'customer return'].includes(rItem.reason.trim().toLowerCase()))
-                                ? rItem.reason.trim()
-                                : null;
-                            await SalesReturn.create({
-                                orderId: targetOrderId,
-                                userId: order.userId,
-                                deliveryBoyId,
-                                productId: rItem.productId,
-                                variantId: rItem.variantId || null,
-                                volumeId: rItem.volumeId || null,
-                                quantity: rQty,
-                                price: rPrice,
-                                returnAmount: rAmt,
-                                reason: returnReason,
-                                status: 'Pending',
-                                creditProcessed: true
-                            }, { transaction: t });
-                        }
-                    }
-                }
             }
 
             if (remainingCash > 0 && due > 0) {

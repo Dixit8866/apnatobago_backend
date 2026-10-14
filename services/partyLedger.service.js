@@ -227,58 +227,24 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             const returnNote = sanitizeReturnNote(attachedReturns.map(r => r.reason));
 
             // Distinguish payments made at delivery/order time vs subsequent payments:
+            // Payments made on this order:
             let initialCash = 0;
             let initialBank = 0;
             const initialReceivers = [];
-            const subsequentPayments = [];
 
-            if (validPayments.length <= 1) {
-                // Single or zero payments on this order
-                validPayments.forEach(p => {
-                    const method = String(p.paymentMethod || '').toUpperCase();
-                    const pAmt = parseFloat(p.amount || 0);
-                    if (isCashMethod(method)) {
-                        initialCash += pAmt;
-                    } else if (isBankMethod(method)) {
-                        initialBank += pAmt;
-                        const rName = p.bankAccount?.bankName
-                            ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
-                            : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null);
-                        if (rName) initialReceivers.push(rName);
-                    }
-                });
-            } else {
-                // Multiple payments: sort chronologically
-                validPayments.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-                const firstPayTime = new Date(validPayments[0].createdAt).getTime();
-
-                validPayments.forEach((p, pIdx) => {
-                    const pTime = new Date(p.createdAt).getTime();
-                    const method = String(p.paymentMethod || '').toUpperCase();
-                    const pAmt = parseFloat(p.amount || 0);
+            validPayments.forEach(p => {
+                const method = String(p.paymentMethod || '').toUpperCase();
+                const pAmt = parseFloat(p.amount || 0);
+                if (isCashMethod(method)) {
+                    initialCash += pAmt;
+                } else if (isBankMethod(method)) {
+                    initialBank += pAmt;
                     const rName = p.bankAccount?.bankName
                         ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
                         : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null);
-
-                    // First payment or payments made within 2 minutes of the initial payment belong to initial bill settlement
-                    if (pIdx === 0 || Math.abs(pTime - firstPayTime) <= 120000) {
-                        if (isCashMethod(method)) {
-                            initialCash += pAmt;
-                        } else if (isBankMethod(method)) {
-                            initialBank += pAmt;
-                            if (rName) initialReceivers.push(rName);
-                        }
-                    } else {
-                        // Subsequent payments on the same order get their own ledger row with the same billNo
-                        subsequentPayments.push({
-                            pAmt,
-                            method,
-                            rName: isBankMethod(method) ? rName : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null),
-                            pTime
-                        });
-                    }
-                });
-            }
+                    if (rName) initialReceivers.push(rName);
+                }
+            });
 
             // Fallback: If marked Paid or has paidAmount without individual OrderPayment record
             if (validPayments.length === 0 && fin.paidAmount > 0) {
@@ -290,7 +256,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 }
             }
 
-            // 1a. Add the primary ORDER invoice row
+            // Exactly ONE row per ORDER in the Party Ledger - Never split orders into duplicate rows
             chronologicalTransactions.push({
                 type: 'ORDER',
                 orderId: ord.id,
@@ -306,26 +272,6 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 returnVal: parseFloat(returnTotal.toFixed(2)),
                 returnNote: returnNote,
                 sortTime: orderTimestamp
-            });
-
-            // 1b. Add separate rows for any SUBSEQUENT payments on this same bill
-            subsequentPayments.forEach((sp, spIdx) => {
-                chronologicalTransactions.push({
-                    type: 'ORDER_PAYMENT',
-                    orderId: ord.id,
-                    dateObj: new Date(sp.pTime),
-                    billNo: formattedBillNo, // Bill number stays the same!
-                    sales: 0, // Sales is 0 for payment receipt
-                    purchaseCost: 0,
-                    profit: 0,
-                    cash: isCashMethod(sp.method) ? parseFloat(sp.pAmt.toFixed(2)) : 0,
-                    bank: isBankMethod(sp.method) ? parseFloat(sp.pAmt.toFixed(2)) : 0,
-                    bankReceiver: sp.rName || '-',
-                    kupan: 0,
-                    returnVal: 0,
-                    returnNote: '-', // Never put return note on payment!
-                    sortTime: sp.pTime + 1 + spIdx
-                });
             });
         }
 

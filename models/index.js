@@ -555,14 +555,23 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] Add order_items discount column failed:', e.message); }
 
         try {
-            // Add godownId to users table (party-godown assignment)
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "godownId" UUID REFERENCES godowns(id) ON DELETE SET NULL ON UPDATE CASCADE');
+        } catch (e) { /* ignore */ }
+        try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
+        } catch (e) { /* ignore */ }
+        try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(50) DEFAULT \'DUE\'');
+        } catch (e) { /* ignore */ }
+        try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "openingBalance" DECIMAL(12, 2) DEFAULT 0.00');
+        } catch (e) { /* ignore */ }
+        try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "openingBalanceType" VARCHAR(10) DEFAULT \'CR\'');
+        } catch (e) { /* ignore */ }
+        try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "isOpeningBalanceSet" BOOLEAN DEFAULT false');
-        } catch (e) { console.log('[Migration Warning] Users godownId/dues column failed:', e.message); }
+        } catch (e) { /* ignore */ }
 
         try {
             // Add godownId to orders table (order routing)
