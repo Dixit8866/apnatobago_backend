@@ -739,6 +739,9 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
     let unpaidOrdersSum = 0;
     let candidateOrders = [];
     let priorClosingBalance = 0;
+    // Earlier bills already in the Party Ledger running balance (payment verified): their due is carried
+    // bill to bill into this bill's opening balance (priorClosingBalance)
+    let ledgerCarriedBills = null;
 
     // Fetch authoritative Closing Balance from Party Ledger (Single Source of Truth)
     if (userId) {
@@ -752,6 +755,13 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                     if (curOrderIdStr && rBillNum && curOrderIdStr === rBillNum) return true;
                     return false;
                 });
+                if (curIdx >= 0) {
+                    const carriedRows = syncedLedger.ledgerRows.slice(0, curIdx).filter(r => r.orderId && r.isPaymentVerified);
+                    ledgerCarriedBills = {
+                        ids: new Set(carriedRows.map(r => String(r.orderId))),
+                        latestRow: carriedRows.length > 0 ? carriedRows[carriedRows.length - 1] : null
+                    };
+                }
                 if (curIdx > 0) {
                     priorClosingBalance = parseFloat(syncedLedger.ledgerRows[curIdx].openingBalance || 0);
                 } else if (curIdx === 0) {
@@ -804,6 +814,8 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                 : (uoTime <= currentOrderCreated);
 
             if (!isEarlier) return;
+            // Already in priorClosingBalance via the running ledger — adding it again double counts (800 + 1000 = 1800)
+            if (ledgerCarriedBills && ledgerCarriedBills.ids.has(String(uo.id))) return;
 
             const fin = calculateOrderFinancials(uo, uo.payments);
             let due = parseFloat(fin.dueAmount || 0);
@@ -834,8 +846,27 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
             }
         });
 
-        // Ensure Closing Amount from previous bill / party ledger is accurately sent as Due
-        if (priorClosingBalance > 0.01) {
+        if (ledgerCarriedBills) {
+            // Party Ledger: B-100001 closing -> B-100002 opening ... -> this bill's opening.
+            // So the verified bills' whole due is this bill's opening, shown once on the latest verified bill.
+            if (priorClosingBalance > 0.01) {
+                const latestRow = ledgerCarriedBills.latestRow;
+                const latestOrder = latestRow ? candidateOrders.find(co => String(co.id) === String(latestRow.orderId)) : null;
+                unpaidOrdersSum += priorClosingBalance;
+                pastDueOrders.push({
+                    id: latestOrder ? latestOrder.id : (latestRow ? latestRow.orderId : 'prior-due'),
+                    orderId: latestOrder ? latestOrder.orderId : (latestRow ? String(latestRow.billNo || '').replace(/^B-/, '') : 'Previous Due'),
+                    totalAmount: latestOrder ? parseFloat(latestOrder.totalAmount || 0) : (latestRow ? parseFloat(latestRow.sales || 0) : priorClosingBalance),
+                    couponDiscount: latestOrder ? parseFloat(latestOrder.couponDiscount || 0) : 0,
+                    paidAmount: latestOrder ? parseFloat(latestOrder.paidAmount || 0) : 0,
+                    dueAmount: parseFloat(priorClosingBalance.toFixed(2)),
+                    paymentStatus: latestRow ? 'Partial' : 'Pending',
+                    orderStatus: latestOrder ? latestOrder.orderStatus : 'Delivered',
+                    createdAt: latestOrder ? latestOrder.createdAt : (assignment.order?.createdAt || new Date())
+                });
+            }
+        } else if (priorClosingBalance > 0.01) {
+            // Ensure Closing Amount from previous bill / party ledger is accurately sent as Due
             if (pastDueOrders.length === 0) {
                 const latestPriorOrder = candidateOrders.find(co => {
                     const num = parseInt(String(co.orderId || '').replace(/\D/g, ''), 10) || 0;
