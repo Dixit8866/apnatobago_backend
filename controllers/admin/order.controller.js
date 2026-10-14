@@ -2641,6 +2641,11 @@ export const getOrderDetails = async (req, res) => {
                     } else if (rows.length > 0) {
                         adjustedOrder.openingBalance = parseFloat(rows[rows.length - 1].closingBalance || 0);
                         adjustedOrder.closingBalance = parseFloat(syncedLedger?.closingBalance || 0);
+                    } else {
+                        const rawInit = parseFloat(syncedLedger?.user?.openingBalance || 0);
+                        const initType = String(syncedLedger?.user?.openingBalanceType || 'CR').toUpperCase();
+                        adjustedOrder.openingBalance = initType === 'DR' ? -rawInit : rawInit;
+                        adjustedOrder.closingBalance = adjustedOrder.openingBalance;
                     }
                     totalCustomerDue = parseFloat(syncedLedger?.user?.currentDue ?? 0);
                 }
