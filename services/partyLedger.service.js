@@ -173,13 +173,14 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // 1. Process Orders
         for (const ord of orders) {
             const st = String(ord.orderStatus || '').toLowerCase();
-            // Skip cancelled, rejected, and pending orders
-            // Business Rule: Party orders only enter Party Ledger / All Date Report once accepted/moved to Packaging or beyond
-            if (st.includes('cancel') || st.includes('reject') || st === 'pending') continue;
+            // Business Rule: Party orders ONLY enter Party Ledger / Closing Balance once Delivered or Payment Collected/Verified/Completed.
+            // In-flight orders (Pending, Packaging, Packed, Shipping) have NOT been delivered to the party and payment is not verified yet.
+            const isDeliveredOrSettled = ['delivered', 'payment collect', 'payment verify', 'completed'].includes(st);
+            if (!isDeliveredOrSettled) continue;
 
             const billNo = ord.orderId || String(ord.id).slice(0, 8);
             const fin = calculateOrderFinancials(ord, ord.payments);
-            const orderDate = ord.packagingAt || ord.createdAt || new Date();
+            const orderDate = ord.deliveredAt || ord.packagingAt || ord.createdAt || new Date();
 
             const orderPaymentsList = ord.payments || [];
             const orderItemsList = ord.items || [];

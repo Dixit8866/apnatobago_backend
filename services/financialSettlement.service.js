@@ -531,7 +531,9 @@ export const getCustomerCreditFinancials = async ({
 
         const userAdvanceJama = parseFloat(customerUser?.advanceJama || 0);
         const userCloseBal = parseFloat(customerUser?.closingBalance || 0);
-        const roundedUsedDue = userCloseBal > 0 ? userCloseBal : parseFloat(totalUnpaidDue.toFixed(2));
+        const roundedUsedDue = excludeOrderId
+            ? parseFloat(totalUnpaidDue.toFixed(2))
+            : (userCloseBal > 0 ? userCloseBal : parseFloat(totalUnpaidDue.toFixed(2)));
         const totalPendingDue = roundedUsedDue;
         const availableCredit = Math.max(0, parseFloat((baseCreditLimit + userAdvanceJama - roundedUsedDue).toFixed(2)));
         const isBlocked = customerUser?.blockcredit ? true : false;

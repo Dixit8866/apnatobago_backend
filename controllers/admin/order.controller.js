@@ -807,32 +807,21 @@ export const getAllOrders = async (req, res) => {
                     return isSameCustomer;
                 });
 
-                // In a running ledger, past due is the customer's LAST closing balance (NOT the sum of all past orders)
+                // In a running ledger, past due for THIS order is the unpaid due from DELIVERED orders prior to this order
                 let lastClosingDue = 0;
-                if (order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
-                    const userClose = parseFloat(order.user.closingBalance || 0);
-                    if (userClose > 0) {
-                        lastClosingDue = userClose;
-                    }
-                }
-
-                if (lastClosingDue <= 0 && earlierOrders.length > 0) {
-                    // earlierOrders is sorted DESC by createdAt (most recent earlier order first)
+                if (earlierOrders.length > 0) {
+                    // earlierOrders is sorted DESC by createdAt (most recent earlier delivered order first)
                     const latestEarlier = earlierOrders.find(uo => uo.due > 0);
                     if (latestEarlier) {
                         lastClosingDue = latestEarlier.due;
                     }
+                } else if (order.user?.openingBalance && parseFloat(order.user.openingBalance) > 0 && String(order.user.openingBalanceType || 'CR').toUpperCase() === 'CR') {
+                    // If no earlier delivered orders exist, check customer's initial opening balance
+                    lastClosingDue = parseFloat(order.user.openingBalance);
                 }
 
                 const effectivePrevUnpaidDue = lastClosingDue;
-
-                let totalCustomerDue = 0;
-                if (order.user?.closingBalance !== undefined && order.user?.closingBalance !== null) {
-                    const userClose = parseFloat(order.user.closingBalance || 0);
-                    totalCustomerDue = userClose > 0 ? userClose : 0;
-                } else if (lastClosingDue > 0) {
-                    totalCustomerDue = lastClosingDue;
-                }
+                const totalCustomerDue = lastClosingDue;
 
                 const baseCreditLimit = parseFloat(order.user?.creditline || 0);
                 const userAdvanceJama = parseFloat(order.user?.advanceJama || 0);
