@@ -481,9 +481,24 @@ export const getCustomerCreditFinancials = async ({
         }
 
         let totalUnpaidDue = 0;
-        const pastDueOrders = [];
+        let pastDueOrders = [];
 
-        if (matchConditions.length > 0) {
+        // Party with an account: due from the Party Ledger (single source, see getPartyCurrentDue in partyLedger.service)
+        let ledgerDue = null;
+        if (customerUser?.id) {
+            try {
+                const { getPartyCurrentDue } = await import('./partyLedger.service.js');
+                ledgerDue = await getPartyCurrentDue(customerUser.id, { excludeOrderId, transaction });
+                totalUnpaidDue = ledgerDue.totalDue;
+                pastDueOrders = ledgerDue.dueBill ? [ledgerDue.dueBill] : [];
+            } catch (ledgerErr) {
+                logger.warn(`[getCustomerCreditFinancials ledger warning]: ${ledgerErr.message}`);
+                ledgerDue = null;
+            }
+        }
+
+        // Guest / phone-only customer (no party account): sum of delivered bills' own dues
+        if (!ledgerDue && matchConditions.length > 0) {
             const orderWhere = {
                 [Op.or]: matchConditions,
                 orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel', 'Auto Cancelled', 'Rejected'] }
@@ -541,9 +556,9 @@ export const getCustomerCreditFinancials = async ({
             });
         }
 
-        const userAdvanceJama = parseFloat(customerUser?.advanceJama || 0);
+        const userAdvanceJama = ledgerDue ? ledgerDue.advanceJama : parseFloat(customerUser?.advanceJama || 0);
         const userCloseBal = parseFloat(customerUser?.closingBalance || 0);
-        const roundedUsedDue = excludeOrderId
+        const roundedUsedDue = (ledgerDue || excludeOrderId)
             ? parseFloat(totalUnpaidDue.toFixed(2))
             : (userCloseBal > 0 ? userCloseBal : parseFloat(totalUnpaidDue.toFixed(2)));
         const totalPendingDue = roundedUsedDue;

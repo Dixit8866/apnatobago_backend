@@ -5,6 +5,7 @@ import { addFcmToken, removeFcmToken } from '../../utils/fcmHelper.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import APP_MESSAGES from '../../constants/messages.js';
 import logger from '../../logger/apiLogger.js';
+import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
 import axios from 'axios';
 import { Op } from 'sequelize';
 import dotenv from 'dotenv';
@@ -409,16 +410,11 @@ export const getProfile = async (req, res) => {
         userData.deviceType = req.user.deviceType || null;
         userData.version = req.user.version || null;
 
-        // Sum the dueAmount for all orders of this user
-        const totalDueAmount = await Order.sum('dueAmount', {
-            where: {
-                userId: req.user.id,
-                orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-            }
-        }) || 0;
+        // Party's due from the Party Ledger (single source), not a sum of every bill's own dueAmount
+        const creditData = await getCustomerCreditFinancials({ userId: req.user.id, user: req.user });
 
         const baseCreditLimit = parseFloat(userData.creditline || 0);
-        const unpaidDue = parseFloat(totalDueAmount || 0);
+        const unpaidDue = parseFloat(creditData.usedCredit || 0);
         const availableCredit = Math.max(0, baseCreditLimit - unpaidDue);
 
         // Nest totalDueAmount and central credit fields directly inside the user object
