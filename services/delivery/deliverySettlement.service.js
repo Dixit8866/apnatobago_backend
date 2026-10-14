@@ -1116,6 +1116,15 @@ export const submitDeliveryBankPaymentService = async ({ orderIdOrUuid, delivery
 
         await t.commit();
 
+        // Bill is payment verified: save the Party Ledger balance (closingBalance, bill dues)
+        if (order.userId) {
+            try {
+                await syncPartyLedger(order.userId, { forceRebuild: true });
+            } catch (syncErr) {
+                logger.warn(`[submitDeliveryBankPayment ledger sync warning]: ${syncErr.message}`);
+            }
+        }
+
         await sendDeliveredNotification(order.id);
 
         return { payment };

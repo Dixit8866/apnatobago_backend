@@ -18,10 +18,13 @@ import fs from 'fs';
  *   • Credit limit (creditline), wallet and the party's opening balance setting are NOT touched.
  *   • Each party runs in its own transaction. Every change is written to a backup file so --undo restores it.
  *
+ * A party that already has a reset is skipped (bills delivered after it are real new dues); --again resets it again.
+ *
  * Usage (run from backend/):
  *   Preview only (no changes):   node scripts/resetPartyBalancesToZero.js
  *   One party first:             node scripts/resetPartyBalancesToZero.js --phone=9429089905 --execute
  *   All parties:                 node scripts/resetPartyBalancesToZero.js --execute
+ *   Re-save ledger balances only (no reset entries): node scripts/resetPartyBalancesToZero.js --sync-only [--execute]
  *   Undo a run (preview / do):   node scripts/resetPartyBalancesToZero.js --undo=scripts/backups/balance-reset-<runId>.json [--execute]
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -46,6 +49,8 @@ const getArg = (name) => {
     return found ? found.slice(name.length + 3).trim() : null;
 };
 const EXECUTE = args.includes('--execute');
+const SYNC_ONLY = args.includes('--sync-only');
+const AGAIN = args.includes('--again');
 const UNDO_FILE = getArg('undo');
 const TARGET_PHONE = getArg('phone') ? getArg('phone').replace(/\D/g, '').slice(-10) : null;
 const TARGET_USER_ID = getArg('userId');
@@ -103,8 +108,10 @@ const planParty = async (user, transaction) => {
     const carryOrders = unverifiedOrders.filter(o => !WRITEOFF_STATUSES.includes(String(o.orderStatus || '').toLowerCase()));
 
     const advanceJama = round2(user.advanceJama);
+    const alreadyReset = (await PartyBalanceLog.count({ where: { userId: user.id, type: BALANCE_RESET }, transaction })) > 0;
     const needsReset = Math.abs(balance) >= 0.01 || writeOffOrders.length > 0;
     const needsUserClean = advanceJama !== 0 || (user.balanceType && user.balanceType !== 'CLEAR');
+    const savedBalanceStale = Math.abs(round2(user.closingBalance) - balance) >= 0.01;
 
     return {
         rows,
@@ -112,34 +119,118 @@ const planParty = async (user, transaction) => {
         writeOffOrders,
         carryOrders,
         advanceJama,
+        alreadyReset,
         needsReset,
         needsUserClean,
+        savedBalanceStale,
         hasWork: needsReset || needsUserClean
     };
 };
 
-const runReset = async () => {
+const backupFor = async (user, plan, transaction) => {
+    const verifiedOrderIds = plan.rows.filter(r => r.orderId && r.isPaymentVerified).map(r => r.orderId);
+    const ordersBefore = verifiedOrderIds.length > 0
+        ? await Order.findAll({ where: { id: verifiedOrderIds }, attributes: ['id', 'dueAmount', 'paymentStatus'], transaction })
+        : [];
+    return {
+        userId: user.id,
+        name: `${user.fullname || 'Party'} (${user.number || '-'})`,
+        balanceBefore: plan.balance,
+        userBefore: {
+            closingBalance: user.closingBalance,
+            advanceJama: user.advanceJama,
+            balanceType: user.balanceType
+        },
+        ordersBefore: ordersBefore.map(o => ({ id: o.id, dueAmount: o.dueAmount, paymentStatus: o.paymentStatus })),
+        logIds: []
+    };
+};
+
+const newBackup = (kind) => {
     const runId = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
     const backupDir = join(__dirname, 'backups');
-    const backupFile = join(backupDir, `balance-reset-${runId}.json`);
-    const backup = { runId, startedAt: new Date().toISOString(), parties: [], failed: [] };
-    const writeBackup = () => fs.writeFileSync(backupFile, JSON.stringify(backup, null, 2));
+    const backupFile = join(backupDir, `balance-${kind}-${runId}.json`);
+    const backup = { runId, kind, startedAt: new Date().toISOString(), parties: [], failed: [] };
+    return {
+        runId,
+        backupFile,
+        backup,
+        open: () => { fs.mkdirSync(backupDir, { recursive: true }); fs.writeFileSync(backupFile, JSON.stringify(backup, null, 2)); },
+        write: () => fs.writeFileSync(backupFile, JSON.stringify(backup, null, 2))
+    };
+};
 
-    const userWhere = TARGET_PHONE
+const loadUsers = () => User.findAll({
+    where: TARGET_PHONE
         ? { number: { [Op.like]: `%${TARGET_PHONE}` } }
-        : (TARGET_USER_ID ? { id: TARGET_USER_ID } : {});
-    const users = await User.findAll({
-        where: userWhere,
-        attributes: ['id', 'fullname', 'number', 'advanceJama', 'balanceType', 'closingBalance'],
-        order: [['createdAt', 'ASC']]
-    });
+        : (TARGET_USER_ID ? { id: TARGET_USER_ID } : {}),
+    attributes: ['id', 'fullname', 'number', 'advanceJama', 'balanceType', 'closingBalance'],
+    order: [['createdAt', 'ASC']]
+});
+
+/**
+ * Re-save every party's Party Ledger balance (user.closingBalance, bill dues) — no reset entries.
+ */
+const runSyncOnly = async () => {
+    const run = newBackup('sync');
+    const users = await loadUsers();
+    console.log(`\nMode: ${EXECUTE ? 'SYNC EXECUTE (saved ledger balances will be refreshed)' : 'SYNC PREVIEW (no changes)'}`);
+    console.log(`Parties: ${users.length}\n`);
+    if (EXECUTE) {
+        run.open();
+        console.log(`Backup file: ${run.backupFile}\n`);
+    }
+
+    let staleCount = 0;
+    for (const user of users) {
+        const label = `${user.fullname || 'Party'} (${user.number || '-'})`;
+        const t = EXECUTE ? await sequelize.transaction() : null;
+        try {
+            const plan = await planParty(user, t);
+            if (plan.savedBalanceStale) {
+                staleCount++;
+                console.log(`• ${label}: saved balance ${fmtBal(user.closingBalance)} -> ledger ${fmtBal(plan.balance)}`);
+            }
+            if (!EXECUTE) continue;
+
+            const partyBackup = await backupFor(user, plan, t);
+            await syncPartyLedger(user.id, { transaction: t });
+            await t.commit();
+            run.backup.parties.push(partyBackup);
+            run.write();
+        } catch (err) {
+            if (t && !t.finished) await t.rollback();
+            console.error(`  ✗ ${label}: ${err.message} (nothing changed for this party)`);
+            if (EXECUTE) {
+                run.backup.failed.push({ userId: user.id, name: label, error: err.message });
+                run.write();
+            }
+        }
+    }
+
+    console.log('\n──────────────────────────── SUMMARY ────────────────────────────');
+    console.log(`Parties with an out-of-date saved balance: ${staleCount}`);
+    if (EXECUTE) {
+        run.backup.finishedAt = new Date().toISOString();
+        run.write();
+        console.log(`Parties synced: ${run.backup.parties.length}, failed: ${run.backup.failed.length}`);
+        console.log(`Backup / undo file: ${run.backupFile}`);
+    } else {
+        console.log('\nPreview only. Add --execute to re-save the ledger balances.');
+    }
+};
+
+const runReset = async () => {
+    const run = newBackup('reset');
+    const { runId, backupFile, backup } = run;
+    const writeBackup = run.write;
+    const users = await loadUsers();
 
     console.log(`\nMode: ${EXECUTE ? 'EXECUTE (database will be updated)' : 'PREVIEW (no changes)'}`);
     console.log(`Parties: ${users.length}${TARGET_PHONE ? ` (phone %${TARGET_PHONE})` : ''}${TARGET_USER_ID ? ` (userId ${TARGET_USER_ID})` : ''}\n`);
 
     if (EXECUTE) {
-        fs.mkdirSync(backupDir, { recursive: true });
-        writeBackup();
+        run.open();
         console.log(`Backup file: ${backupFile}\n`);
     }
 
@@ -147,12 +238,19 @@ const runReset = async () => {
     let totalDr = 0;
     let partiesChanged = 0;
     let writeOffCount = 0;
+    let skippedAlreadyReset = 0;
 
     for (const user of users) {
         const label = `${user.fullname || 'Party'} (${user.number || '-'})`;
         const t = EXECUTE ? await sequelize.transaction() : null;
         try {
             const plan = await planParty(user, t);
+            // Already reset once: bills delivered after that reset are real new dues, keep them (unless --again)
+            if (plan.alreadyReset && !AGAIN) {
+                if (plan.hasWork) skippedAlreadyReset++;
+                if (t) await t.rollback();
+                continue;
+            }
             if (!plan.hasWork) {
                 if (t) await t.rollback();
                 continue;
@@ -171,22 +269,7 @@ const runReset = async () => {
             if (!EXECUTE) continue;
 
             // Backup before any change
-            const verifiedOrderIds = plan.rows.filter(r => r.orderId && r.isPaymentVerified).map(r => r.orderId);
-            const ordersBefore = verifiedOrderIds.length > 0
-                ? await Order.findAll({ where: { id: verifiedOrderIds }, attributes: ['id', 'dueAmount', 'paymentStatus'], transaction: t })
-                : [];
-            const partyBackup = {
-                userId: user.id,
-                name: label,
-                balanceBefore: plan.balance,
-                userBefore: {
-                    closingBalance: user.closingBalance,
-                    advanceJama: user.advanceJama,
-                    balanceType: user.balanceType
-                },
-                ordersBefore: ordersBefore.map(o => ({ id: o.id, dueAmount: o.dueAmount, paymentStatus: o.paymentStatus })),
-                logIds: []
-            };
+            const partyBackup = await backupFor(user, plan, t);
 
             if (plan.needsReset) {
                 const resetAt = new Date();
@@ -251,6 +334,9 @@ const runReset = async () => {
     console.log(`Baki (CR) cleared:  ₹${totalCr.toFixed(2)}`);
     console.log(`Jama (DR) cleared:  ₹${totalDr.toFixed(2)}`);
     console.log(`Unverified delivered bills written off: ${writeOffCount}`);
+    if (skippedAlreadyReset > 0) {
+        console.log(`Skipped (already reset before, use --again to reset again): ${skippedAlreadyReset}`);
+    }
     if (EXECUTE) {
         backup.finishedAt = new Date().toISOString();
         writeBackup();
@@ -300,6 +386,8 @@ try {
     await sequelize.authenticate();
     if (UNDO_FILE) {
         await runUndo();
+    } else if (SYNC_ONLY) {
+        await runSyncOnly();
     } else {
         await runReset();
     }

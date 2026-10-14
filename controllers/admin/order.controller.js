@@ -13,7 +13,7 @@ import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered, broadcastUserUpdated } from '../../services/socketEvent.service.js';
 import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
-import { getPartyLedger as getPartyLedgerFromService, syncPartyLedger, getLedgerBillReturns, getBalanceType } from '../../services/partyLedger.service.js';
+import { getPartyLedger as getPartyLedgerFromService, syncPartyLedger, getLedgerBillReturns, getBalanceType, BALANCE_RESET_WRITEOFF } from '../../services/partyLedger.service.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -676,6 +676,8 @@ export const getAllOrders = async (req, res) => {
             }).filter(s => s && s.length > 2)));
 
             let unpaidOrdersStore = [];
+            // Bills whose own baki / jama was written off by a balance reset (scripts/resetPartyBalancesToZero.js)
+            let writtenOffIds = new Set();
             const customerDuesFilters = [];
             if (userIds.length > 0) {
                 customerDuesFilters.push({ userId: { [Op.in]: userIds } });
@@ -723,9 +725,17 @@ export const getAllOrders = async (req, res) => {
                                 attributes: ['id', 'notes']
                             }
                         ],
-                        attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'couponDiscount', 'paidAmount', 'paymentStatus', 'orderStatus', 'createdAt', 'notes', 'deliveryNotice'],
+                        attributes: ['id', 'orderId', 'userId', 'customerNumber', 'customerName', 'dueAmount', 'totalAmount', 'couponDiscount', 'paidAmount', 'paymentStatus', 'paymentCollectStatus', 'orderStatus', 'createdAt', 'notes', 'deliveryNotice'],
                         order: [['createdAt', 'DESC']]
                     });
+
+                    const writtenOffLogs = unpaidOrdersList.length > 0
+                        ? await PartyBalanceLog.findAll({
+                            where: { type: BALANCE_RESET_WRITEOFF, orderId: unpaidOrdersList.map(uo => uo.id) },
+                            attributes: ['orderId']
+                        })
+                        : [];
+                    writtenOffIds = new Set(writtenOffLogs.map(l => String(l.orderId)));
 
                     unpaidOrdersStore = unpaidOrdersList.map(uo => {
                         // Centralized financial calculation for unpaid orders
@@ -758,11 +768,15 @@ export const getAllOrders = async (req, res) => {
                         return {
                             id: uo.id,
                             orderId: uo.orderId,
+                            orderNum: parseInt(String(uo.orderId || '').replace(/\D/g, ''), 10) || 0,
                             userId: uo.userId || uo.user?.id,
                             phone: uPhone,
                             shopName: uShop,
                             name: uName,
                             due,
+                            // Same rule as the Party Ledger: payment verified bills are in the ledger balance
+                            verified: uo.paymentCollectStatus === 'Verified' || ['payment verify', 'completed'].includes(String(uo.orderStatus || '').toLowerCase()),
+                            writtenOff: writtenOffIds.has(String(uo.id)),
                             pastNote,
                             createdAt: new Date(uo.createdAt).getTime()
                         };
@@ -815,17 +829,16 @@ export const getAllOrders = async (req, res) => {
                     return isSameCustomer;
                 });
 
-                // In a running ledger, past due for THIS order is the unpaid due from DELIVERED orders prior to this order
-                let lastClosingDue = 0;
-                if (earlierOrders.length > 0) {
-                    // earlierOrders is sorted DESC by createdAt (most recent earlier delivered order first)
-                    const latestEarlier = earlierOrders.find(uo => uo.due > 0);
-                    if (latestEarlier) {
-                        lastClosingDue = latestEarlier.due;
-                    }
-                } else if (order.user?.openingBalance && parseFloat(order.user.openingBalance) > 0 && String(order.user.openingBalanceType || 'CR').toUpperCase() === 'CR') {
-                    // If no earlier delivered orders exist, check customer's initial opening balance
-                    lastClosingDue = parseFloat(order.user.openingBalance);
+                // Past due from the Party Ledger: verified bills are carried bill to bill into the party's ledger balance
+                // (user.closingBalance, saved by syncPartyLedger). The latest delivered bill that is not verified yet is not in
+                // the ledger: its own due (recorded at delivery, incl. the balance carried till then) is used, unless a
+                // balance reset wrote it off. Old bills' own CREDIT records are never added again.
+                let lastClosingDue = Math.max(0, parseFloat(order.user?.closingBalance || 0));
+                const latestEarlier = earlierOrders.reduce((best, uo) => (
+                    !best || uo.createdAt > best.createdAt || (uo.createdAt === best.createdAt && uo.orderNum > best.orderNum) ? uo : best
+                ), null);
+                if (latestEarlier && !latestEarlier.verified && !latestEarlier.writtenOff) {
+                    lastClosingDue = Math.max(0, latestEarlier.due);
                 }
 
                 const effectivePrevUnpaidDue = lastClosingDue;
@@ -866,7 +879,20 @@ export const getAllOrders = async (req, res) => {
                 order.setDataValue('payments', paymentsMap[order.id] || []);
                 order.setDataValue('returns', returnsMap[order.id] || []);
 
+                // Order.dueAmount of a verified bill is saved by the Party Ledger (latest verified bill carries the baki)
+                const ledgerSavedDue = parseFloat(order.dueAmount || 0);
+                const isVerifiedBill = order.paymentCollectStatus === 'Verified' || ['payment verify', 'completed'].includes(String(order.orderStatus || '').toLowerCase());
+
                 const adjusted = adjustOrderPayments(order);
+                if (adjusted && isVerifiedBill) {
+                    // Current due of a verified bill comes from the ledger, not from the bill's own CREDIT records
+                    adjusted.dueAmount = Math.max(0, ledgerSavedDue).toFixed(2);
+                    adjusted.creditAmount = adjusted.dueAmount;
+                } else if (adjusted && writtenOffIds.has(String(order.id))) {
+                    // Delivered bill written off by a balance reset: no due of its own
+                    adjusted.dueAmount = (0).toFixed(2);
+                    adjusted.creditAmount = adjusted.dueAmount;
+                }
                 if (adjusted) {
                     adjusted.deliveryNotice = activeDeliveryNotice || null;
                     adjusted.partyActiveNotice = activeDeliveryNotice || null;
@@ -1924,6 +1950,15 @@ export const bulkVerifyPayments = async (req, res) => {
                 { isSubmitted: true, submittedAt: new Date() },
                 { where: { orderId: order.id, isSubmitted: false } }
             );
+        }
+
+        // Verified bills enter the Party Ledger balance: save it for every party (closingBalance, bill dues)
+        for (const uId of new Set(orders.map(o => o.userId).filter(Boolean))) {
+            try {
+                await syncPartyLedger(uId, { forceRebuild: true });
+            } catch (syncErr) {
+                logger.warn(`[Bulk Verify Payments ledger sync warning]: ${syncErr.message}`);
+            }
         }
 
         logActivity(req, {
