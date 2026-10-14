@@ -231,10 +231,10 @@ export const getLedgerBillReturns = async (orderId, { transaction = null } = {})
  * Reconstruct and synchronize the entire ledger history for a party.
  *
  * @param {string} userId - UUID or phone of customer
- * @param {Object} [options] - { forceRebuild: boolean, transaction: Object }
+ * @param {Object} [options] - { forceRebuild: boolean, transaction: Object, persist: boolean (false = read only, no DB writes) }
  * @returns {Promise<Object>} { user, summary, ledgerRows, entries }
  */
-export const syncPartyLedger = async (userId, { forceRebuild = false, transaction = null } = {}) => {
+export const syncPartyLedger = async (userId, { forceRebuild = false, transaction = null, persist = true } = {}) => {
     try {
         if (!userId) throw new Error('User ID is required for party ledger sync');
 
@@ -588,7 +588,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Synchronize User Model closingBalance as single source of truth (from verified transactions)
         const latestClosingBalance = runningBalance;
 
-        if (user) {
+        if (persist && user) {
             try {
                 user.closingBalance = latestClosingBalance;
                 await user.save({ transaction });
@@ -599,7 +599,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
 
         // Synchronize Order dueAmount ONLY for verified orders
         const verifiedOrderRows = allBuiltRows.filter(r => r.orderId && r.isPaymentVerified);
-        if (verifiedOrderRows.length > 0) {
+        if (persist && verifiedOrderRows.length > 0) {
             const lastVerifiedOrder = verifiedOrderRows[verifiedOrderRows.length - 1];
             for (const r of verifiedOrderRows) {
                 try {

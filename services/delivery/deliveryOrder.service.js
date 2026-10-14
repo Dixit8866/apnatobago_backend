@@ -388,6 +388,16 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
 
         await Promise.all(fetchPromises);
 
+        // Party Ledger per party on this page (read only) — same source as the order detail API
+        const ledgerByUser = new Map();
+        await Promise.all(userIds.map(async (uid) => {
+            try {
+                ledgerByUser.set(String(uid), await syncPartyLedger(uid, { persist: false }));
+            } catch (ledgerErr) {
+                logger.warn(`[getMyAssignedOrdersService] party ledger warning: ${ledgerErr.message}`);
+            }
+        }));
+
         const itemsMap = {};
         items.forEach(item => {
             if (!itemsMap[item.orderId]) itemsMap[item.orderId] = [];
@@ -460,6 +470,27 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                 let pastDueOrders = [];
                 let unpaidOrdersSum = 0;
 
+                // Party Ledger: B-100001 closing -> B-100002 opening ... -> this bill's opening. Earlier payment
+                // verified bills are carried into this bill's opening, so their due is counted once from it.
+                let ledgerCarry = null;
+                const partyLedger = uId ? ledgerByUser.get(String(uId)) : null;
+                if (partyLedger && Array.isArray(partyLedger.ledgerRows)) {
+                    const curOrderIdStr = String(data.order?.orderId || '').replace(/\D/g, '');
+                    const curIdx = partyLedger.ledgerRows.findIndex(r => {
+                        if (r.orderId && String(r.orderId) === String(currentOrderDbId)) return true;
+                        const rBillNum = String(r.billNo || '').replace(/\D/g, '');
+                        return Boolean(curOrderIdStr && rBillNum && curOrderIdStr === rBillNum);
+                    });
+                    if (curIdx >= 0) {
+                        const carriedRows = partyLedger.ledgerRows.slice(0, curIdx).filter(r => r.orderId && r.isPaymentVerified);
+                        ledgerCarry = {
+                            openingBalance: parseFloat(partyLedger.ledgerRows[curIdx].openingBalance || 0),
+                            ids: new Set(carriedRows.map(r => String(r.orderId))),
+                            latestRow: carriedRows.length > 0 ? carriedRows[carriedRows.length - 1] : null
+                        };
+                    }
+                }
+
                 candidateOrders.forEach(uo => {
                     if (String(uo.id) === String(currentOrderDbId)) return;
 
@@ -480,6 +511,8 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                         : (uoTime <= currentOrderCreated);
 
                     if (!isEarlier) return;
+                    // Already in this bill's ledger opening — adding it again double counts (800 + 1000 = 1800)
+                    if (ledgerCarry && ledgerCarry.ids.has(String(uo.id))) return;
 
                     const fin = calculateOrderFinancials(uo, uo.payments);
                     let due = parseFloat(fin.dueAmount || 0);
@@ -509,6 +542,24 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                         });
                     }
                 });
+
+                // Verified bills' whole due = this bill's ledger opening, shown once on the latest verified bill
+                if (ledgerCarry && ledgerCarry.openingBalance > 0.01) {
+                    const latestRow = ledgerCarry.latestRow;
+                    const latestOrder = latestRow ? candidateOrders.find(co => String(co.id) === String(latestRow.orderId)) : null;
+                    unpaidOrdersSum += ledgerCarry.openingBalance;
+                    pastDueOrders.push({
+                        id: latestOrder ? latestOrder.id : (latestRow ? latestRow.orderId : 'prior-due'),
+                        orderId: latestOrder ? latestOrder.orderId : (latestRow ? String(latestRow.billNo || '').replace(/^B-/, '') : 'Previous Due'),
+                        totalAmount: latestOrder ? parseFloat(latestOrder.totalAmount || 0) : (latestRow ? parseFloat(latestRow.sales || 0) : ledgerCarry.openingBalance),
+                        couponDiscount: latestOrder ? parseFloat(latestOrder.couponDiscount || 0) : 0,
+                        paidAmount: latestOrder ? parseFloat(latestOrder.paidAmount || 0) : 0,
+                        dueAmount: parseFloat(ledgerCarry.openingBalance.toFixed(2)),
+                        paymentStatus: latestRow ? 'Partial' : 'Pending',
+                        orderStatus: latestOrder ? latestOrder.orderStatus : 'Delivered',
+                        createdAt: latestOrder ? latestOrder.createdAt : (data.order?.createdAt || new Date())
+                    });
+                }
 
                 const directReturns = (returnsMap[data.order?.id] || []).filter(r => r.status !== 'Rejected' && r.status !== 'Cancelled');
                 const directReturnAmount = directReturns.reduce((sum, r) => sum + parseFloat(r.returnAmount || 0), 0);
@@ -572,6 +623,8 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                             totalCustomerDue += calculatedDueAmt;
                         }
                     } else {
+                        // Carried in this bill's ledger opening (added once below)
+                        if (ledgerCarry && ledgerCarry.ids.has(String(uo.id))) return;
                         const fin = calculateOrderFinancials(uo, uo.payments);
                         const due = fin.paymentStatus !== 'Paid' ? parseFloat(fin.dueAmount) : 0;
                         if (due > 0) {
@@ -582,6 +635,9 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
 
                 if (isDelivered && calculatedDueAmt > 0 && !candidateOrders.some(uo => String(uo.id) === String(currentOrderDbId))) {
                     totalCustomerDue += calculatedDueAmt;
+                }
+                if (ledgerCarry && ledgerCarry.openingBalance > 0.01) {
+                    totalCustomerDue += ledgerCarry.openingBalance;
                 }
 
                 const baseCreditLimit = userCreditVal;
