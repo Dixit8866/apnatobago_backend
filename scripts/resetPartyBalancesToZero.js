@@ -20,10 +20,15 @@ import fs from 'fs';
  *
  * A party that already has a reset is skipped (bills delivered after it are real new dues); --again resets it again.
  *
+ * --fresh-start: the whole hisab of EVERY party starts again now. Every party gets a reset line now (also when its
+ * balance is already 0 or it was reset before). The Party Ledger counts its summary totals (sales, cash, bank,
+ * kupan, return, purchase, profit) only from the latest reset line, so all of them show 0. Bills stay in the ledger.
+ *
  * Usage (run from backend/):
  *   Preview only (no changes):   node scripts/resetPartyBalancesToZero.js
  *   One party first:             node scripts/resetPartyBalancesToZero.js --phone=9429089905 --execute
  *   All parties:                 node scripts/resetPartyBalancesToZero.js --execute
+ *   Whole hisab of all parties from now: node scripts/resetPartyBalancesToZero.js --fresh-start [--execute]
  *   Re-save ledger balances only (no reset entries): node scripts/resetPartyBalancesToZero.js --sync-only [--execute]
  *   Undo a run (preview / do):   node scripts/resetPartyBalancesToZero.js --undo=scripts/backups/balance-reset-<runId>.json [--execute]
  * ─────────────────────────────────────────────────────────────────────────────
@@ -50,7 +55,8 @@ const getArg = (name) => {
 };
 const EXECUTE = args.includes('--execute');
 const SYNC_ONLY = args.includes('--sync-only');
-const AGAIN = args.includes('--again');
+const FRESH_START = args.includes('--fresh-start');
+const AGAIN = args.includes('--again') || FRESH_START;
 const UNDO_FILE = getArg('undo');
 const TARGET_PHONE = getArg('phone') ? getArg('phone').replace(/\D/g, '').slice(-10) : null;
 const TARGET_USER_ID = getArg('userId');
@@ -109,7 +115,8 @@ const planParty = async (user, transaction) => {
 
     const advanceJama = round2(user.advanceJama);
     const alreadyReset = (await PartyBalanceLog.count({ where: { userId: user.id, type: BALANCE_RESET }, transaction })) > 0;
-    const needsReset = Math.abs(balance) >= 0.01 || writeOffOrders.length > 0;
+    // --fresh-start: every party gets a reset line now (start of the new hisab), even with balance 0
+    const needsReset = FRESH_START || Math.abs(balance) >= 0.01 || writeOffOrders.length > 0;
     const needsUserClean = advanceJama !== 0 || (user.balanceType && user.balanceType !== 'CLEAR');
     const savedBalanceStale = Math.abs(round2(user.closingBalance) - balance) >= 0.01;
 
@@ -128,9 +135,13 @@ const planParty = async (user, transaction) => {
 };
 
 const backupFor = async (user, plan, transaction) => {
-    const verifiedOrderIds = plan.rows.filter(r => r.orderId && r.isPaymentVerified).map(r => r.orderId);
-    const ordersBefore = verifiedOrderIds.length > 0
-        ? await Order.findAll({ where: { id: verifiedOrderIds }, attributes: ['id', 'dueAmount', 'paymentStatus'], transaction })
+    // Bills whose dueAmount / paymentStatus the ledger sync saves: verified bills and written-off bills
+    const syncedOrderIds = Array.from(new Set([
+        ...plan.rows.filter(r => r.orderId && (r.isPaymentVerified || r.isBalanceResetWriteOff)).map(r => r.orderId),
+        ...plan.writeOffOrders.map(o => o.id)
+    ]));
+    const ordersBefore = syncedOrderIds.length > 0
+        ? await Order.findAll({ where: { id: syncedOrderIds }, attributes: ['id', 'dueAmount', 'paymentStatus'], transaction })
         : [];
     return {
         userId: user.id,
@@ -226,7 +237,7 @@ const runReset = async () => {
     const writeBackup = run.write;
     const users = await loadUsers();
 
-    console.log(`\nMode: ${EXECUTE ? 'EXECUTE (database will be updated)' : 'PREVIEW (no changes)'}`);
+    console.log(`\nMode: ${EXECUTE ? 'EXECUTE (database will be updated)' : 'PREVIEW (no changes)'}${FRESH_START ? ' — FRESH START: whole hisab of every party from now' : ''}`);
     console.log(`Parties: ${users.length}${TARGET_PHONE ? ` (phone %${TARGET_PHONE})` : ''}${TARGET_USER_ID ? ` (userId ${TARGET_USER_ID})` : ''}\n`);
 
     if (EXECUTE) {

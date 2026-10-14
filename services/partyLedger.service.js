@@ -602,6 +602,12 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Stable sort keeps bills with the same time in bill-number order.
         chronologicalTransactions.sort((a, b) => a.sortTime - b.sortTime);
 
+        // Hisab starts again at the latest Balance Reset: rows dated before it stay in the ledger (no bill is removed)
+        // but are not counted in the summary totals (sales, cash, bank, kupan, return, purchase, profit)
+        const latestResetTime = chronologicalTransactions
+            .filter(tx => tx.type === 'BALANCE_RESET')
+            .reduce((latest, tx) => Math.max(latest, tx.dateObj.getTime()), 0);
+
         // Build continuous Running Ledger Rows
         let runningBalance = initialPartyOpeningBalance;
         const allBuiltRows = chronologicalTransactions.map((tx, idx) => {
@@ -647,7 +653,8 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 closingBalanceType: getBalanceType(closingBalance),
                 isPaymentVerified: tx.isPaymentVerified !== false,
                 isBalanceReset: tx.type === 'BALANCE_RESET',
-                isBalanceResetWriteOff: Boolean(tx.balanceResetWriteOff)
+                isBalanceResetWriteOff: Boolean(tx.balanceResetWriteOff),
+                isBeforeReset: latestResetTime > 0 && tx.dateObj.getTime() < latestResetTime
             };
         });
 
@@ -903,8 +910,8 @@ export const getPartyLedger = async (userId, query = {}) => {
             sr: idx + 1
         }));
 
-        // Compute Summary Totals for UI Cards
-        const totals = filteredRows.reduce((acc, r) => {
+        // Compute Summary Totals for UI Cards (hisab from the latest Balance Reset: older rows are not counted)
+        const totals = filteredRows.filter(r => !r.isBeforeReset).reduce((acc, r) => {
             acc.periodSales += r.sales || 0;
             acc.totalAmount += r.totalAmount || 0;
             acc.purchaseCost += r.purchaseCost || 0;
