@@ -1087,16 +1087,14 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
 
     const roundedFullTotal = Math.round(parseFloat(fullTotal || 0));
     const isDelivered = ['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(assignment.order?.orderStatus);
-    const hasJamaPayment = (assignment.order?.payments || []).some(p => String(p.paymentMethod || '').toUpperCase() === 'JAMA_CREDIT');
     const isPrepaidOnline = ['ONLINE', 'RAZORPAY', 'UPI'].includes(String(assignment.order?.paymentMethod || '').toUpperCase()) &&
         String(assignment.order?.paymentStatus || '').toUpperCase() === 'PAID';
     const effectiveOrderDue = (!isDelivered && !isPrepaidOnline && calculatedDueAmt <= 0.01)
         ? payableAmt
         : calculatedDueAmt;
-    const applicableJama = (!isDelivered && !hasJamaPayment && jamaAmountVal > 0)
-        ? Math.min(jamaAmountVal, Math.max(0, Math.round(effectiveOrderDue) - totalSalesReturnDeduction))
-        : 0;
-    const netOrderCollectible = Math.max(0, Math.round(effectiveOrderDue) - totalSalesReturnDeduction - applicableJama);
+    // Jama (DR) is not deducted here: the app deducts jamaAmount itself (bill 2600 - jama 50 = 2550).
+    // Deducting it here as well took it twice (2600 - 50 - 50 = 2500).
+    const netOrderCollectible = Math.max(0, Math.round(effectiveOrderDue) - totalSalesReturnDeduction);
     const totalDueAmt = parseFloat(totalPastDueAmount) + netOrderCollectible;
     const netPayableVal = Math.max(0, totalDueAmt);
 
