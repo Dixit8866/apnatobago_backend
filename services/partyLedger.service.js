@@ -85,6 +85,14 @@ const sanitizeReturnNote = (rawNotes) => {
     return filtered.length > 0 ? Array.from(new Set(filtered)).join(', ') : '-';
 };
 
+// Party balance reset (scripts/resetPartyBalancesToZero.js) — PartyBalanceLog types, amount 0:
+// BALANCE_RESET           party line: writes off previousBalance (balance at reset time) -> closing 0
+// BALANCE_RESET_CARRY     bill not verified at reset: placed after the reset line (opens at the reset balance)
+// BALANCE_RESET_WRITEOFF  bill delivered, not verified at reset: placed after the reset line, its own baki/jama written off
+export const BALANCE_RESET = 'BALANCE_RESET';
+export const BALANCE_RESET_CARRY = 'BALANCE_RESET_CARRY';
+export const BALANCE_RESET_WRITEOFF = 'BALANCE_RESET_WRITEOFF';
+
 // Orders shown in the Party Ledger: Packaging onwards
 const LEDGER_ORDER_STATUSES = ['packaging', 'packed', 'shipping', 'delivered', 'payment collect', 'payment verify', 'completed'];
 const isLedgerOrder = (ord) => LEDGER_ORDER_STATUSES.includes(String(ord.orderStatus || '').toLowerCase());
@@ -324,10 +332,21 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Fetch manual balance logs (Opening dues, Adjustments)
         const balanceLogs = await PartyBalanceLog.findAll({
             where: { userId: user.id },
-            attributes: ['id', 'userId', 'orderId', 'type', 'amount', 'note', 'createdByName', 'createdAt'],
+            attributes: ['id', 'userId', 'orderId', 'type', 'amount', 'previousBalance', 'note', 'createdByName', 'createdAt'],
             order: [['createdAt', 'ASC']],
             transaction
         });
+
+        // Bills marked by a balance reset: placed right after the reset line; write-off bills keep the balance unchanged
+        const resetCarryTime = new Map();
+        const resetWriteOffIds = new Set();
+        for (const log of balanceLogs) {
+            const logType = String(log.type || '').toUpperCase();
+            if (log.orderId && (logType === BALANCE_RESET_CARRY || logType === BALANCE_RESET_WRITEOFF)) {
+                resetCarryTime.set(log.orderId, new Date(log.createdAt).getTime());
+                if (logType === BALANCE_RESET_WRITEOFF) resetWriteOffIds.add(log.orderId);
+            }
+        }
 
         // Build Chronological Transactions List
         const chronologicalTransactions = [];
@@ -450,7 +469,9 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 attachedReturnVal: parseFloat(returnTotal.toFixed(2)),
                 returnNote: isPaymentVerified ? returnNote : '-',
                 isPaymentVerified,
-                sortTime: orderTimestamp
+                balanceResetWriteOff: resetWriteOffIds.has(ord.id),
+                // Bill not verified at a balance reset goes right after the reset line (stable sort keeps bill order)
+                sortTime: resetCarryTime.has(ord.id) ? resetCarryTime.get(ord.id) + 1 : orderTimestamp
             });
         }
 
@@ -481,6 +502,28 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // 3. Process Independent Manual Adjustments (PartyBalanceLog)
         // ONLY genuine manual adjustments not linked to an order should be processed here!
         for (const log of balanceLogs) {
+            // Balance reset line: writes off the party balance as it was at reset time (not counted as cash / sales)
+            if (!log.orderId && String(log.type || '').toUpperCase() === BALANCE_RESET) {
+                chronologicalTransactions.push({
+                    type: 'BALANCE_RESET',
+                    orderId: null,
+                    dateObj: new Date(log.createdAt),
+                    billNo: `RESET-${String(log.id).slice(0, 6).toUpperCase()}`,
+                    sales: 0,
+                    purchaseCost: 0,
+                    profit: 0,
+                    cash: 0,
+                    bank: 0,
+                    bankReceiver: log.createdByName ? `Admin • ${log.createdByName}` : 'Admin',
+                    kupan: 0,
+                    returnVal: 0,
+                    returnNote: '-',
+                    balanceResetAmount: parseFloat(log.previousBalance || 0),
+                    sortTime: new Date(log.createdAt).getTime()
+                });
+                continue;
+            }
+
             // NEVER process logs linked to an order! Order dues/credits are handled through Order itself.
             if (log.orderId) continue;
 
@@ -570,6 +613,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             if (tx.isPaymentVerified !== false) {
                 const creditsTotal = tx.cash + tx.bank + tx.kupan + tx.returnVal;
                 closingBalance = parseFloat((totalAmount - creditsTotal).toFixed(2));
+                if (tx.type === 'BALANCE_RESET') {
+                    // Write off the balance as it was at reset time
+                    closingBalance = parseFloat((totalAmount - tx.balanceResetAmount).toFixed(2));
+                } else if (tx.balanceResetWriteOff) {
+                    // Bill written off by a balance reset: its own baki / jama does not change the balance
+                    closingBalance = parseFloat(openingBalance.toFixed(2));
+                }
                 runningBalance = closingBalance;
             }
 
@@ -595,7 +645,9 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 returnNote: tx.returnNote,
                 closingBalance: closingBalance,
                 closingBalanceType: getBalanceType(closingBalance),
-                isPaymentVerified: tx.isPaymentVerified !== false
+                isPaymentVerified: tx.isPaymentVerified !== false,
+                isBalanceReset: tx.type === 'BALANCE_RESET',
+                isBalanceResetWriteOff: Boolean(tx.balanceResetWriteOff)
             };
         });
 

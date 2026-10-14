@@ -613,7 +613,8 @@ export const getDailyReconciliationReport = async (req, res) => {
 
         // 7. Jama & Baki Wallet logs created today
         const jamaLogsToday = await PartyBalanceLog.findAll({
-            where: { createdAt: dateFilter },
+            // Balance reset markers (reset script) are not jama / baki collections
+            where: { createdAt: dateFilter, type: { [Op.notIn]: ['BALANCE_RESET', 'BALANCE_RESET_CARRY', 'BALANCE_RESET_WRITEOFF'] } },
             include: [
                 {
                     model: User,

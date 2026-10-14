@@ -483,9 +483,11 @@ export const getMyAssignedOrdersService = async ({ deliveryBoyId, query }) => {
                     });
                     if (curIdx >= 0) {
                         const carriedRows = partyLedger.ledgerRows.slice(0, curIdx).filter(r => r.orderId && r.isPaymentVerified);
+                        // Bills written off by a balance reset are settled in the ledger too (no own due)
+                        const writtenOffRows = partyLedger.ledgerRows.slice(0, curIdx).filter(r => r.orderId && r.isBalanceResetWriteOff);
                         ledgerCarry = {
                             openingBalance: parseFloat(partyLedger.ledgerRows[curIdx].openingBalance || 0),
-                            ids: new Set(carriedRows.map(r => String(r.orderId))),
+                            ids: new Set([...carriedRows, ...writtenOffRows].map(r => String(r.orderId))),
                             latestRow: carriedRows.length > 0 ? carriedRows[carriedRows.length - 1] : null
                         };
                     }
@@ -813,8 +815,10 @@ export const getAssignmentDetailsService = async ({ assignmentId, deliveryBoyId 
                 });
                 if (curIdx >= 0) {
                     const carriedRows = syncedLedger.ledgerRows.slice(0, curIdx).filter(r => r.orderId && r.isPaymentVerified);
+                    // Bills written off by a balance reset are settled in the ledger too (no own due)
+                    const writtenOffRows = syncedLedger.ledgerRows.slice(0, curIdx).filter(r => r.orderId && r.isBalanceResetWriteOff);
                     ledgerCarriedBills = {
-                        ids: new Set(carriedRows.map(r => String(r.orderId))),
+                        ids: new Set([...carriedRows, ...writtenOffRows].map(r => String(r.orderId))),
                         latestRow: carriedRows.length > 0 ? carriedRows[carriedRows.length - 1] : null
                     };
                 }
