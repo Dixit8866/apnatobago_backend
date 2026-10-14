@@ -55,6 +55,10 @@ export const extractManualDeliveryNotice = (raw) => {
             WHERE "deliveryNotice" ILIKE '%Due Cleared%' 
                OR "deliveryNotice" ILIKE '%Adjustments:%' 
                OR "deliveryNotice" ILIKE '%Settled via%'
+               OR "deliveryNotice" ILIKE '%Payment Verification%'
+               OR "deliveryNotice" ILIKE '%Cash:%'
+               OR "deliveryNotice" ILIKE '%Account Baki%'
+               OR "deliveryNotice" ILIKE '%Verified & Settled%'
                OR "deliveryNotice" ILIKE '[%';
         `);
         await sequelize.query(`
@@ -63,6 +67,10 @@ export const extractManualDeliveryNotice = (raw) => {
             WHERE "deliveryNotice" ILIKE '%Due Cleared%' 
                OR "deliveryNotice" ILIKE '%Adjustments:%' 
                OR "deliveryNotice" ILIKE '%Settled via%'
+               OR "deliveryNotice" ILIKE '%Payment Verification%'
+               OR "deliveryNotice" ILIKE '%Cash:%'
+               OR "deliveryNotice" ILIKE '%Account Baki%'
+               OR "deliveryNotice" ILIKE '%Verified & Settled%'
                OR "deliveryNotice" ILIKE '[%';
         `);
         await sequelize.query(`

@@ -12,7 +12,7 @@ import {
 import logger from '../../logger/apiLogger.js';
 import { uploadToS3 } from '../../utils/aws.s3.js';
 import { broadcastOrderStatusChanged, broadcastUserUpdated } from '../socketEvent.service.js';
-import { syncPartyDeliveryNotice, calculateOrderFinancials, getCustomerCreditFinancials } from '../financialSettlement.service.js';
+import { syncPartyDeliveryNotice, calculateOrderFinancials, getCustomerCreditFinancials, isSystemOrAuditNotice } from '../financialSettlement.service.js';
 import { syncPartyLedger } from '../partyLedger.service.js';
 import { sendDeliveredNotification } from './deliveryOrder.service.js';
 
@@ -499,10 +499,12 @@ export const completeOrderAndSettlePaymentService = async ({ assignmentId, deliv
 
         if (customDeliveryNote) {
             assignment.order.notes = customDeliveryNote;
-            assignment.order.deliveryNotice = customDeliveryNote;
-            if (user) {
-                user.deliveryNotice = customDeliveryNote;
-                await user.save({ transaction: t });
+            if (!isSystemOrAuditNotice(customDeliveryNote)) {
+                assignment.order.deliveryNotice = customDeliveryNote;
+                if (user) {
+                    user.deliveryNotice = customDeliveryNote;
+                    await user.save({ transaction: t });
+                }
             }
         }
         await assignment.order.save({ transaction: t });
@@ -942,10 +944,10 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                 paymentMethod: finalMethod,
                 orderStatus: 'Payment Collect',
                 notes: customDeliveryNote || order.notes,
-                deliveryNotice: customDeliveryNote || order.deliveryNotice
+                deliveryNotice: (!isSystemOrAuditNotice(customDeliveryNote) ? customDeliveryNote : null) || (isSystemOrAuditNotice(order.deliveryNotice) ? null : order.deliveryNotice)
             }, { transaction: t });
 
-            if (customDeliveryNote && order.userId) {
+            if (customDeliveryNote && !isSystemOrAuditNotice(customDeliveryNote) && order.userId) {
                 await User.update({ deliveryNotice: customDeliveryNote }, { where: { id: order.userId }, transaction: t });
             }
 
@@ -1105,10 +1107,10 @@ export const submitDeliveryBankPaymentService = async ({ orderIdOrUuid, delivery
             orderStatus: 'Payment Verify',
             deliveredAt: order.deliveredAt || new Date(),
             notes: customDeliveryNote || order.notes,
-            deliveryNotice: customDeliveryNote || order.deliveryNotice
+            deliveryNotice: (!isSystemOrAuditNotice(customDeliveryNote) ? customDeliveryNote : null) || (isSystemOrAuditNotice(order.deliveryNotice) ? null : order.deliveryNotice)
         }, { transaction: t });
 
-        if (customDeliveryNote && order.userId) {
+        if (customDeliveryNote && !isSystemOrAuditNotice(customDeliveryNote) && order.userId) {
             await User.update({ deliveryNotice: customDeliveryNote }, { where: { id: order.userId }, transaction: t });
         }
 

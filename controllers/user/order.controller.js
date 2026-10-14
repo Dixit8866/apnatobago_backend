@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { sendToDevice } from '../../services/notification.service.js';
 import { restoreOrderStock } from '../../helpers/inventory.helper.js';
+import { isSystemOrAuditNotice } from '../../services/financialSettlement.service.js';
 
 /**
  * Generate a unique human-readable Order ID (100% bulletproof with uniqueness check)
@@ -677,30 +678,9 @@ export const createOrder = async (req, res) => {
         } else {
             logger.info(`[Create Order] Creating new order. totalAmount: ${finalTotal}, paymentMethod: ${paymentMethod}`);
             const netPayableDue = paymentStatus === 'Paid' ? 0 : finalTotal;
-            let activeDeliveryNotice = userData.deliveryNotice || null;
-            if (!activeDeliveryNotice && userId) {
-                const pastOrderWithNotice = await Order.findOne({
-                    where: {
-                        userId,
-                        [Op.or]: [
-                            { deliveryNotice: { [Op.ne]: null } },
-                            { notes: { [Op.ne]: null } }
-                        ],
-                        orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
-                    },
-                    order: [['createdAt', 'DESC']],
-                    attributes: ['deliveryNotice', 'notes'],
-                    transaction: t
-                });
-                if (pastOrderWithNotice) {
-                    const found = pastOrderWithNotice.deliveryNotice || pastOrderWithNotice.notes;
-                    if (found && !String(found).includes('Adjustments:')) {
-                        activeDeliveryNotice = String(found).replace(/\[.*?\]\s*/g, '').trim();
-                        if (activeDeliveryNotice) {
-                            await User.update({ deliveryNotice: activeDeliveryNotice }, { where: { id: userId }, transaction: t });
-                        }
-                    }
-                }
+            let activeDeliveryNotice = null;
+            if (userData.deliveryNotice && !isSystemOrAuditNotice(userData.deliveryNotice)) {
+                activeDeliveryNotice = String(userData.deliveryNotice).replace(/^\[Delivery Note\]:\s*/i, '').trim();
             }
 
             // Create a new Order

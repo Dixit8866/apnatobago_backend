@@ -356,6 +356,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 bankReceiver: isPaymentVerified ? (initialReceivers.length > 0 ? Array.from(new Set(initialReceivers)).join(', ') : '-') : '-',
                 kupan: isPaymentVerified ? parseFloat(couponDiscount.toFixed(2)) : 0,
                 returnVal: isPaymentVerified ? parseFloat(returnTotal.toFixed(2)) : 0,
+                attachedReturnVal: parseFloat(returnTotal.toFixed(2)),
                 returnNote: isPaymentVerified ? returnNote : '-',
                 isPaymentVerified,
                 sortTime: orderTimestamp
@@ -495,6 +496,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 bankReceiver: tx.bankReceiver,
                 kupan: parseFloat(tx.kupan.toFixed(2)),
                 returnVal: parseFloat(tx.returnVal.toFixed(2)),
+                attachedReturnVal: parseFloat((tx.attachedReturnVal || tx.returnVal || 0).toFixed(2)),
                 returnNote: tx.returnNote,
                 closingBalance: closingBalance,
                 isPaymentVerified: tx.isPaymentVerified !== false

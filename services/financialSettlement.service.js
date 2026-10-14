@@ -224,7 +224,15 @@ export const isSystemOrAuditNotice = (raw) => {
         s.includes('Settled via') || 
         s.includes('Single Settle') || 
         s.includes('Verified & Settled') || 
+        s.includes('Payment Verification') ||
         s.includes('Advance Jama') ||
+        s.includes('Account Baki') ||
+        s.includes('Account Jama') ||
+        s.includes('Cash:') ||
+        s.includes('Online:') ||
+        s.includes('Coupon:') ||
+        s.includes('Credit:') ||
+        s.includes('Return Deduction') ||
         s.includes('Admin')
     ) {
         return true;
@@ -261,6 +269,8 @@ export const syncPartyDeliveryNotice = async (userId, transaction = null) => {
             const raw = activeOrderWithNotice.deliveryNotice;
             if (!isSystemOrAuditNotice(raw)) {
                 validNotice = String(raw).replace(/^\[Delivery Note\]:\s*/i, '').trim();
+            } else {
+                await Order.update({ deliveryNotice: null }, { where: { id: activeOrderWithNotice.id }, transaction });
             }
         }
 
@@ -404,6 +414,8 @@ export const adjustOrderResponse = (order) => {
     rowData.paymentStatus = financials.paymentStatus;
     rowData.cashAmount = financials.cashSum;
     rowData.onlineAmount = financials.onlineSum;
+    rowData.returnAmount = financials.returnSum;
+    rowData.salesReturnAmount = financials.returnSum;
     rowData.couponDiscount = financials.couponDiscount.toFixed(2);
     rowData.couponPoints = Number(rowData.couponPoints || 0);
     rowData.discountType = (rowData.couponPoints > 0 || financials.couponDiscount > 0) 
