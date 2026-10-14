@@ -72,6 +72,161 @@ const sanitizeReturnNote = (rawNotes) => {
     return filtered.length > 0 ? Array.from(new Set(filtered)).join(', ') : '-';
 };
 
+// Orders shown in the Party Ledger: Packaging onwards
+const LEDGER_ORDER_STATUSES = ['packaging', 'packed', 'shipping', 'delivered', 'payment collect', 'payment verify', 'completed'];
+const isLedgerOrder = (ord) => LEDGER_ORDER_STATUSES.includes(String(ord.orderStatus || '').toLowerCase());
+
+/**
+ * Time at which a bill takes its place in the running ledger.
+ */
+const getLedgerOrderTime = (ord) => new Date(ord.deliveredAt || ord.packagingAt || ord.createdAt).getTime();
+
+/**
+ * Bills in running-ledger sequence: by bill time, then by bill number.
+ * One bill's closing balance is the next bill's opening balance (B-100001 closing -> B-100002 opening),
+ * so this order must never depend on DB row order (custom sales share createdAt = sale date midnight).
+ */
+const sortOrdersForLedger = (orders) => [...orders].sort((a, b) =>
+    (getLedgerOrderTime(a) - getLedgerOrderTime(b)) ||
+    String(a.orderId || '').localeCompare(String(b.orderId || ''), undefined, { numeric: true })
+);
+
+/**
+ * Party's orders: by userId, or by customer number for orders placed with the party's phone.
+ */
+const buildPartyOrderConditions = (user) => {
+    const conds = [{ userId: user.id }];
+    const cleanUserPhone = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
+    if (cleanUserPhone && cleanUserPhone.length >= 7) {
+        conds.push({ customerNumber: { [Op.like]: `%${cleanUserPhone}` } });
+    }
+    return conds;
+};
+
+/**
+ * Decide which bill each sales return belongs to in the running ledger.
+ * Core Running Ledger Rule: Old closed bills must NEVER be mutated!
+ * A return created during or after a subsequent bill belongs to that subsequent bill,
+ * even if the returned item was originally from a previous bill.
+ *
+ * @param {Array} eligibleOrders - Bills in ledger sequence (sortOrdersForLedger)
+ * @param {Array} allUserReturns - Party's sales returns (not cancelled / rejected), createdAt ASC
+ * @returns {{ orderReturnsMap: Map, unassignedStandaloneReturns: Array }}
+ */
+const assignReturnsToOrders = (eligibleOrders, allUserReturns) => {
+    const orderReturnsMap = new Map();
+    const unassignedStandaloneReturns = [];
+
+    for (const ord of eligibleOrders) {
+        orderReturnsMap.set(ord.id, []);
+    }
+
+    for (const ret of allUserReturns) {
+        const retTime = new Date(ret.createdAt || new Date()).getTime();
+
+        if (eligibleOrders.length === 0) {
+            unassignedStandaloneReturns.push(ret);
+            continue;
+        }
+
+        let assignedOrder = null;
+
+        if (ret.orderId && orderReturnsMap.has(ret.orderId)) {
+            const targetIdx = eligibleOrders.findIndex(o => o.id === ret.orderId);
+            const nextOrder = targetIdx < eligibleOrders.length - 1 ? eligibleOrders[targetIdx + 1] : null;
+            const nextOrderTime = nextOrder ? getLedgerOrderTime(nextOrder) : Infinity;
+
+            if (retTime >= nextOrderTime) {
+                // Return occurred AFTER this order was already closed and next order was active!
+                // Roll forward to the order active at retTime
+                let activeOrder = eligibleOrders[eligibleOrders.length - 1];
+                for (let j = targetIdx + 1; j < eligibleOrders.length; j++) {
+                    const curTime = getLedgerOrderTime(eligibleOrders[j]);
+                    const nextTime = j < eligibleOrders.length - 1 ? getLedgerOrderTime(eligibleOrders[j + 1]) : Infinity;
+                    if (retTime >= curTime && retTime < nextTime) {
+                        activeOrder = eligibleOrders[j];
+                        break;
+                    }
+                }
+                assignedOrder = activeOrder;
+            } else {
+                assignedOrder = eligibleOrders[targetIdx];
+            }
+        } else {
+            // Standalone return or unlinked orderId
+            const firstOrderTime = getLedgerOrderTime(eligibleOrders[0]);
+            if (retTime < firstOrderTime) {
+                unassignedStandaloneReturns.push(ret);
+                continue;
+            }
+            let activeOrder = eligibleOrders[eligibleOrders.length - 1];
+            for (let j = 0; j < eligibleOrders.length; j++) {
+                const curTime = getLedgerOrderTime(eligibleOrders[j]);
+                const nextTime = j < eligibleOrders.length - 1 ? getLedgerOrderTime(eligibleOrders[j + 1]) : Infinity;
+                if (retTime >= curTime && retTime < nextTime) {
+                    activeOrder = eligibleOrders[j];
+                    break;
+                }
+            }
+            assignedOrder = activeOrder;
+        }
+
+        if (assignedOrder) {
+            const list = orderReturnsMap.get(assignedOrder.id) || [];
+            list.push(ret);
+            orderReturnsMap.set(assignedOrder.id, list);
+        }
+    }
+
+    return { orderReturnsMap, unassignedStandaloneReturns };
+};
+
+/**
+ * A bill as the Party Ledger sees it (same rule as syncPartyLedger): the sales returns shown on it,
+ * including returns linked to another bill / no bill that land on this one, and the bill's ledger time.
+ * Payment settlement and ledger edits use this, so a return is never recorded twice and a return
+ * recorded for this bill (dated billTime) stays on this bill instead of rolling to a later one.
+ *
+ * @param {string} orderId - Order UUID
+ * @param {Object} [options] - { transaction }
+ * @returns {Promise<{ inLedger: boolean, billTime: Date|null, returns: Array }>}
+ */
+export const getLedgerBillReturns = async (orderId, { transaction = null } = {}) => {
+    const notInLedger = { inLedger: false, billTime: null, returns: [] };
+    if (!orderId) return notInLedger;
+
+    const order = await Order.findByPk(orderId, { attributes: ['id', 'userId'], transaction });
+    if (!order || !order.userId) return notInLedger;
+
+    const user = await User.findByPk(order.userId, { attributes: ['id', 'number'], transaction });
+    if (!user) return notInLedger;
+
+    const orders = await Order.findAll({
+        where: { [Op.or]: buildPartyOrderConditions(user) },
+        attributes: ['id', 'orderId', 'orderStatus', 'createdAt', 'packagingAt'],
+        transaction
+    });
+    const eligibleOrders = sortOrdersForLedger(orders.filter(isLedgerOrder));
+    const ledgerOrder = eligibleOrders.find(o => o.id === order.id);
+    if (!ledgerOrder) return notInLedger;
+
+    const allUserReturns = await SalesReturn.findAll({
+        where: {
+            userId: user.id,
+            status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
+        },
+        order: [['createdAt', 'ASC']],
+        transaction
+    });
+
+    const { orderReturnsMap } = assignReturnsToOrders(eligibleOrders, allUserReturns);
+    return {
+        inLedger: true,
+        billTime: new Date(getLedgerOrderTime(ledgerOrder)),
+        returns: orderReturnsMap.get(order.id) || []
+    };
+};
+
 /**
  * Reconstruct and synchronize the entire ledger history for a party.
  *
@@ -104,14 +259,8 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         if (!user) throw new Error(`User not found: ${userId}`);
 
         // Fetch all non-cancelled orders for this party
-        const orderOrConds = [{ userId: user.id }];
-        const cleanUserPhone = user.number ? String(user.number).replace(/\D/g, '').slice(-10) : '';
-        if (cleanUserPhone && cleanUserPhone.length >= 7) {
-            orderOrConds.push({ customerNumber: { [Op.like]: `%${cleanUserPhone}` } });
-        }
-
         const orders = await Order.findAll({
-            where: { [Op.or]: orderOrConds },
+            where: { [Op.or]: buildPartyOrderConditions(user) },
             attributes: ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt', 'packagingAt'],
             include: [
                 {
@@ -171,10 +320,8 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         const chronologicalTransactions = [];
 
         // Include orders from Packaging onwards (Packaging, Packed, Shipping, Delivered, Payment Collect, Payment Verify, Completed)
-        const eligibleOrders = orders.filter(ord => {
-            const st = String(ord.orderStatus || '').toLowerCase();
-            return ['packaging', 'packed', 'shipping', 'delivered', 'payment collect', 'payment verify', 'completed'].includes(st);
-        });
+        // in running-ledger sequence (bill time, then bill number)
+        const eligibleOrders = sortOrdersForLedger(orders.filter(isLedgerOrder));
 
         // Fetch ALL Sales Returns for this party
         const allUserReturns = await SalesReturn.findAll({
@@ -187,77 +334,8 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             transaction
         });
 
-        // Map sales returns to orders:
-        // Core Running Ledger Rule: Old closed bills must NEVER be mutated!
-        // A return created during or after a subsequent bill belongs to that subsequent bill,
-        // even if the returned item was originally from a previous bill.
-        const orderReturnsMap = new Map();
-        const unassignedStandaloneReturns = [];
-
-        for (const ord of eligibleOrders) {
-            orderReturnsMap.set(ord.id, []);
-        }
-
-        for (const ret of allUserReturns) {
-            const retTime = new Date(ret.createdAt || new Date()).getTime();
-
-            if (eligibleOrders.length === 0) {
-                unassignedStandaloneReturns.push(ret);
-                continue;
-            }
-
-            let assignedOrder = null;
-
-            if (ret.orderId && orderReturnsMap.has(ret.orderId)) {
-                const targetIdx = eligibleOrders.findIndex(o => o.id === ret.orderId);
-                const nextOrder = targetIdx < eligibleOrders.length - 1 ? eligibleOrders[targetIdx + 1] : null;
-                const nextOrderTime = nextOrder ? new Date(nextOrder.deliveredAt || nextOrder.packagingAt || nextOrder.createdAt).getTime() : Infinity;
-
-                if (retTime >= nextOrderTime) {
-                    // Return occurred AFTER this order was already closed and next order was active!
-                    // Roll forward to the order active at retTime
-                    let activeOrder = eligibleOrders[eligibleOrders.length - 1];
-                    for (let j = targetIdx + 1; j < eligibleOrders.length; j++) {
-                        const curTime = new Date(eligibleOrders[j].deliveredAt || eligibleOrders[j].packagingAt || eligibleOrders[j].createdAt).getTime();
-                        const nextTime = j < eligibleOrders.length - 1
-                            ? new Date(eligibleOrders[j + 1].deliveredAt || eligibleOrders[j + 1].packagingAt || eligibleOrders[j + 1].createdAt).getTime()
-                            : Infinity;
-                        if (retTime >= curTime && retTime < nextTime) {
-                            activeOrder = eligibleOrders[j];
-                            break;
-                        }
-                    }
-                    assignedOrder = activeOrder;
-                } else {
-                    assignedOrder = eligibleOrders[targetIdx];
-                }
-            } else {
-                // Standalone return or unlinked orderId
-                const firstOrderTime = new Date(eligibleOrders[0].deliveredAt || eligibleOrders[0].packagingAt || eligibleOrders[0].createdAt).getTime();
-                if (retTime < firstOrderTime) {
-                    unassignedStandaloneReturns.push(ret);
-                    continue;
-                }
-                let activeOrder = eligibleOrders[eligibleOrders.length - 1];
-                for (let j = 0; j < eligibleOrders.length; j++) {
-                    const curTime = new Date(eligibleOrders[j].deliveredAt || eligibleOrders[j].packagingAt || eligibleOrders[j].createdAt).getTime();
-                    const nextTime = j < eligibleOrders.length - 1
-                        ? new Date(eligibleOrders[j + 1].deliveredAt || eligibleOrders[j + 1].packagingAt || eligibleOrders[j + 1].createdAt).getTime()
-                        : Infinity;
-                    if (retTime >= curTime && retTime < nextTime) {
-                        activeOrder = eligibleOrders[j];
-                        break;
-                    }
-                }
-                assignedOrder = activeOrder;
-            }
-
-            if (assignedOrder) {
-                const list = orderReturnsMap.get(assignedOrder.id) || [];
-                list.push(ret);
-                orderReturnsMap.set(assignedOrder.id, list);
-            }
-        }
+        // Map sales returns to orders (Core Running Ledger Rule — see assignReturnsToOrders)
+        const { orderReturnsMap, unassignedStandaloneReturns } = assignReturnsToOrders(eligibleOrders, allUserReturns);
 
         // 1. Process Eligible Orders (Packaging onwards)
         for (const ord of eligibleOrders) {
@@ -463,6 +541,10 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // CR = Baki / Due (Positive balance: customer owes admin)
         // DR = Jama / Advance (Negative balance: customer has advance deposit with admin)
         const initialPartyOpeningBalance = opType === 'DR' ? -rawOpeningAmt : rawOpeningAmt;
+
+        // Running ledger follows time: each row's closing balance is the next row's opening balance.
+        // Stable sort keeps bills with the same time in bill-number order.
+        chronologicalTransactions.sort((a, b) => a.sortTime - b.sortTime);
 
         // Build continuous Running Ledger Rows
         let runningBalance = initialPartyOpeningBalance;
@@ -832,7 +914,9 @@ export const updatePartyLedgerTransaction = async ({
                 .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
 
             const currentKupan = parseFloat(order.couponDiscount || 0);
-            const returns = order.returns || [];
+            // Exactly the returns this ledger row shows (incl. returns linked to another bill that land here)
+            const ledgerBill = await getLedgerBillReturns(order.id);
+            const returns = ledgerBill.inLedger ? ledgerBill.returns : (order.returns || []);
             const currentReturn = returns.reduce((sum, r) => sum + parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0), 0);
             const currentReturnNote = sanitizeReturnNote(returns.map(r => r.reason));
 

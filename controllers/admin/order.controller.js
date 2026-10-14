@@ -13,7 +13,7 @@ import { restoreOrderStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered, broadcastUserUpdated } from '../../services/socketEvent.service.js';
 import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
-import { getPartyLedger as getPartyLedgerFromService, syncPartyLedger } from '../../services/partyLedger.service.js';
+import { getPartyLedger as getPartyLedgerFromService, syncPartyLedger, getLedgerBillReturns } from '../../services/partyLedger.service.js';
 
 const getStatusLabel = (status) => {
     switch (status) {
@@ -1956,20 +1956,52 @@ export const verifyAndSettleOrder = async (req, res) => {
         const parsedPrevReturn = parseFloat(previousReturnCredit) || 0;
         let totalReturnDeduction = 0;
 
+        // Party Ledger is the single source for which returns sit on this bill. When the bill's full return
+        // amount is sent (Payment Settlement page), returns the ledger already shows on this bill are part of it,
+        // so only the rest is recorded here — the same return is never counted twice.
+        const isBillReturnTotal = req.body.returnAmount !== undefined && req.body.returnAmount !== null;
+        const ledgerBill = await getLedgerBillReturns(order.id, { transaction });
+        const ledgerBillReturns = isBillReturnTotal ? ledgerBill.returns : [];
+        const returnAmountOf = (r) => parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0);
+        // Returns recorded while settling this bill stay on this bill (not rolled to a later bill in the ledger)
+        const billReturnDate = ledgerBill.billTime ? { createdAt: ledgerBill.billTime } : {};
+
         // Process In-Bill Sales Returns (Clean up existing settlement returns to prevent duplicates)
         if (Array.isArray(salesReturns) && salesReturns.length > 0) {
+            // Replace this bill's own returns — only those the ledger shows on this bill, never another bill's
+            const ownBillReturnIds = ledgerBill.returns.filter(r => r.orderId === order.id).map(r => r.id);
             await SalesReturn.destroy({
-                where: { orderId: order.id },
+                where: ledgerBill.inLedger ? { id: ownBillReturnIds } : { orderId: order.id },
                 transaction
             });
 
-            for (const itemReturn of salesReturns) {
-                const retQty = parseInt(itemReturn.quantity, 10);
-                const retPrice = parseFloat(itemReturn.price) || 0;
-                if (!retQty || retQty <= 0) continue;
+            const returnLines = salesReturns
+                .map(itemReturn => {
+                    const retQty = parseInt(itemReturn.quantity, 10);
+                    const retPrice = parseFloat(itemReturn.price) || 0;
+                    // Line amount as sent (price can already be the line total), else qty x price
+                    const sentAmount = parseFloat(itemReturn.returnAmount) || 0;
+                    const lineAmount = sentAmount > 0 ? sentAmount : retQty * retPrice;
+                    return { itemReturn, retQty, retPrice, lineAmount, newAmount: lineAmount };
+                })
+                .filter(line => line.retQty > 0);
 
-                const itemDeduction = retQty * retPrice;
-                totalReturnDeduction += itemDeduction;
+            // Returns on this bill linked to another bill / no bill were not removed above: skip that amount,
+            // taking it from the last line first (the page adds any difference to the last line)
+            let returnAlreadyOnBill = ledgerBillReturns
+                .filter(r => r.orderId !== order.id)
+                .reduce((sum, r) => sum + returnAmountOf(r), 0);
+            for (let i = returnLines.length - 1; i >= 0 && returnAlreadyOnBill > 0.009; i--) {
+                const covered = Math.min(returnAlreadyOnBill, returnLines[i].newAmount);
+                returnLines[i].newAmount = parseFloat((returnLines[i].newAmount - covered).toFixed(2));
+                returnAlreadyOnBill -= covered;
+            }
+
+            for (const { itemReturn, retQty, retPrice, lineAmount, newAmount } of returnLines) {
+                totalReturnDeduction += lineAmount;
+                if (newAmount <= 0) continue;
+
+                const itemPrice = newAmount === retQty * retPrice ? retPrice : parseFloat((newAmount / retQty).toFixed(2));
 
                 const condition = itemReturn.condition === 'DAMAGED' ? 'DAMAGED' : 'GOOD';
 
@@ -1996,12 +2028,13 @@ export const verifyAndSettleOrder = async (req, res) => {
                     productId: targetProductId,
                     variantId: targetVariantId,
                     quantity: retQty,
-                    price: retPrice,
-                    returnAmount: itemDeduction,
+                    price: itemPrice,
+                    returnAmount: newAmount,
                     condition,
                     status: 'Approved',
                     reason: itemReturn.reason || 'Payment verification in-bill sales return',
-                    approvedByAdminId: req.admin?.id || req.user?.id || null
+                    approvedByAdminId: req.admin?.id || req.user?.id || null,
+                    ...billReturnDate
                 }, { transaction });
 
                 if (condition === 'GOOD' && targetVariantId) {
@@ -2054,20 +2087,26 @@ export const verifyAndSettleOrder = async (req, res) => {
         const reqReturnAmt = parseFloat(req.body.returnAmount) || 0;
         if (totalReturnDeduction === 0 && reqReturnAmt > 0) {
             totalReturnDeduction = reqReturnAmt;
-            const fallbackItem = order.items && order.items.length > 0 ? order.items[0] : null;
-            await SalesReturn.create({
-                orderId: order.id,
-                userId: order.userId,
-                productId: fallbackItem?.productId || null,
-                variantId: fallbackItem?.variantId || null,
-                quantity: 1,
-                price: reqReturnAmt,
-                returnAmount: reqReturnAmt,
-                condition: 'GOOD',
-                status: 'Approved',
-                reason: req.body.returnNote || 'Payment verification sales return',
-                approvedByAdminId: req.admin?.id || req.user?.id || null
-            }, { transaction });
+            // Nothing was replaced above, so every return the ledger already shows on this bill is part of this amount
+            const returnAlreadyOnBill = ledgerBillReturns.reduce((sum, r) => sum + returnAmountOf(r), 0);
+            const newReturnAmt = parseFloat(Math.max(0, reqReturnAmt - returnAlreadyOnBill).toFixed(2));
+            if (newReturnAmt > 0) {
+                const fallbackItem = order.items && order.items.length > 0 ? order.items[0] : null;
+                await SalesReturn.create({
+                    orderId: order.id,
+                    userId: order.userId,
+                    productId: fallbackItem?.productId || null,
+                    variantId: fallbackItem?.variantId || null,
+                    quantity: 1,
+                    price: newReturnAmt,
+                    returnAmount: newReturnAmt,
+                    condition: 'GOOD',
+                    status: 'Approved',
+                    reason: req.body.returnNote || 'Payment verification sales return',
+                    approvedByAdminId: req.admin?.id || req.user?.id || null,
+                    ...billReturnDate
+                }, { transaction });
+            }
         }
 
         // Update Order Settlement Fields (Bill total stays intact as requested!)
