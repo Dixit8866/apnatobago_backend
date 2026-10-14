@@ -685,6 +685,19 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
             }
         }
 
+        // Bills written off by a balance reset and not verified yet: no due of their own
+        const writtenOffPendingRows = allBuiltRows.filter(r => r.orderId && r.isBalanceResetWriteOff && !r.isPaymentVerified);
+        if (persist && writtenOffPendingRows.length > 0) {
+            try {
+                await Order.update(
+                    { dueAmount: 0 },
+                    { where: { id: writtenOffPendingRows.map(r => r.orderId) }, transaction }
+                );
+            } catch (ordErr) {
+                logger.warn(`[syncPartyLedger written-off Order update warning]: ${ordErr.message}`);
+            }
+        }
+
         return {
             user: {
                 id: user.id,
@@ -709,6 +722,116 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         logger.error(`[syncPartyLedger Error for userId ${userId}]: ${error.message}`);
         throw error;
     }
+};
+
+/**
+ * Own due of a delivered bill that is not in the ledger yet (not payment verified):
+ * recorded at delivery (CREDIT / dueAmount), else bill minus cash / online received.
+ */
+export const getDeliveredBillDue = (order, payments = []) => {
+    const fin = calculateOrderFinancials(order, payments);
+    let due = parseFloat(fin.dueAmount || 0);
+    if (due <= 0 && order.dueAmount !== undefined && order.dueAmount !== null) {
+        due = parseFloat(order.dueAmount) || 0;
+    }
+    if (due <= 0) {
+        const netPayable = parseFloat(fin.netPayable || 0);
+        const nonCreditPaid = parseFloat(fin.nonCreditPaid || 0);
+        if (netPayable > nonCreditPaid + 0.01) {
+            due = netPayable - nonCreditPaid;
+        }
+    }
+    return parseFloat(Math.max(0, due).toFixed(2));
+};
+
+/**
+ * Party's due right now, from the Party Ledger — single source for every "past due / used due / credit" figure.
+ * Verified bills are carried bill to bill into the ledger balance. The latest delivered bill that is not verified
+ * yet is not in the ledger: its own due (recorded at delivery, incl. the balance carried till then) is the party's
+ * due, unless a balance reset wrote it off. Old bills' own CREDIT records are never added up.
+ *
+ * @param {string} userId - Party (User) UUID
+ * @param {Object} [options] - { excludeOrderId: bill being delivered / settled now, transaction }
+ * @returns {Promise<{ ledgerBalance: number, totalDue: number, advanceJama: number, dueBill: Object|null }>}
+ */
+export const getPartyCurrentDue = async (userId, { excludeOrderId = null, transaction = null } = {}) => {
+    const ledger = await syncPartyLedger(userId, { persist: false, transaction });
+    const ledgerBalance = parseFloat(parseFloat(ledger.closingBalance || 0).toFixed(2));
+    const rows = (ledger.ledgerRows || []).filter(r => r.orderId && String(r.orderId) !== String(excludeOrderId || ''));
+
+    // Latest delivered bill in ledger sequence (verified bills are delivered; in-flight bills are skipped)
+    const unverifiedIds = rows.filter(r => !r.isPaymentVerified).map(r => r.orderId);
+    const unverifiedOrders = unverifiedIds.length > 0
+        ? await Order.findAll({
+            where: { id: unverifiedIds },
+            attributes: ['id', 'orderId', 'orderStatus', 'totalAmount', 'couponDiscount', 'deliveryCharge', 'paidAmount', 'dueAmount', 'paymentStatus', 'paymentMethod', 'createdAt'],
+            transaction
+        })
+        : [];
+    const unverifiedById = new Map(unverifiedOrders.map(o => [String(o.id), o]));
+    const deliveredStatuses = ['delivered', 'payment collect', 'payment verify', 'completed'];
+
+    let latestVerifiedRow = null;
+    let pendingDeliveredOrder = null;
+    let pendingDeliveredRow = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const r = rows[i];
+        if (r.isPaymentVerified) {
+            latestVerifiedRow = r;
+            break;
+        }
+        const ord = unverifiedById.get(String(r.orderId));
+        if (ord && deliveredStatuses.includes(String(ord.orderStatus || '').toLowerCase())) {
+            pendingDeliveredOrder = ord;
+            pendingDeliveredRow = r;
+            break;
+        }
+    }
+
+    if (pendingDeliveredOrder && !pendingDeliveredRow.isBalanceResetWriteOff) {
+        const payments = await OrderPayment.findAll({
+            where: { orderId: pendingDeliveredOrder.id },
+            attributes: ['id', 'amount', 'paymentMethod', 'notes'],
+            transaction
+        });
+        const due = getDeliveredBillDue(pendingDeliveredOrder, payments);
+        return {
+            ledgerBalance,
+            totalDue: due,
+            advanceJama: 0,
+            dueBill: due > 0.01 ? {
+                id: pendingDeliveredOrder.id,
+                orderId: pendingDeliveredOrder.orderId,
+                totalAmount: parseFloat(pendingDeliveredOrder.totalAmount || 0),
+                couponDiscount: parseFloat(pendingDeliveredOrder.couponDiscount || 0),
+                paidAmount: parseFloat(pendingDeliveredOrder.paidAmount || 0),
+                dueAmount: due,
+                paymentStatus: 'Partial',
+                orderStatus: pendingDeliveredOrder.orderStatus,
+                createdAt: pendingDeliveredOrder.createdAt
+            } : null
+        };
+    }
+
+    if (!latestVerifiedRow) {
+        latestVerifiedRow = [...rows].reverse().find(r => r.isPaymentVerified) || null;
+    }
+    return {
+        ledgerBalance,
+        totalDue: Math.max(0, ledgerBalance),
+        advanceJama: ledgerBalance < 0 ? Math.abs(ledgerBalance) : 0,
+        dueBill: ledgerBalance > 0.01 ? {
+            id: latestVerifiedRow ? latestVerifiedRow.orderId : 'prior-due',
+            orderId: latestVerifiedRow ? String(latestVerifiedRow.billNo || '').replace(/^B-/, '') : 'Previous Due',
+            totalAmount: latestVerifiedRow ? parseFloat(latestVerifiedRow.sales || 0) : ledgerBalance,
+            couponDiscount: latestVerifiedRow ? parseFloat(latestVerifiedRow.kupan || 0) : 0,
+            paidAmount: latestVerifiedRow ? parseFloat(((latestVerifiedRow.cash || 0) + (latestVerifiedRow.bank || 0)).toFixed(2)) : 0,
+            dueAmount: ledgerBalance,
+            paymentStatus: 'Partial',
+            orderStatus: 'Payment Verify',
+            createdAt: latestVerifiedRow ? latestVerifiedRow.dateObj : new Date()
+        } : null
+    };
 };
 
 /**
