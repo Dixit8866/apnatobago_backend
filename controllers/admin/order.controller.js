@@ -377,28 +377,7 @@ export const getAllOrders = async (req, res) => {
         // Restrict historical statuses to today by default unless filtered; keep active workflow tabs (Pending, Packaging, Packed, Shipping, Payment Collect, Payment Confirm) unrestricted so all open orders appear
         const activeWorkflowStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Payment Collect', 'Payment Confirm', 'Pending Due Order', 'All'];
         if (!startDate && !endDate && !date && status && !activeWorkflowStatuses.includes(status)) {
-            if (status === 'Delivered') {
-                // Today's delivered orders OR past delivered orders whose payment verification is pending
-                dateClause = {
-                    [Op.or]: [
-                        { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
-                        { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
-                        {
-                            [Op.and]: [
-                                {
-                                    [Op.or]: [
-                                        { paymentCollectStatus: null },
-                                        { paymentCollectStatus: { [Op.ne]: 'Verified' } }
-                                    ]
-                                },
-                                { orderStatus: { [Op.ne]: 'Payment Verify' } }
-                            ]
-                        }
-                    ]
-                };
-            } else {
-                dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
-            }
+            dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
         }
 
         let startOfDate = null;
@@ -1099,24 +1078,11 @@ export const getAllOrders = async (req, res) => {
                 cancelledCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
             }
         } else {
-            // Restrict Delivered to today's delivered OR past orders with pending payment verification
-            deliveredCountWhere[Op.and] = [{
-                [Op.or]: [
-                    { deliveredAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
-                    { deliveredAt: null, updatedAt: { [Op.between]: [startOfTodayUTC, endOfTodayUTC] } },
-                    {
-                        [Op.and]: [
-                            {
-                                [Op.or]: [
-                                    { paymentCollectStatus: null },
-                                    { paymentCollectStatus: { [Op.ne]: 'Verified' } }
-                                ]
-                            },
-                            { orderStatus: { [Op.ne]: 'Payment Verify' } }
-                        ]
-                    }
-                ]
-            }];
+            // Restrict Delivered strictly to today's delivered orders
+            const delClauseToday = buildDateClause(startOfTodayUTC, endOfTodayUTC, 'Delivered');
+            if (delClauseToday && delClauseToday[Op.or]) {
+                deliveredCountWhere[Op.and] = [{ [Op.or]: delClauseToday[Op.or] }];
+            }
 
             const genericClauseToday = buildDateClause(startOfTodayUTC, endOfTodayUTC);
             if (genericClauseToday && genericClauseToday[Op.or]) {
