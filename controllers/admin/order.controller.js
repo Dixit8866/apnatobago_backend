@@ -883,6 +883,13 @@ export const getAllOrders = async (req, res) => {
                     adjusted.creditAmount = adjusted.dueAmount;
                 }
                 if (adjusted) {
+                    const dbObj = order.assignment?.deliveryBoy || order.deliveryBoy;
+                    if (dbObj) {
+                        adjusted.deliveryBoy = dbObj.toJSON ? dbObj.toJSON() : dbObj;
+                        adjusted.deliveryBoyName = dbObj.name || null;
+                    } else if (order.assignment?.deliveryBoyId) {
+                        adjusted.deliveryBoyId = order.assignment.deliveryBoyId;
+                    }
                     adjusted.deliveryNotice = activeDeliveryNotice || null;
                     adjusted.partyActiveNotice = activeDeliveryNotice || null;
                     adjusted.previousUnpaidDue = effectivePrevUnpaidDue;
