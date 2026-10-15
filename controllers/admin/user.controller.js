@@ -281,6 +281,10 @@ export const getAllUsers = async (req, res, next) => {
             AND NOT (${RKYC_CONDITION_SQL})
         )`;
 
+        const PARTY_DUE_SQL = `(
+            COALESCE("User"."closingBalance", 0) > 0
+        )`;
+
         if (status === 'Daily Order') {
             where[Op.and] = [
                 ...(where[Op.and] || []),
@@ -305,6 +309,11 @@ export const getAllUsers = async (req, res, next) => {
             where[Op.and] = [
                 ...(where[Op.and] || []),
                 sequelize.literal(RKYC_CONDITION_SQL)
+            ];
+        } else if (status === 'Party Due') {
+            where[Op.and] = [
+                ...(where[Op.and] || []),
+                sequelize.literal(PARTY_DUE_SQL)
             ];
         } else if (status && status !== 'All') {
             where.status = status;
@@ -337,7 +346,7 @@ export const getAllUsers = async (req, res, next) => {
             }
         ] : [];
 
-        // Parallel status counts (All, Kyc Pending, R-KYC Pending, Non Order, Start Order, Daily Order)
+        // Parallel status counts (All, Kyc Pending, R-KYC Pending, Non Order, Start Order, Daily Order, Party Due)
         const [
             totalCount,
             dailyOrderCount,
@@ -345,6 +354,7 @@ export const getAllUsers = async (req, res, next) => {
             nonOrderCount,
             startOrderCount,
             rkycPendingCount,
+            partyDueCount,
             activeCount,
             inactiveCount,
             deletedCount
@@ -405,6 +415,17 @@ export const getAllUsers = async (req, res, next) => {
                 distinct: true,
                 col: 'id'
             }),
+            User.count({
+                where: {
+                    ...searchWhere,
+                    [Op.and]: [
+                        sequelize.literal(PARTY_DUE_SQL)
+                    ]
+                },
+                include: countInclude,
+                distinct: true,
+                col: 'id'
+            }),
             User.count({ where: { ...searchWhere, status: 'Active' }, include: countInclude, distinct: true, col: 'id' }),
             User.count({ where: { ...searchWhere, status: 'Inactive' }, include: countInclude, distinct: true, col: 'id' }),
             User.count({ where: { ...searchWhere, status: 'Deleted' }, include: countInclude, distinct: true, col: 'id' }),
@@ -413,6 +434,7 @@ export const getAllUsers = async (req, res, next) => {
         const statusCounts = {
             '': totalCount,
             'All': totalCount,
+            'Party Due': partyDueCount,
             'Kyc Pending': kycPendingCount,
             'R-KYC Pending': rkycPendingCount,
             'Rkyc Pending': rkycPendingCount,
