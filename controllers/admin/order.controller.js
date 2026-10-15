@@ -295,7 +295,17 @@ export const getAllOrders = async (req, res) => {
                 if (status === 'Delivered') {
                     baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
                 } else if (status === 'Payment Collect' || status === 'Payment Confirm') {
-                    baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] };
+                    baseWhere.orderStatus = { [Op.in]: ['Delivered', 'Payment Collect'] };
+                    baseWhere[Op.and] = [
+                        ...(baseWhere[Op.and] || []),
+                        { orderStatus: { [Op.ne]: 'Payment Verify' } },
+                        {
+                            [Op.or]: [
+                                { paymentCollectStatus: null },
+                                { paymentCollectStatus: { [Op.ne]: 'Verified' } }
+                            ]
+                        }
+                    ];
                 } else if (status === 'Payment Verify') {
                     baseWhere[Op.or] = [
                         { orderStatus: 'Payment Verify' },
@@ -1040,7 +1050,17 @@ export const getAllOrders = async (req, res) => {
         const deliveredCountWhere = { ...countWhere, orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] } };
         const paymentCollectCountWhere = {
             ...countWhere,
-            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect', 'Payment Verify'] }
+            orderStatus: { [Op.in]: ['Delivered', 'Payment Collect'] },
+            [Op.and]: [
+                ...(countWhere[Op.and] || []),
+                { orderStatus: { [Op.ne]: 'Payment Verify' } },
+                {
+                    [Op.or]: [
+                        { paymentCollectStatus: null },
+                        { paymentCollectStatus: { [Op.ne]: 'Verified' } }
+                    ]
+                }
+            ]
         };
         const paymentVerifyCountWhere = {
             ...countWhere,
@@ -1070,7 +1090,10 @@ export const getAllOrders = async (req, res) => {
 
             const genericClauseCount = buildDateClause(startOfDate, endOfDate);
             if (genericClauseCount && genericClauseCount[Op.or]) {
-                paymentCollectCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
+                paymentCollectCountWhere[Op.and] = [
+                    ...(paymentCollectCountWhere[Op.and] || []),
+                    { [Op.or]: genericClauseCount[Op.or] }
+                ];
                 paymentVerifyCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
                 pendingDueCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
                 cancelledCountWhere[Op.and] = [{ [Op.or]: genericClauseCount[Op.or] }];
