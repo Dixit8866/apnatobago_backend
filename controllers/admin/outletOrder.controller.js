@@ -1,4 +1,4 @@
-import { OutletOrder, OutletOrderItem, Product, ProductVariant, User, Volume, InventoryStock, InventoryTransaction, Godown } from '../../models/index.js';
+import { OutletOrder, OutletOrderItem, Product, ProductVariant, ProductPricing, CustomLevel, User, Volume, InventoryStock, InventoryTransaction, Godown } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -6,6 +6,36 @@ import sequelize from '../../config/db.js';
 import { Op } from 'sequelize';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
+
+/**
+ * Resolve price prioritizing Premium level pricing for outlet orders
+ */
+const resolvePremiumItemPrice = (variant, itemQty = 1, itemPrice = null, sellUnit = 'Base') => {
+    let priceNum = Number(itemPrice);
+    if (priceNum && priceNum > 0) return priceNum;
+
+    const pricings = variant?.pricings || [];
+    const premiumPricings = pricings.filter(p => 
+        p.customLevel?.name?.toLowerCase() === 'premium' || 
+        p.customLevelId === '6b0722c6-ee28-4058-b4de-a961d1b16da0'
+    );
+    const candidatePricings = premiumPricings.length > 0 ? premiumPricings : pricings;
+
+    let matched = candidatePricings.find(p => {
+        const min = p.minQty !== null && p.minQty !== undefined ? Number(p.minQty) : null;
+        const max = p.maxQty !== null && p.maxQty !== undefined ? Number(p.maxQty) : null;
+        if (min !== null && max !== null) return itemQty >= min && itemQty <= max;
+        if (min !== null) return itemQty >= min;
+        return false;
+    }) || candidatePricings[0];
+
+    let rawPrice = (matched && Number(matched.price) > 0) ? Number(matched.price) : Number(variant?.purchasePrice || 0);
+    if (sellUnit === 'Inner') {
+        const bUPP = Number(variant?.baseUnitsPerPack || 1);
+        return parseFloat((rawPrice / bUPP).toFixed(2));
+    }
+    return parseFloat(rawPrice.toFixed(2));
+};
 
 /**
  * Generate a unique human-readable Order ID for Outlet Orders (e.g. OTL-100001)
@@ -102,7 +132,13 @@ export const createOutletOrder = async (req, res) => {
             const variant = await ProductVariant.findByPk(item.variantId, {
                 include: [
                     { model: Product, as: 'product' },
-                    { model: Volume, as: 'volumeRef', required: false }
+                    { model: Volume, as: 'volumeRef', required: false },
+                    {
+                        model: ProductPricing,
+                        as: 'pricings',
+                        required: false,
+                        include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'], required: false }]
+                    }
                 ],
                 transaction: t
             });
@@ -113,7 +149,7 @@ export const createOutletOrder = async (req, res) => {
             }
 
             const itemQty = Number(item.quantity || 1);
-            const itemUnitPrice = Number(item.price || variant.purchasePrice || 0);
+            const itemUnitPrice = resolvePremiumItemPrice(variant, itemQty, item.price, item.sellUnit || 'Base');
             const itemDiscount = Number(item.discount || 0);
             const itemSubtotal = Math.max(0, (itemQty * itemUnitPrice) - itemDiscount);
 
@@ -764,7 +800,13 @@ export const updateOutletOrder = async (req, res) => {
             const variant = await ProductVariant.findByPk(item.variantId, {
                 include: [
                     { model: Product, as: 'product' },
-                    { model: Volume, as: 'volumeRef', required: false }
+                    { model: Volume, as: 'volumeRef', required: false },
+                    {
+                        model: ProductPricing,
+                        as: 'pricings',
+                        required: false,
+                        include: [{ model: CustomLevel, as: 'customLevel', attributes: ['id', 'name'], required: false }]
+                    }
                 ],
                 transaction: t
             });
@@ -775,7 +817,7 @@ export const updateOutletOrder = async (req, res) => {
             }
 
             const itemQty = Number(item.quantity || 1);
-            const itemUnitPrice = Number(item.price || variant.purchasePrice || 0);
+            const itemUnitPrice = resolvePremiumItemPrice(variant, itemQty, item.price, item.sellUnit || 'Base');
             const itemDiscount = Number(item.discount || 0);
             const itemSubtotal = Math.max(0, (itemQty * itemUnitPrice) - itemDiscount);
 
