@@ -1332,22 +1332,31 @@ export const updateOrderStatus = async (req, res) => {
         const prevStatus = order.orderStatus;
         if (orderStatus) {
             // Check if party already has an active shipping order when moving from Pending to Shipping
-            if (orderStatus === 'Shipping' && prevStatus !== 'Shipping' && (order.userId || order.customerNumber)) {
-                const activeShippingOrder = await Order.findOne({
-                    where: {
-                        id: { [Op.ne]: order.id },
-                        orderStatus: { [Op.in]: ['Shipping', 'Payment Collect'] },
-                        ...(order.userId ? { userId: order.userId } : { customerNumber: order.customerNumber })
-                    },
-                    attributes: ['id', 'orderId', 'orderStatus', 'customerName', 'totalAmount']
-                });
+            if (orderStatus === 'Shipping' && prevStatus !== 'Shipping') {
+                const cleanPhone = order.customerNumber ? String(order.customerNumber).replace(/\D/g, '').slice(-10) : '';
+                const partyOrs = [];
+                if (order.userId) partyOrs.push({ userId: order.userId });
+                if (order.customerNumber) partyOrs.push({ customerNumber: order.customerNumber });
+                if (cleanPhone && cleanPhone.length >= 7) partyOrs.push({ customerNumber: { [Op.like]: `%${cleanPhone}%` } });
 
-                if (activeShippingOrder) {
-                    return sendErrorResponse(
-                        res,
-                        HTTP_STATUS.BAD_REQUEST,
-                        `આ પાર્ટીનો ઓર્ડર #${activeShippingOrder.orderId} પહેલેથી જ ${activeShippingOrder.orderStatus} માં છે. પહેલા તેની ડિલિવરી પૂર્ણ થઈને પેમેન્ટ વેરિફાય થાય પછી જ આ ઓર્ડર Shipping માં મૂકી શકાશે.`
-                    );
+                if (partyOrs.length > 0) {
+                    const activeShippingOrder = await Order.findOne({
+                        where: {
+                            id: { [Op.ne]: order.id },
+                            orderId: { [Op.ne]: order.orderId },
+                            orderStatus: { [Op.in]: ['Shipping', 'Shipped', 'Payment Collect'] },
+                            [Op.or]: partyOrs
+                        },
+                        attributes: ['id', 'orderId', 'orderStatus', 'customerName', 'totalAmount']
+                    });
+
+                    if (activeShippingOrder) {
+                        return sendErrorResponse(
+                            res,
+                            HTTP_STATUS.BAD_REQUEST,
+                            `આ પાર્ટીનો ઓર્ડર #${activeShippingOrder.orderId} પહેલેથી જ ${activeShippingOrder.orderStatus} માં છે. પહેલા તેની ડિલિવરી પૂર્ણ થઈને પેમેન્ટ વેરિફાય થાય પછી જ આ ઓર્ડર Shipping માં મૂકી શકાશે.`
+                        );
+                    }
                 }
             }
 
@@ -5043,23 +5052,115 @@ export const getPartyLedger = async (req, res) => {
  */
 export const checkPartyActiveShipping = async (req, res) => {
     try {
-        const { userId, customerPhone, excludeOrderId } = req.query;
-        if (!userId && !customerPhone) {
+        const { userId, customerPhone, customerName, excludeOrderId } = req.query;
+
+        // 1. Gather all party identifiers (userIds, phone variations, shop names, customer names)
+        const userIds = new Set();
+        const phoneNumbers = new Set();
+        const cleanPhones = new Set();
+        const names = new Set();
+
+        if (userId && String(userId).trim()) userIds.add(String(userId).trim());
+        if (customerPhone && String(customerPhone).trim()) {
+            phoneNumbers.add(String(customerPhone).trim());
+            const clean = String(customerPhone).replace(/\D/g, '').slice(-10);
+            if (clean && clean.length >= 7) cleanPhones.add(clean);
+        }
+        if (customerName && String(customerName).trim().length >= 3) {
+            names.add(String(customerName).trim());
+        }
+
+        // If we have a userId, fetch the User record to get all their known numbers and names
+        if (userId) {
+            try {
+                const userObj = await User.findByPk(userId, {
+                    include: [{ model: BusinessProfile, as: 'businessProfile' }]
+                });
+                if (userObj) {
+                    if (userObj.number) {
+                        phoneNumbers.add(String(userObj.number).trim());
+                        const clean = String(userObj.number).replace(/\D/g, '').slice(-10);
+                        if (clean && clean.length >= 7) cleanPhones.add(clean);
+                    }
+                    if (userObj.phone) {
+                        phoneNumbers.add(String(userObj.phone).trim());
+                        const clean = String(userObj.phone).replace(/\D/g, '').slice(-10);
+                        if (clean && clean.length >= 7) cleanPhones.add(clean);
+                    }
+                    if (userObj.fullname && userObj.fullname.trim().length >= 3) {
+                        names.add(userObj.fullname.trim());
+                    }
+                    const shop = userObj.businessProfile?.shopName || userObj.businessProfile?.shopNameAlt;
+                    if (shop && shop.trim().length >= 3) {
+                        names.add(shop.trim());
+                    }
+                }
+            } catch (uErr) {
+                logger.warn(`[checkPartyActiveShipping] Could not fetch user details: ${uErr.message}`);
+            }
+        }
+
+        // If we have clean phone but no user record yet, try to find user by phone to expand identifiers
+        if (cleanPhones.size > 0 && userIds.size === 0) {
+            try {
+                for (const cp of cleanPhones) {
+                    const matchedUser = await User.findOne({
+                        where: {
+                            [Op.or]: [
+                                { number: { [Op.like]: `%${cp}` } },
+                                { phone: { [Op.like]: `%${cp}` } }
+                            ]
+                        },
+                        include: [{ model: BusinessProfile, as: 'businessProfile' }]
+                    });
+                    if (matchedUser) {
+                        userIds.add(String(matchedUser.id));
+                        if (matchedUser.fullname && matchedUser.fullname.trim().length >= 3) names.add(matchedUser.fullname.trim());
+                        const shop = matchedUser.businessProfile?.shopName || matchedUser.businessProfile?.shopNameAlt;
+                        if (shop && shop.trim().length >= 3) names.add(shop.trim());
+                    }
+                }
+            } catch (err) {
+                // ignore
+            }
+        }
+
+        if (userIds.size === 0 && phoneNumbers.size === 0 && cleanPhones.size === 0 && names.size === 0) {
             return sendSuccessResponse(res, HTTP_STATUS.OK, 'OK', { hasActiveShipping: false });
         }
 
+        // 2. Build Op.or conditions to match ANY order belonging to this party
+        const partyConditions = [];
+
+        if (userIds.size > 0) {
+            partyConditions.push({ userId: { [Op.in]: Array.from(userIds) } });
+        }
+
+        for (const phone of phoneNumbers) {
+            partyConditions.push({ customerNumber: phone });
+        }
+
+        for (const cp of cleanPhones) {
+            partyConditions.push({ customerNumber: { [Op.like]: `%${cp}%` } });
+        }
+
+        for (const name of names) {
+            partyConditions.push({ customerName: { [Op.iLike]: `%${name}%` } });
+        }
+
+        // 3. Statuses that represent active shipping / unverified delivery cycle
+        const activeStatuses = ['Shipping', 'Shipped', 'Payment Collect'];
+
         const whereClause = {
-            orderStatus: { [Op.in]: ['Shipping', 'Payment Collect'] }
+            orderStatus: { [Op.in]: activeStatuses },
+            [Op.or]: partyConditions
         };
 
         if (excludeOrderId) {
-            whereClause.id = { [Op.ne]: excludeOrderId };
-        }
-
-        if (userId) {
-            whereClause.userId = userId;
-        } else if (customerPhone) {
-            whereClause.customerNumber = customerPhone;
+            whereClause[Op.and] = [
+                { id: { [Op.ne]: excludeOrderId } },
+                { orderId: { [Op.ne]: excludeOrderId } }
+            ];
         }
 
         const activeOrder = await Order.findOne({
