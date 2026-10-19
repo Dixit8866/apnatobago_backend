@@ -305,45 +305,122 @@ export const createCustomSale = async (req, res) => {
             activeDeliveryNotice = String(userObj.deliveryNotice).replace(/^\[Delivery Note\]:\s*/i, '').trim();
         }
 
-        // 2. Create the Order
-        const newSale = await Order.create({
-            orderId: await generateUniqueDirectSaleId(),
-            userId: userId || null,
-            customerName: resolvedCustomerName,
-            customerNumber: resolvedCustomerNumber,
-            totalAmount: grandTotalAmount,
-            paidAmount,
-            dueAmount,
-            discount: totalDiscount,
-            paymentMethod: orderPaymentMethod,
-            paymentStatus,
-            orderStatus: status,
-            deliveryMode: deliveryMode || null,
-            deliveryRoundId: deliveryMode === 'Round' ? (deliveryRoundId || null) : null,
-            deliveryRoundTiming: deliveryMode === 'Round' ? (resolvedDeliveryRoundTiming || null) : null,
-            deliveredAt: status === 'Delivered' ? now : null,
-            shippingAt: (status === 'Shipping' || status === 'Delivered') ? now : null,
-            packedAt: (status === 'Packed' || status === 'Shipping' || status === 'Delivered') ? now : null,
-            packagingAt: (status === 'Packaging' || status === 'Packed' || status === 'Shipping' || status === 'Delivered') ? now : null,
-            saleType: 'Direct',
-            deliveryCharge,
-            createdByAdminId: req.user?.id,
-            notes,
-            deliveryNotice: activeDeliveryNotice || null,
-            routeCategoryId: resolvedRouteCategoryId,
-            godownId: req.body.godownId || null,
-            orderDate: orderDate || new Date().toISOString().split('T')[0],
-            deliveryDate: deliveryDate || null,
-            ...(orderDate ? { createdAt: new Date(orderDate) } : {})
-        }, { transaction: t });
+        // 2. Check for Existing Pending Order for this Party to Auto Merge
+        let targetSale = null;
+        let isMerged = false;
 
-        // 3. Create Order Items
-        const finalOrderItems = orderItemsData.map(item => ({
-            ...item,
-            orderId: newSale.id
-        }));
+        if (userId && status === 'Pending') {
+            const existingPendingOrder = await Order.findOne({
+                where: {
+                    userId,
+                    orderStatus: 'Pending'
+                },
+                order: [['createdAt', 'DESC']],
+                transaction: t
+            });
 
-        await OrderItem.bulkCreate(finalOrderItems, { transaction: t });
+            if (existingPendingOrder) {
+                targetSale = existingPendingOrder;
+                isMerged = true;
+                logger.info(`[createCustomSale] Found existing pending order #${targetSale.orderId} for party ${userId}. Auto-merging.`);
+            }
+        }
+
+        if (!targetSale) {
+            // Create new Order
+            targetSale = await Order.create({
+                orderId: await generateUniqueDirectSaleId(),
+                userId: userId || null,
+                customerName: resolvedCustomerName,
+                customerNumber: resolvedCustomerNumber,
+                totalAmount: grandTotalAmount,
+                paidAmount,
+                dueAmount,
+                discount: totalDiscount,
+                paymentMethod: orderPaymentMethod,
+                paymentStatus,
+                orderStatus: status,
+                deliveryMode: deliveryMode || null,
+                deliveryRoundId: deliveryMode === 'Round' ? (deliveryRoundId || null) : null,
+                deliveryRoundTiming: deliveryMode === 'Round' ? (resolvedDeliveryRoundTiming || null) : null,
+                deliveredAt: status === 'Delivered' ? now : null,
+                shippingAt: (status === 'Shipping' || status === 'Delivered') ? now : null,
+                packedAt: (status === 'Packed' || status === 'Shipping' || status === 'Delivered') ? now : null,
+                packagingAt: (status === 'Packaging' || status === 'Packed' || status === 'Shipping' || status === 'Delivered') ? now : null,
+                saleType: 'Direct',
+                deliveryCharge,
+                createdByAdminId: req.user?.id,
+                notes,
+                deliveryNotice: activeDeliveryNotice || null,
+                routeCategoryId: resolvedRouteCategoryId,
+                godownId: req.body.godownId || null,
+                orderDate: orderDate || new Date().toISOString().split('T')[0],
+                deliveryDate: deliveryDate || null,
+                ...(orderDate ? { createdAt: new Date(orderDate) } : {})
+            }, { transaction: t });
+
+            // 3. Create Order Items
+            const finalOrderItems = orderItemsData.map(item => ({
+                ...item,
+                orderId: targetSale.id
+            }));
+            await OrderItem.bulkCreate(finalOrderItems, { transaction: t });
+        } else {
+            // Merge Order Items into existing pending order
+            for (const item of orderItemsData) {
+                const matchedItem = await OrderItem.findOne({
+                    where: {
+                        orderId: targetSale.id,
+                        variantId: item.variantId,
+                        sellUnit: item.sellUnit || 'Base'
+                    },
+                    transaction: t
+                });
+
+                if (matchedItem) {
+                    const newQty = Number(matchedItem.quantity) + Number(item.quantity);
+                    await matchedItem.update({ quantity: newQty }, { transaction: t });
+                } else {
+                    await OrderItem.create({
+                        ...item,
+                        orderId: targetSale.id
+                    }, { transaction: t });
+                }
+            }
+
+            // Recalculate totals from all items in targetSale
+            const allItems = await OrderItem.findAll({
+                where: { orderId: targetSale.id },
+                transaction: t
+            });
+
+            let newSubtotal = 0;
+            for (const it of allItems) {
+                const price = Number(it.price || 0);
+                const qty = Number(it.quantity || 0);
+                const disc = Number(it.discount || 0);
+                newSubtotal += Math.max(0, (price * qty) - disc);
+            }
+
+            const newDeliveryCharge = Number(targetSale.deliveryCharge || 0) + Number(deliveryCharge || 0);
+            const newTotalAmount = Math.round((newSubtotal + newDeliveryCharge) * 100) / 100;
+            const newPaidAmount = Math.round((Number(targetSale.paidAmount || 0) + Number(paidAmount || 0)) * 100) / 100;
+            const newDueAmount = Math.max(0, Math.round((newTotalAmount - newPaidAmount) * 100) / 100);
+
+            let newPaymentStatus = 'Pending';
+            if (newPaidAmount >= newTotalAmount && newTotalAmount > 0) newPaymentStatus = 'Paid';
+            else if (newPaidAmount > 0) newPaymentStatus = 'Partial';
+
+            await targetSale.update({
+                totalAmount: newTotalAmount,
+                paidAmount: newPaidAmount,
+                dueAmount: newDueAmount,
+                deliveryCharge: newDeliveryCharge,
+                paymentStatus: newPaymentStatus,
+                isMerged: true,
+                ...(notes ? { notes: targetSale.notes ? `${targetSale.notes}\n${notes}` : notes } : {})
+            }, { transaction: t });
+        }
 
         // 4. Deduct Stock from Inventory
         for (const item of orderItemsData) {
@@ -381,7 +458,7 @@ export const createCustomSale = async (req, res) => {
                     secondaryPerPrimary: stock.secondaryPerPrimary,
                     totalQtyBaseUnits: deductFromThis,
                     balanceAfterBaseUnits: newTotalBaseUnits,
-                    note: `Direct Sale #${newSale.orderId}`,
+                    note: isMerged ? `Direct Sale (Merged into #${targetSale.orderId})` : `Direct Sale #${targetSale.orderId}`,
                     createdBy: req.user?.name || 'Admin'
                 }, { transaction: t });
 
@@ -390,7 +467,7 @@ export const createCustomSale = async (req, res) => {
             
             if (remainingToDeduct > 0) {
                 // For direct sales, we might allow negative stock or just log a warning
-                logger.warn(`[Direct Sale Stock Warning]: Order #${newSale.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId}`);
+                logger.warn(`[Direct Sale Stock Warning]: Order #${targetSale.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId}`);
             }
         }
 
@@ -399,7 +476,7 @@ export const createCustomSale = async (req, res) => {
             const paymentRecords = resolvedPayments.map(p => {
                 const isBank = p.method === 'Bank Account' || (p.bankSettingId && p.bankSettingId !== 'Cash');
                 return {
-                    orderId: newSale.id,
+                    orderId: targetSale.id,
                     amount: parseFloat(p.amount || 0),
                     paymentMethod: isBank ? 'ONLINE' : 'CASH',
                     bankSettingId: isBank ? p.bankSettingId : null,
@@ -424,7 +501,7 @@ export const createCustomSale = async (req, res) => {
                         where: {
                             userId: user.id,
                             dueAmount: { [Op.gt]: 0 },
-                            id: { [Op.ne]: newSale.id },
+                            id: { [Op.ne]: targetSale.id },
                             orderStatus: { [Op.notIn]: ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'] }
                         },
                         attributes: ['dueAmount'],
@@ -439,12 +516,12 @@ export const createCustomSale = async (req, res) => {
                     if (PartyBalanceLog) {
                         await PartyBalanceLog.create({
                             userId: user.id,
-                            orderId: newSale.id,
+                            orderId: targetSale.id,
                             type: 'DUE',
                             amount: creditUsed,
                             previousBalance: prevAvail,
                             newBalance: newAvail,
-                            note: `Custom Sale #${newSale.orderId} placed on Credit: -₹${creditUsed.toFixed(2)}. Remaining Available Credit: ₹${newAvail.toFixed(2)}`,
+                            note: `Custom Sale #${targetSale.orderId} placed on Credit: -₹${creditUsed.toFixed(2)}. Remaining Available Credit: ₹${newAvail.toFixed(2)}`,
                             createdByName: req.user?.fullname || 'Admin'
                         }, { transaction: t });
                     }
@@ -456,7 +533,7 @@ export const createCustomSale = async (req, res) => {
 
         // Broadcast socket real-time update
         try {
-            const freshSaleForSocket = await Order.findByPk(newSale.id, {
+            const freshSaleForSocket = await Order.findByPk(targetSale.id, {
                 include: [
                     {
                         model: User,
@@ -466,18 +543,20 @@ export const createCustomSale = async (req, res) => {
                     }
                 ]
             });
-            broadcastOrderCreated(freshSaleForSocket || newSale);
+            broadcastOrderCreated(freshSaleForSocket || targetSale);
         } catch (sErr) {
             logger.error(`[Socket Broadcast Error on createCustomSale]: ${sErr.message}`);
         }
 
         logActivity(req, {
             module: 'Custom Sales',
-            action: 'CREATE',
-            description: `Created Custom Sale #${newSale.orderId} for customer ${newSale.customerName || 'Customer'} (Total: ₹${newSale.totalAmount})`,
-            metadata: { orderId: newSale.id, orderNo: newSale.orderId, totalAmount: newSale.totalAmount }
+            action: isMerged ? 'UPDATE' : 'CREATE',
+            description: isMerged 
+                ? `Auto-merged Outlet Order into existing Pending Order #${targetSale.orderId} for customer ${targetSale.customerName || 'Customer'} (New Total: ₹${targetSale.totalAmount})`
+                : `Created Custom Sale #${targetSale.orderId} for customer ${targetSale.customerName || 'Customer'} (Total: ₹${targetSale.totalAmount})`,
+            metadata: { orderId: targetSale.id, orderNo: targetSale.orderId, totalAmount: targetSale.totalAmount, isMerged }
         });
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, "Custom sale recorded successfully.", newSale);
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, isMerged ? `Order auto-merged successfully into existing Pending Order #${targetSale.orderId}` : "Custom sale recorded successfully.", targetSale);
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Create Custom Sale Error]: ${error.message}`);

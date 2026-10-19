@@ -201,44 +201,130 @@ export const createOutletOrder = async (req, res) => {
         // Primary payment mode label
         const primaryMode = payments.length > 1 ? 'Multiple' : (payments[0]?.method || paymentMode || 'Cash');
 
-        // 2. Create OutletOrder record
-        const newOutletOrder = await OutletOrder.create({
-            orderId: generatedOrderId,
-            userId: userId || null,
-            customerName: finalCustomerName,
-            customerPhone: finalCustomerPhone,
-            shopName: finalShopName,
-            godownId: targetGodownId,
-            orderStatus: orderStatus || 'Completed',
-            fulfillmentStatus: 'Fulfilled',
-            paymentStatus,
-            totalAmount: totalOrderAmount,
-            discountAmount: Number(discountAmount || 0),
-            grandTotal: finalGrandTotal,
-            paidAmount: numPaidAmount,
-            paymentMode: primaryMode,
-            payments: payments,
-            deliveryDate: deliveryDate || new Date().toISOString().split('T')[0],
-            fulfillmentMode: 'Outlet',
-            note: note || 'Outlet Order Entry',
-            createdBy: req.body.createdBy || req.user?.name || req.user?.fullname || 'Admin'
-        }, { transaction: t });
+        // 2. Check for Existing Pending Outlet Order for this Party to Auto Merge
+        let targetOutletOrder = null;
+        let isMerged = false;
 
-        // 3. Create Items & Deduct Inventory Stock
-        for (const pItem of processedItems) {
-            await OutletOrderItem.create({
-                outletOrderId: newOutletOrder.id,
-                productId: pItem.productId,
-                variantId: pItem.variantId,
-                quantity: pItem.quantity,
-                price: pItem.price,
-                sellUnit: pItem.sellUnit,
-                discount: pItem.discount,
-                subtotal: pItem.subtotal,
-                variantInfo: pItem.variantInfo
+        if (userId && orderStatus === 'Pending') {
+            const existingPendingOutletOrder = await OutletOrder.findOne({
+                where: {
+                    userId,
+                    orderStatus: 'Pending'
+                },
+                order: [['createdAt', 'DESC']],
+                transaction: t
+            });
+
+            if (existingPendingOutletOrder) {
+                targetOutletOrder = existingPendingOutletOrder;
+                isMerged = true;
+                logger.info(`[createOutletOrder] Found existing pending outlet order #${targetOutletOrder.orderId} for party ${userId}. Auto-merging.`);
+            }
+        }
+
+        if (!targetOutletOrder) {
+            targetOutletOrder = await OutletOrder.create({
+                orderId: generatedOrderId,
+                userId: userId || null,
+                customerName: finalCustomerName,
+                customerPhone: finalCustomerPhone,
+                shopName: finalShopName,
+                godownId: targetGodownId,
+                orderStatus: orderStatus || 'Completed',
+                fulfillmentStatus: 'Fulfilled',
+                paymentStatus,
+                totalAmount: totalOrderAmount,
+                discountAmount: Number(discountAmount || 0),
+                grandTotal: finalGrandTotal,
+                paidAmount: numPaidAmount,
+                paymentMode: primaryMode,
+                payments: payments,
+                deliveryDate: deliveryDate || new Date().toISOString().split('T')[0],
+                fulfillmentMode: 'Outlet',
+                note: note || 'Outlet Order Entry',
+                createdBy: req.body.createdBy || req.user?.name || req.user?.fullname || 'Admin'
             }, { transaction: t });
 
-            // Stock Deduction Logic
+            // 3. Create Items
+            for (const pItem of processedItems) {
+                await OutletOrderItem.create({
+                    outletOrderId: targetOutletOrder.id,
+                    productId: pItem.productId,
+                    variantId: pItem.variantId,
+                    quantity: pItem.quantity,
+                    price: pItem.price,
+                    sellUnit: pItem.sellUnit,
+                    discount: pItem.discount,
+                    subtotal: pItem.subtotal,
+                    variantInfo: pItem.variantInfo
+                }, { transaction: t });
+            }
+        } else {
+            // Merge Items into existing pending outlet order
+            for (const pItem of processedItems) {
+                const matchedItem = await OutletOrderItem.findOne({
+                    where: {
+                        outletOrderId: targetOutletOrder.id,
+                        variantId: pItem.variantId,
+                        sellUnit: pItem.sellUnit || 'Base'
+                    },
+                    transaction: t
+                });
+
+                if (matchedItem) {
+                    const newQty = Number(matchedItem.quantity) + Number(pItem.quantity);
+                    const newSubtotal = Number(matchedItem.subtotal) + Number(pItem.subtotal);
+                    await matchedItem.update({
+                        quantity: newQty,
+                        subtotal: newSubtotal
+                    }, { transaction: t });
+                } else {
+                    await OutletOrderItem.create({
+                        outletOrderId: targetOutletOrder.id,
+                        productId: pItem.productId,
+                        variantId: pItem.variantId,
+                        quantity: pItem.quantity,
+                        price: pItem.price,
+                        sellUnit: pItem.sellUnit,
+                        discount: pItem.discount,
+                        subtotal: pItem.subtotal,
+                        variantInfo: pItem.variantInfo
+                    }, { transaction: t });
+                }
+            }
+
+            const allOutletItems = await OutletOrderItem.findAll({
+                where: { outletOrderId: targetOutletOrder.id },
+                transaction: t
+            });
+
+            const mergedTotalAmount = allOutletItems.reduce((sum, it) => sum + Number(it.subtotal || 0), 0);
+            const mergedDiscountAmount = Number(targetOutletOrder.discountAmount || 0) + Number(discountAmount || 0);
+            const mergedGrandTotal = Math.max(0, mergedTotalAmount - mergedDiscountAmount);
+            const mergedPaidAmount = Number(targetOutletOrder.paidAmount || 0) + Number(numPaidAmount || 0);
+
+            let mergedPaymentStatus = 'Pending';
+            if (mergedPaidAmount >= mergedGrandTotal && mergedGrandTotal > 0) mergedPaymentStatus = 'Paid';
+            else if (mergedPaidAmount > 0) mergedPaymentStatus = 'Partial';
+
+            const mergedPayments = [
+                ...(Array.isArray(targetOutletOrder.payments) ? targetOutletOrder.payments : []),
+                ...(Array.isArray(payments) ? payments : [])
+            ];
+
+            await targetOutletOrder.update({
+                totalAmount: mergedTotalAmount,
+                discountAmount: mergedDiscountAmount,
+                grandTotal: mergedGrandTotal,
+                paidAmount: mergedPaidAmount,
+                paymentStatus: mergedPaymentStatus,
+                payments: mergedPayments,
+                note: targetOutletOrder.note ? `${targetOutletOrder.note} | ${note || 'Merged'}` : note
+            }, { transaction: t });
+        }
+
+        // 3. Stock Deduction Logic
+        for (const pItem of processedItems) {
             const deductionRequired = Math.round(pItem.sellUnit === 'Inner'
                 ? pItem.quantity
                 : pItem.quantity * (pItem.variant.baseUnitsPerPack || 1));
@@ -290,19 +376,22 @@ export const createOutletOrder = async (req, res) => {
         // 4. Log Activity for Activity Monitoring
         logActivity(req, {
             module: 'Outlet Orders',
-            action: 'CREATE',
-            description: `Created Outlet Order #${generatedOrderId} for ${finalCustomerName} (${finalShopName}) with amount ₹${finalGrandTotal}`,
+            action: isMerged ? 'UPDATE' : 'CREATE',
+            description: isMerged
+                ? `Auto-merged Outlet Order into existing Pending Order #${targetOutletOrder.orderId} for ${finalCustomerName} (${finalShopName}) with amount ₹${targetOutletOrder.grandTotal}`
+                : `Created Outlet Order #${targetOutletOrder.orderId} for ${finalCustomerName} (${finalShopName}) with amount ₹${targetOutletOrder.grandTotal}`,
             metadata: {
-                orderId: newOutletOrder.id,
-                generatedOrderId,
-                grandTotal: finalGrandTotal,
+                orderId: targetOutletOrder.id,
+                generatedOrderId: targetOutletOrder.orderId,
+                grandTotal: targetOutletOrder.grandTotal,
                 godownId: targetGodownId,
-                itemsCount: processedItems.length
+                itemsCount: processedItems.length,
+                isMerged
             }
         });
 
-        return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Outlet order created successfully.', {
-            order: newOutletOrder
+        return sendSuccessResponse(res, HTTP_STATUS.CREATED, isMerged ? `Outlet order auto-merged successfully into existing Pending Order #${targetOutletOrder.orderId}` : 'Outlet order created successfully.', {
+            order: targetOutletOrder
         });
     } catch (error) {
         await t.rollback();
