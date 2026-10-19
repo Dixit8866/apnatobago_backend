@@ -43,17 +43,15 @@ import { Op } from 'sequelize';
  * TODAY'S PACKAGING / PACKED ORDERS REPORT (READ-ONLY)
  * =========================================================================================
  *
- * Lists every order that belongs to "today" (IST) in the Packaging / Packed stage and logs
- * complete details (party, route, godown, delivery boy, amounts, items, status history).
+ * Lists every order whose status in the database is RIGHT NOW "Packaging" or "Packed"
+ * (the admin panel no longer has tabs for these statuses, so such orders are invisible there)
+ * and logs complete details (party, route, godown, delivery boy, amounts, items, history).
  *
- * An order is picked up if ANY of these match (each order shows which rule matched it):
- *   [CURRENT]  orderStatus is Packaging/Packed AND it is today's order — same rule as the
- *              admin Order List tab: deliveryDate = today, or (deliveryDate empty AND created today)
- *   [STAMPED]  packagingAt or packedAt timestamp falls inside today — catches orders that
- *              went to Packaging/Packed today but whose status has changed since
- *   [ACTIVITY] an activity log entry today moved the order into / out of Packaging/Packed
+ * Deleted / merged orders and orders already moved to Shipping etc. are NOT listed.
  *
- * Soft-deleted orders are included too and flagged as DELETED.
+ * An order counts as "today's" when ANY of these fall on the target date (IST):
+ *   deliveryDate, createdAt, packagingAt, packedAt
+ * Orders still in Packaging/Packed from older dates are listed in a short section at the end.
  *
  * 🛡️ This script only READS. Nothing is updated or deleted.
  *
@@ -75,13 +73,10 @@ import { Op } from 'sequelize';
  *   # 4. Only one status
  *   node scripts/list-today-packaging-packed-orders.js --status=Packaging
  *
- *   # 5. Only orders that are STILL in Packaging/Packed right now (skip STAMPED/ACTIVITY rules)
- *   node scripts/list-today-packaging-packed-orders.js --current-only
- *
- *   # 6. Every order currently in Packaging/Packed, whatever its date
+ *   # 5. Every order currently in Packaging/Packed, whatever its date
  *   node scripts/list-today-packaging-packed-orders.js --all-dates
  *
- *   # 7. Also save raw JSON
+ *   # 6. Also save raw JSON
  *   node scripts/list-today-packaging-packed-orders.js --json
  * =========================================================================================
  */
@@ -112,7 +107,6 @@ const statuses = (getArg('status') || 'Packaging,Packed')
     .map(s => s.trim())
     .filter(Boolean);
 
-const currentOnly = hasFlag('current-only');
 const allDates = hasFlag('all-dates');
 const saveJson = hasFlag('json');
 
@@ -161,79 +155,42 @@ const fmtAddress = (addr) => {
 const pad = (s, n) => String(s ?? '').padEnd(n).slice(0, n);
 const padL = (s, n) => String(s ?? '').padStart(n).slice(-n);
 
+const inDay = (d) => !!d && new Date(d) >= startOfDay && new Date(d) <= endOfDay;
+
+// Which fields make this order "today's"
+const todayReasons = (o) => [
+    o.deliveryDate === targetDate && 'Delivery date',
+    inDay(o.createdAt) && 'Created',
+    inDay(o.packagingAt) && 'Packaging at',
+    inDay(o.packedAt) && 'Packed at'
+].filter(Boolean);
+
 // ─── Main ────────────────────────────────────────────────────────────────────────────────
 const run = async () => {
     await sequelize.authenticate();
 
     log('='.repeat(100));
-    log(`  PACKAGING / PACKED ORDERS REPORT`);
+    log(`  PACKAGING / PACKED ORDERS REPORT  (current status in database)`);
     log('='.repeat(100));
     log(`  Environment : ${process.env.NODE_ENV || 'development'}  (DB: ${process.env.DB_NAME}@${process.env.DB_HOST})`);
-    log(`  Date (IST)  : ${allDates ? 'ALL DATES' : targetDate}`);
+    log(`  Date (IST)  : ${allDates ? 'ALL DATES' : `${targetDate}  (deliveryDate / createdAt / packagingAt / packedAt on this date)`}`);
     log(`  Statuses    : ${statuses.join(', ')}`);
-    log(`  Mode        : ${currentOnly || allDates ? 'Current status only' : 'Current status + reached today (timestamps / activity log)'}`);
     log(`  Generated   : ${fmtIST(new Date())}`);
     log('='.repeat(100));
 
-    // reasons: Map<orderUuid, Set<'CURRENT'|'STAMPED'|'ACTIVITY'>>
-    const reasons = new Map();
-    const addReason = (id, reason) => {
-        if (!reasons.has(id)) reasons.set(id, new Set());
-        reasons.get(id).add(reason);
-    };
-
-    // Rule 1: CURRENT — status is Packaging/Packed and it is today's order (admin tab logic)
-    const currentWhere = { orderStatus: { [Op.in]: statuses } };
+    // Orders whose status RIGHT NOW is Packaging/Packed (soft-deleted / merged orders are skipped)
+    const where = { orderStatus: { [Op.in]: statuses } };
     if (!allDates) {
-        currentWhere[Op.or] = [
+        where[Op.or] = [
             { deliveryDate: targetDate },
-            { deliveryDate: null, createdAt: { [Op.between]: [startOfDay, endOfDay] } }
+            { createdAt: { [Op.between]: [startOfDay, endOfDay] } },
+            { packagingAt: { [Op.between]: [startOfDay, endOfDay] } },
+            { packedAt: { [Op.between]: [startOfDay, endOfDay] } }
         ];
     }
-    const currentRows = await Order.findAll({ where: currentWhere, attributes: ['id'], paranoid: false });
-    currentRows.forEach(o => addReason(o.id, 'CURRENT'));
 
-    if (!currentOnly && !allDates) {
-        // Rule 2: STAMPED — packagingAt / packedAt set today
-        const stampOr = [];
-        if (statuses.includes('Packaging')) stampOr.push({ packagingAt: { [Op.between]: [startOfDay, endOfDay] } });
-        if (statuses.includes('Packed')) stampOr.push({ packedAt: { [Op.between]: [startOfDay, endOfDay] } });
-        if (stampOr.length) {
-            const stampedRows = await Order.findAll({ where: { [Op.or]: stampOr }, attributes: ['id'], paranoid: false });
-            stampedRows.forEach(o => addReason(o.id, 'STAMPED'));
-        }
-
-        // Rule 3: ACTIVITY — status change logged today into / out of the selected statuses
-        const activityRows = await ActivityLog.findAll({
-            where: {
-                createdAt: { [Op.between]: [startOfDay, endOfDay] },
-                [Op.or]: [
-                    sequelize.where(sequelize.literal(`"metadata"->>'newStatus'`), { [Op.in]: statuses }),
-                    sequelize.where(sequelize.literal(`"metadata"->>'prevStatus'`), { [Op.in]: statuses })
-                ]
-            },
-            attributes: ['metadata']
-        });
-        activityRows.forEach(a => {
-            const oid = a.metadata?.orderId;
-            if (oid && /^[0-9a-f-]{36}$/i.test(oid)) addReason(oid, 'ACTIVITY');
-        });
-    }
-
-    const orderIds = [...reasons.keys()];
-
-    if (!orderIds.length) {
-        log('');
-        log(`  ⚠️  No ${statuses.join('/')} orders found for ${allDates ? 'any date' : targetDate}.`);
-        await reportStale();
-        finish([]);
-        return;
-    }
-
-    // Full details
     const orders = await Order.findAll({
-        where: { id: { [Op.in]: orderIds } },
-        paranoid: false,
+        where,
         include: [
             {
                 model: User,
@@ -258,46 +215,40 @@ const run = async () => {
                 ]
             }
         ],
-        order: [['createdAt', 'ASC'], [{ model: OrderItem, as: 'items' }, 'createdAt', 'ASC']]
+        order: [['orderStatus', 'ASC'], ['createdAt', 'ASC'], [{ model: OrderItem, as: 'items' }, 'createdAt', 'ASC']]
     });
 
-    // Activity history for these orders on the target date
-    const historyByOrder = new Map();
-    if (!allDates) {
-        const history = await ActivityLog.findAll({
-            where: {
-                createdAt: { [Op.between]: [startOfDay, endOfDay] },
-                [Op.and]: [sequelize.where(sequelize.literal(`"metadata"->>'orderId'`), { [Op.in]: orderIds })]
-            },
-            attributes: ['action', 'description', 'userName', 'userType', 'metadata', 'createdAt'],
-            order: [['createdAt', 'ASC']]
-        });
-        history.forEach(h => {
-            const oid = h.metadata.orderId;
-            if (!historyByOrder.has(oid)) historyByOrder.set(oid, []);
-            historyByOrder.get(oid).push(h);
-        });
+    if (!orders.length) {
+        log('');
+        log(`  ✅ No order is in ${statuses.join('/')} status for ${allDates ? 'any date' : targetDate}.`);
+        await reportOlder(new Set());
+        finish([]);
+        return;
     }
 
-    // Product-wise totals (only for orders still in the selected statuses and not deleted)
-    const productTotals = new Map();
-    const summary = {
-        byStatus: {},
-        byRoute: {},
-        byGodown: {},
-        stillInStage: 0,
-        movedOut: 0,
-        deleted: 0,
-        totalAmount: 0,
-        totalItems: 0
-    };
+    const orderIds = orders.map(o => o.id);
 
+    // Full status-change history of these orders (activity log)
+    const historyByOrder = new Map();
+    const history = await ActivityLog.findAll({
+        where: {
+            [Op.and]: [sequelize.where(sequelize.literal(`"metadata"->>'orderId'`), { [Op.in]: orderIds })]
+        },
+        attributes: ['action', 'description', 'userName', 'userType', 'metadata', 'createdAt'],
+        order: [['createdAt', 'ASC']]
+    });
+    history.forEach(h => {
+        const oid = h.metadata.orderId;
+        if (!historyByOrder.has(oid)) historyByOrder.set(oid, []);
+        historyByOrder.get(oid).push(h);
+    });
+
+    const productTotals = new Map();
+    const summary = { byStatus: {}, byRoute: {}, byGodown: {}, totalAmount: 0, totalItems: 0 };
     const jsonOut = [];
 
     orders.forEach((o, idx) => {
-        const r = [...(reasons.get(o.id) || [])];
-        const isDeleted = !!o.deletedAt;
-        const inStage = statuses.includes(o.orderStatus);
+        const why = allDates ? [] : todayReasons(o);
 
         const partyName = o.user?.businessProfile?.shopName || o.user?.fullname || o.customerName || '-';
         const ownerName = o.user?.fullname || o.customerName || '-';
@@ -308,16 +259,13 @@ const run = async () => {
         summary.byStatus[o.orderStatus] = (summary.byStatus[o.orderStatus] || 0) + 1;
         summary.byRoute[routeName] = (summary.byRoute[routeName] || 0) + 1;
         summary.byGodown[godownName] = (summary.byGodown[godownName] || 0) + 1;
-        if (isDeleted) summary.deleted++;
-        if (inStage && !isDeleted) summary.stillInStage++;
-        if (!inStage) summary.movedOut++;
         summary.totalAmount += num(o.totalAmount);
         summary.totalItems += o.items.length;
 
         log('');
         log('-'.repeat(100));
-        log(`  #${idx + 1}  ORDER ${o.orderId}   [${o.orderStatus}]${isDeleted ? '   ❗ DELETED' : ''}${!inStage ? `   ⚠️ NOW "${o.orderStatus}"` : ''}`);
-        log(`      Matched by      : ${r.join(', ')}`);
+        log(`  #${idx + 1}  ORDER ${o.orderId}   [${o.orderStatus}]`);
+        if (why.length) log(`      Today's because : ${why.join(', ')}`);
         log('-'.repeat(100));
         log(`  Order UUID        : ${o.id}`);
         log(`  Party / Shop      : ${partyName}`);
@@ -335,10 +283,7 @@ const run = async () => {
         log(`  Created At        : ${fmtIST(o.createdAt)}`);
         log(`  Packaging At      : ${fmtIST(o.packagingAt)}`);
         log(`  Packed At         : ${fmtIST(o.packedAt)}`);
-        log(`  Shipping At       : ${fmtIST(o.shippingAt)}`);
-        log(`  Delivered At      : ${fmtIST(o.deliveredAt)}`);
         log(`  Updated At        : ${fmtIST(o.updatedAt)}`);
-        if (isDeleted) log(`  Deleted At        : ${fmtIST(o.deletedAt)}`);
         log('');
         log(`  Payment Method    : ${o.paymentMethod}    Payment Status: ${o.paymentStatus}    Collect Status: ${o.paymentCollectStatus}`);
         log(`  Total Amount      : ${money(o.totalAmount)}    Paid: ${money(o.paidAmount)}    Due: ${money(o.dueAmount)}`);
@@ -353,27 +298,25 @@ const run = async () => {
         log(`  ${pad('No', 4)}${pad('Product', 40)}${pad('Variant', 16)}${padL('Qty', 8)} ${pad('Unit', 6)}${padL('Price', 11)}${padL('Disc', 10)}${padL('Line Total', 13)}`);
         let itemsTotal = 0;
         o.items.forEach((it, i) => {
-            const productName = pickName(it.product?.name) || it.variantInfo?.productName && pickName(it.variantInfo.productName) || '-';
+            const productName = pickName(it.product?.name) || pickName(it.variantInfo?.productName) || '-';
             const variant = it.variant?.volume || it.variantInfo?.volume || '-';
             const extra = it.variantInfo?.extra ? ` ${it.variantInfo.extra}` : '';
             const lineTotal = num(it.price) * num(it.quantity) - num(it.discount);
             itemsTotal += lineTotal;
             log(`  ${pad(i + 1, 4)}${pad(productName, 40)}${pad(variant + extra, 16)}${padL(num(it.quantity), 8)} ${pad(it.sellUnit, 6)}${padL(num(it.price).toFixed(2), 11)}${padL(num(it.discount).toFixed(2), 10)}${padL(lineTotal.toFixed(2), 13)}`);
 
-            if (inStage && !isDeleted) {
-                const key = `${it.productId}|${it.variantId}|${it.sellUnit}`;
-                const prev = productTotals.get(key) || { productName, variant: variant + extra, sellUnit: it.sellUnit, qty: 0, orders: 0 };
-                prev.qty += num(it.quantity);
-                prev.orders += 1;
-                productTotals.set(key, prev);
-            }
+            const key = `${it.productId}|${it.variantId}|${it.sellUnit}`;
+            const prev = productTotals.get(key) || { productName, variant: variant + extra, sellUnit: it.sellUnit, qty: 0, orders: 0 };
+            prev.qty += num(it.quantity);
+            prev.orders += 1;
+            productTotals.set(key, prev);
         });
         log(`  ${' '.repeat(95)}${padL(itemsTotal.toFixed(2), 13)}`);
 
         const hist = historyByOrder.get(o.id) || [];
         if (hist.length) {
             log('');
-            log(`  ACTIVITY ON ${targetDate}`);
+            log(`  ACTIVITY HISTORY`);
             hist.forEach(h => {
                 const m = h.metadata || {};
                 const change = m.prevStatus || m.newStatus ? `  [${m.prevStatus || '?'} → ${m.newStatus || '?'}]` : '';
@@ -382,9 +325,7 @@ const run = async () => {
         }
 
         jsonOut.push({
-            matchedBy: r,
-            isDeleted,
-            stillInStage: inStage,
+            todayReasons: why,
             ...o.toJSON(),
             activity: hist.map(h => h.toJSON())
         });
@@ -395,14 +336,11 @@ const run = async () => {
     log('='.repeat(100));
     log('  SUMMARY');
     log('='.repeat(100));
-    log(`  Total orders found              : ${orders.length}`);
-    log(`  Still in ${statuses.join('/')} (not deleted) : ${summary.stillInStage}`);
-    log(`  Moved to another status         : ${summary.movedOut}`);
-    log(`  Deleted (soft)                  : ${summary.deleted}`);
+    log(`  Total orders in ${statuses.join('/')} : ${orders.length}`);
     log(`  Total order value               : ${money(summary.totalAmount)}`);
     log(`  Total item lines                : ${summary.totalItems}`);
     log('');
-    log('  By current status:');
+    log('  By status:');
     Object.entries(summary.byStatus).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => log(`    ${pad(k, 30)} ${v}`));
     log('');
     log('  By route:');
@@ -413,7 +351,7 @@ const run = async () => {
 
     if (productTotals.size) {
         log('');
-        log(`  PRODUCT-WISE QTY (orders still in ${statuses.join('/')})`);
+        log(`  PRODUCT-WISE QTY`);
         log(`  ${pad('Product', 44)}${pad('Variant', 18)}${pad('Unit', 8)}${padL('Qty', 10)}${padL('Orders', 8)}`);
         [...productTotals.values()]
             .sort((a, b) => a.productName.localeCompare(b.productName))
@@ -421,30 +359,35 @@ const run = async () => {
     }
 
     log('');
+    log('  QUICK LIST');
+    log(`  ${pad('No', 5)}${pad('Order', 17)}${pad('Status', 11)}${pad('Party / Shop', 30)}${pad('Phone', 15)}${pad('Route', 22)}${padL('Amount', 12)}  ${pad('Delivery', 11)}`);
+    orders.forEach((o, i) => {
+        const partyName = o.user?.businessProfile?.shopName || o.user?.fullname || o.customerName || '-';
+        log(`  ${pad(i + 1, 5)}${pad(o.orderId, 17)}${pad(o.orderStatus, 11)}${pad(partyName, 30)}${pad(o.user?.number || o.customerNumber || '-', 15)}${pad(o.routeCategory?.name || '-', 22)}${padL(num(o.totalAmount).toFixed(2), 12)}  ${pad(o.deliveryDate || '-', 11)}`);
+    });
+
+    log('');
     log('  ORDER NUMBERS');
     log(`  ${orders.map(o => o.orderId).join(', ')}`);
 
-    await reportStale();
+    await reportOlder(new Set(orderIds));
     finish(jsonOut);
 };
 
-// Orders still sitting in Packaging/Packed from OTHER dates — these don't show in the admin "today" tabs
-const reportStale = async () => {
+// Orders still sitting in Packaging/Packed that are NOT from the target date
+const reportOlder = async (shownIds) => {
     if (allDates) return;
     const inStageNow = await Order.findAll({
         where: { orderStatus: { [Op.in]: statuses } },
-        attributes: ['orderId', 'orderStatus', 'deliveryDate', 'createdAt'],
+        attributes: ['id', 'orderId', 'orderStatus', 'deliveryDate', 'createdAt', 'packagingAt', 'packedAt'],
         order: [['createdAt', 'ASC']]
     });
-    const isTodays = (o) => o.deliveryDate
-        ? o.deliveryDate === targetDate
-        : (o.createdAt >= startOfDay && o.createdAt <= endOfDay);
-    const stale = inStageNow.filter(o => !isTodays(o));
-    if (!stale.length) return;
+    const older = inStageNow.filter(o => !shownIds.has(o.id));
+    if (!older.length) return;
 
     log('');
-    log(`  ⚠️  ${stale.length} order(s) are in ${statuses.join('/')} with a DIFFERENT date (hidden from today's admin tab):`);
-    stale.forEach(s => log(`    ${pad(s.orderId, 20)} ${pad(s.orderStatus, 12)} deliveryDate: ${pad(s.deliveryDate || '-', 12)} created: ${fmtIST(s.createdAt)}`));
+    log(`  ⚠️  ${older.length} more order(s) are in ${statuses.join('/')} from OTHER dates:`);
+    older.forEach(s => log(`    ${pad(s.orderId, 16)} ${pad(s.orderStatus, 11)} delivery: ${pad(s.deliveryDate || '-', 11)} created: ${fmtIST(s.createdAt)}   packaging: ${fmtIST(s.packagingAt)}`));
     log(`  Run with --all-dates to see their full details.`);
 };
 
