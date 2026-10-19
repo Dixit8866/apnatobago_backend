@@ -374,8 +374,8 @@ export const getAllOrders = async (req, res) => {
             } : { createdAt: { [Op.between]: [sDate, eDate] } };
         };
 
-        // Restrict historical statuses to today by default unless filtered; keep active workflow tabs (Pending, Packaging, Packed, Shipping, Payment Collect, Payment Confirm) unrestricted so all open orders appear
-        const activeWorkflowStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Payment Collect', 'Payment Confirm', 'Pending Due Order', 'All'];
+        // Restrict historical statuses to today by default unless filtered; keep active workflow tabs (Pending, Shipping, Payment Collect, Payment Confirm) unrestricted so all open orders appear
+        const activeWorkflowStatuses = ['Pending', 'Shipping', 'Payment Collect', 'Payment Confirm', 'Pending Due Order', 'All'];
         if (!startDate && !endDate && !date && status && !activeWorkflowStatuses.includes(status)) {
             dateClause = buildDateClause(startOfTodayUTC, endOfTodayUTC, status);
         }
@@ -1216,8 +1216,6 @@ export const getAllOrders = async (req, res) => {
             Today: todayCount,
             UserCart: userCartCount,
             Pending: pendingCount,
-            Packaging: packagingCount,
-            Packed: packedCount,
             Shipping: shippingCount,
             Delivered: deliveredCount,
             'Payment Collect': paymentCollectCount,

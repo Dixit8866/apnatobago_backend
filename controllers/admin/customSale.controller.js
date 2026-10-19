@@ -572,10 +572,8 @@ export const getCustomSales = async (req, res) => {
             countWhere.godownId = godownId;
         }
 
-        const [pendingCount, packagingCount, packedCount, shippingCount, deliveredCount, paymentCollectCount, cancelledCount, todayCount] = await Promise.all([
+        const [pendingCount, shippingCount, deliveredCount, paymentCollectCount, cancelledCount, todayCount] = await Promise.all([
             Order.count({ where: { ...countWhere, orderStatus: 'Pending' } }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Packaging' } }),
-            Order.count({ where: { ...countWhere, orderStatus: 'Packed' } }),
             Order.count({ where: { ...countWhere, orderStatus: 'Shipping' } }),
             Order.count({ where: { ...countWhere, orderStatus: 'Delivered' } }),
             Order.count({ where: { ...countWhere, orderStatus: 'Payment Collect' } }),
@@ -588,8 +586,6 @@ export const getCustomSales = async (req, res) => {
             '': responseData.totalRecords,
             Today: todayCount,
             Pending: pendingCount,
-            Packaging: packagingCount,
-            Packed: packedCount,
             Shipping: shippingCount,
             Delivered: deliveredCount,
             'Payment Collect': paymentCollectCount,
