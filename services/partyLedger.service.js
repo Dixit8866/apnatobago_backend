@@ -1102,6 +1102,24 @@ export const updatePartyLedgerTransaction = async ({
         const updatedById = adminUser?.id || null;
 
         if (order) {
+            // Validate: only allow editing transactions within the last 3 dates (Today, Yesterday, Day Before Yesterday)
+            const orderDate = order.createdAt ? new Date(order.createdAt) : null;
+            if (orderDate && !isNaN(orderDate.getTime())) {
+                const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+                const todayStr = `${istNow.getUTCFullYear()}-${String(istNow.getUTCMonth() + 1).padStart(2, '0')}-${String(istNow.getUTCDate()).padStart(2, '0')}`;
+                const todayDate = new Date(`${todayStr}T00:00:00`);
+                const cutoffDate = new Date(todayDate);
+                cutoffDate.setDate(cutoffDate.getDate() - 2);
+                const cutoffStr = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
+
+                const orderIst = new Date(orderDate.getTime() + 5.5 * 60 * 60 * 1000);
+                const orderDateStr = `${orderIst.getUTCFullYear()}-${String(orderIst.getUTCMonth() + 1).padStart(2, '0')}-${String(orderIst.getUTCDate()).padStart(2, '0')}`;
+
+                if (orderDateStr < cutoffStr) {
+                    throw new Error('માત્ર છેલ્લા ૩ દિવસ (Last 3 dates) ના રેકોર્ડ જ એડિટ કરી શકાય છે.');
+                }
+            }
+
             const payments = order.payments || [];
             const currentCash = payments
                 .filter(p => String(p.paymentMethod || '').toUpperCase() === 'CASH')
