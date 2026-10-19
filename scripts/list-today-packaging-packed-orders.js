@@ -459,12 +459,12 @@ const finish = (jsonOut) => {
     }
 };
 
+// models/index.js fires non-blocking schema migrations on import; closing the pool here would make
+// them spam "connection manager was closed" warnings, so just exit once the report is written.
 try {
     await run();
-    await sequelize.close();
     process.exit(0);
 } catch (err) {
     console.error('❌ Script failed:', err);
-    try { await sequelize.close(); } catch { /* ignore */ }
     process.exit(1);
 }
