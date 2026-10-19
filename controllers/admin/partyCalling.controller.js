@@ -193,8 +193,9 @@ export const getDailyPartyCalls = async (req, res, next) => {
             return userJson;
         });
 
-        // Compute tab counts in order: Pending Call, Refollowup Call, Rekyc Call, Order Complete, All
+        // Compute tab counts in order: Order Pending, Pending Call, Refollowup Call, Rekyc Call, Order Complete, All
         const tabCounts = {
+            'Order Pending': 0,
             'Pending Call': 0,
             'Refollowup Call': 0,
             'Rekyc Call': 0,
@@ -208,16 +209,25 @@ export const getDailyPartyCalls = async (req, res, next) => {
             const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
             if (matchRoute && matchTiming && matchBillSlot) {
                 tabCounts.All++;
+                if (u.callingStatus !== 'Order Complete') {
+                    tabCounts['Order Pending']++;
+                }
                 if (tabCounts[u.callingStatus] !== undefined) {
                     tabCounts[u.callingStatus]++;
                 }
             }
         });
 
+        const checkMatchStatus = (userStatus, filterStatus) => {
+            if (!filterStatus || filterStatus === 'All') return true;
+            if (filterStatus === 'Order Pending') return userStatus !== 'Order Complete';
+            return userStatus === filterStatus;
+        };
+
         // Compute route counts (filtered by status tab, deliveryRoundTiming, and billPrintTime, but NOT routeCategoryId)
         const routeCounts = {};
         mappedUsers.forEach(u => {
-            const matchStatus = !status || status === 'All' || u.callingStatus === status;
+            const matchStatus = checkMatchStatus(u.callingStatus, status);
             const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
             const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
             if (matchStatus && matchTiming && matchBillSlot) {
@@ -230,7 +240,7 @@ export const getDailyPartyCalls = async (req, res, next) => {
         // Compute timing counts (filtered by status tab, routeCategoryId, and billPrintTime, but NOT deliveryRoundTiming)
         const timingCounts = {};
         mappedUsers.forEach(u => {
-            const matchStatus = !status || status === 'All' || u.callingStatus === status;
+            const matchStatus = checkMatchStatus(u.callingStatus, status);
             const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
             const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
             if (matchStatus && matchRoute && matchBillSlot) {
@@ -242,15 +252,15 @@ export const getDailyPartyCalls = async (req, res, next) => {
 
         // Filter users to display (matching status, routeCategoryId, deliveryRoundTiming, and billPrintTime)
         const filteredUsers = mappedUsers.filter(u => {
-            const matchStatus = !status || status === 'All' || u.callingStatus === status;
+            const matchStatus = checkMatchStatus(u.callingStatus, status);
             const matchRoute = !routeCategoryId || u.routeCategoryId === routeCategoryId;
             const matchTiming = !deliveryRoundTiming || u.deliveryRoundTiming === deliveryRoundTiming;
             const matchBillSlot = !normBillSlotFilter || normalizeSlot(u.billPrintTime) === normBillSlotFilter;
             return matchStatus && matchRoute && matchTiming && matchBillSlot;
         });
 
-        // Sort users: For 'Pending Call', order by lastOrderDate ASC (oldest last order date / most days without order first)
-        if (status === 'Pending Call' || !status) {
+        // Sort users: For 'Pending Call' or 'Order Pending', order by lastOrderDate ASC (oldest last order date / most days without order first)
+        if (status === 'Pending Call' || status === 'Order Pending' || !status) {
             filteredUsers.sort((a, b) => {
                 const timeA = a.lastOrderDate ? new Date(a.lastOrderDate).getTime() : Infinity;
                 const timeB = b.lastOrderDate ? new Date(b.lastOrderDate).getTime() : Infinity;
