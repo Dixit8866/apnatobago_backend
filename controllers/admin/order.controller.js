@@ -1331,6 +1331,26 @@ export const updateOrderStatus = async (req, res) => {
 
         const prevStatus = order.orderStatus;
         if (orderStatus) {
+            // Check if party already has an active shipping order when moving from Pending to Shipping
+            if (orderStatus === 'Shipping' && prevStatus !== 'Shipping' && (order.userId || order.customerNumber)) {
+                const activeShippingOrder = await Order.findOne({
+                    where: {
+                        id: { [Op.ne]: order.id },
+                        orderStatus: { [Op.in]: ['Shipping', 'Payment Collect'] },
+                        ...(order.userId ? { userId: order.userId } : { customerNumber: order.customerNumber })
+                    },
+                    attributes: ['id', 'orderId', 'orderStatus', 'customerName', 'totalAmount']
+                });
+
+                if (activeShippingOrder) {
+                    return sendErrorResponse(
+                        res,
+                        HTTP_STATUS.BAD_REQUEST,
+                        `આ પાર્ટીનો ઓર્ડર #${activeShippingOrder.orderId} પહેલેથી જ ${activeShippingOrder.orderStatus} માં છે. પહેલા તેની ડિલિવરી પૂર્ણ થઈને પેમેન્ટ વેરિફાય થાય પછી જ આ ઓર્ડર Shipping માં મૂકી શકાશે.`
+                    );
+                }
+            }
+
             const validStatuses = ['Pending', 'Packaging', 'Packed', 'Shipping', 'Delivered', 'Payment Collect', 'Payment Verify', 'Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
             if (!validStatuses.includes(orderStatus)) {
                 return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid order status.");
@@ -5013,6 +5033,54 @@ export const getPartyLedger = async (req, res) => {
     } catch (err) {
         logger.error(`[getPartyLedger] Error: ${err.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to fetch party ledger.', err.message);
+    }
+};
+
+/**
+ * @desc Check if a customer/party has any active order currently in Shipping or Payment Collect
+ * @route GET /api/admin/orders/check-party-shipping
+ * @access Private (Admin)
+ */
+export const checkPartyActiveShipping = async (req, res) => {
+    try {
+        const { userId, customerPhone, excludeOrderId } = req.query;
+        if (!userId && !customerPhone) {
+            return sendSuccessResponse(res, HTTP_STATUS.OK, 'OK', { hasActiveShipping: false });
+        }
+
+        const whereClause = {
+            orderStatus: { [Op.in]: ['Shipping', 'Payment Collect'] }
+        };
+
+        if (excludeOrderId) {
+            whereClause.id = { [Op.ne]: excludeOrderId };
+        }
+
+        if (userId) {
+            whereClause.userId = userId;
+        } else if (customerPhone) {
+            whereClause.customerNumber = customerPhone;
+        }
+
+        const activeOrder = await Order.findOne({
+            where: whereClause,
+            attributes: ['id', 'orderId', 'orderStatus', 'customerName', 'customerNumber', 'totalAmount', 'createdAt'],
+            order: [['createdAt', 'DESC']]
+        });
+
+        if (activeOrder) {
+            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Active shipping order found', {
+                hasActiveShipping: true,
+                order: activeOrder
+            });
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'No active shipping order', {
+            hasActiveShipping: false
+        });
+    } catch (err) {
+        logger.error(`[checkPartyActiveShipping Error]: ${err.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to check active shipping orders.', err.message);
     }
 };
 
