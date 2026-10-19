@@ -2625,7 +2625,10 @@ export const settlePastDuePayment = async (req, res) => {
 export const getOrderDetails = async (req, res) => {
     try {
         const { id } = req.params;
-        const isUUID = id.includes('-');
+        if (id === 'check-party-shipping') {
+            return checkPartyActiveShipping(req, res);
+        }
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
         const queryOption = isUUID ? { id } : { orderId: id };
 
         const order = await Order.findOne({

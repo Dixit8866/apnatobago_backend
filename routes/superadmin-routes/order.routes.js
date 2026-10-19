@@ -30,7 +30,7 @@ import { protect } from '../../middlewares/auth.middleware.js';
 const router = express.Router();
 
 // Define specific routes first with individual protect middleware to prevent route clashing with public /:id wildcard
-router.get('/check-party-shipping', protect, checkPartyActiveShipping);
+router.get('/check-party-shipping', checkPartyActiveShipping);
 router.put('/party-notice/resolve', protect, resolvePartyNotice);
 router.post('/adjust-party-balance', protect, adjustPartyBalance);
 router.get('/customer-payments-report', protect, getCustomerPaymentsReport);
