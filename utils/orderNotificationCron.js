@@ -10,6 +10,9 @@ const CANCELLED_ORDER_STATUSES = ['Cancelled', 'Admin Cancel', 'User Cancel', 'D
 // Each bill print slot ("04:00 PM") covers one hour: 04:00 PM to 05:00 PM
 const BILL_SLOT_DURATION_MINUTES = 60;
 
+// Printed at startup and every minute so the deployed build is easy to confirm in pm2 logs
+const CRON_BUILD = 'order-notification-debug-v2';
+
 /**
  * Current Asia/Kolkata date (YYYY-MM-DD) and minutes since midnight
  */
@@ -101,6 +104,7 @@ export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay 
     });
 
     const dueUsers = candidates.filter(u => isDueNow(u.billPrintTime, minuteOfDay, intervalMinutes));
+    console.log(`[DailyOrderCron Debug] IST ${formatMinuteOfDay(minuteOfDay)} | Interval: ${intervalMinutes}m | Verified parties with token + bill slot: ${candidates.length} | Due this minute: ${dueUsers.length}`);
     if (dueUsers.length === 0) return;
 
     const userIds = dueUsers.map(u => u.id);
@@ -134,7 +138,13 @@ export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay 
     const orderedTodayIds = new Set(ordersToday.map(o => o.userId));
     const everOrderedIds = new Set(everOrdered.map(o => o.userId));
 
-    const usersToNotify = dueUsers.filter(u => everOrderedIds.has(u.id) && !orderedTodayIds.has(u.id));
+    const usersToNotify = dueUsers.filter(u => {
+        const skipReason = !everOrderedIds.has(u.id)
+            ? 'not in Daily/Start Order list (never ordered)'
+            : (orderedTodayIds.has(u.id) ? 'already ordered today' : null);
+        console.log(`[DailyOrderCron Debug]   - ${u.fullname} (${u.number}) slot ${u.billPrintTime}: ${skipReason ? `SKIP, ${skipReason}` : 'SEND'}`);
+        return !skipReason;
+    });
     if (usersToNotify.length === 0) return;
 
     await sendToParties('DailyOrderCron', usersToNotify, setting.dailyOrderTitle, setting.dailyOrderMessage, {
@@ -197,22 +207,30 @@ const ORDER_NOTIFICATION_JOBS = [
 
 export const initOrderNotificationCron = () => {
     cron.schedule('* * * * *', async () => {
+        const now = getKolkataNow();
+        console.log(`[OrderNotificationCron Debug] Tick | build: ${CRON_BUILD} | IST ${now.dateStr} ${formatMinuteOfDay(now.minuteOfDay)}`);
         try {
             const setting = await NotificationSetting.findOne();
-            if (!setting) return;
+            if (!setting) {
+                console.log('[OrderNotificationCron Debug] No row in notification_settings, open admin Notification Settings and Save once');
+                return;
+            }
 
-            const now = getKolkataNow();
             for (const [logTag, job] of ORDER_NOTIFICATION_JOBS) {
                 try {
                     await job(setting, now);
                 } catch (error) {
+                    console.error(`[${logTag} Error]:`, error);
                     logger.error(`[${logTag} Error]: ${error.message}`);
                 }
             }
         } catch (error) {
+            console.error('[OrderNotificationCron Error]:', error);
             logger.error(`[OrderNotificationCron Error]: ${error.message}`);
         }
     });
 
+    const now = getKolkataNow();
+    console.log(`[OrderNotificationCron Debug] Started | build: ${CRON_BUILD} | IST ${now.dateStr} ${formatMinuteOfDay(now.minuteOfDay)} | server time: ${new Date().toString()}`);
     logger.info('[Cron]: Order Notification Jobs (Daily Order, No Order) Initialized ✓');
 };
