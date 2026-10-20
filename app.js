@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import path from 'path';
 import dotenv from 'dotenv';
 import superadminRoutes from './routes/superadmin-routes/index.js';
 import godownpanelRoutes from './routes/godownpanel-routes/index.js';
@@ -58,7 +59,8 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'x-api-key']
 }));
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Routes Grouping
 app.use('/api/admin', superadminRoutes);
