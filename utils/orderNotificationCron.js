@@ -163,6 +163,7 @@ export const runNoOrderNotification = async (setting, { minuteOfDay }) => {
         },
         attributes: ['id', 'fullname', 'number', 'fcmtoken']
     });
+    logger.info(`[NoOrderCron]: Scheduled time matched, ${usersToNotify.length} Non-Order parties with app token`);
     if (usersToNotify.length === 0) return;
 
     await sendToParties('NoOrderCron', usersToNotify, setting.noOrderTitle, setting.noOrderMessage, {
