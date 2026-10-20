@@ -120,6 +120,13 @@ export const sendToDevice = async (tokenInput, title, body, imageUrl = null, dat
                 apnsSound = 'othernotification.mp3';
                 actionValue = 'orderdetails';
                 break;
+            case 'daily_order':
+                // Admin uploaded tune comes in data.soundUrl; app plays it on this channel
+                androidSound = 'default';
+                androidChannelId = 'daily_order_channel';
+                apnsSound = 'default';
+                actionValue = 'categories';
+                break;
             case 'other':
             default:
                 androidSound = 'othernotification';

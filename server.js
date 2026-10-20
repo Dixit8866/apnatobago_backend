@@ -16,6 +16,9 @@ initSocket(server);
 import { initReminderCron } from './utils/reminderCron.js';
 initReminderCron();
 
+import { initDailyOrderNotificationCron } from './utils/dailyOrderNotificationCron.js';
+initDailyOrderNotificationCron();
+
 import { syncInactivePartiesReKYC } from './controllers/admin/user.controller.js';
 
 // Import Models for seeding
