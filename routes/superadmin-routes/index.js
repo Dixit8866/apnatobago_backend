@@ -41,6 +41,7 @@ import activityLogRoutes from '../admin/activityLog.routes.js';
 import dailyReconciliationRoutes from './dailyReconciliation.routes.js';
 import appNoticeRoutes from './appNotice.routes.js';
 import partyLedgerRoutes from './partyLedger.routes.js';
+import notificationSettingRoutes from './notificationSetting.routes.js';
 
 const router = express.Router();
 
@@ -69,6 +70,7 @@ router.use('/orders', orderRoutes);
 router.use('/delivery-boys', deliveryBoyRoutes);
 router.use('/order-assignments', orderAssignmentRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/notification-settings', notificationSettingRoutes);
 router.use('/admin-notifications', adminNotificationRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/help-support', helpSupportRoutes);

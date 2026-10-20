@@ -53,6 +53,7 @@ import OutletOrder from './superadmin-models/OutletOrder.js';
 import OutletOrderItem from './superadmin-models/OutletOrderItem.js';
 import DailyReconciliation from './superadmin-models/DailyReconciliation.js';
 import AppNoticeSetting from './superadmin-models/AppNoticeSetting.js';
+import NotificationSetting from './superadmin-models/NotificationSetting.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -625,6 +626,10 @@ const runManualMigrations = async () => {
         } catch (e) { console.log('[Migration Warning] PartyLedgerEditLog sync failed:', e.message); }
 
         try {
+            await NotificationSetting.sync();
+        } catch (e) { console.log('[Migration Warning] NotificationSetting sync failed:', e.message); }
+
+        try {
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "balanceType" VARCHAR(20) DEFAULT \'DUE\'');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "advanceJama" DECIMAL(12, 2) DEFAULT 0.00');
             await sequelize.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS "billPrintTime" VARCHAR(50) DEFAULT NULL');
@@ -852,5 +857,6 @@ export {
     PartyLedger,
     PartyLedgerEditLog,
     AppNoticeSetting,
+    NotificationSetting,
     runManualMigrations
 };

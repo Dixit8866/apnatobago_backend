@@ -4,17 +4,18 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 
 export const uploadImage = async (req, res, next) => {
     try {
-        if (!req.file) {
+        const file = req.file || (req.files && req.files.length > 0 ? req.files[0] : null);
+        if (!file) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "No file uploaded.");
         }
 
-        const result = await uploadToS3(req.file.buffer, req.file.originalname, req.file.mimetype);
+        const result = await uploadToS3(file.buffer, file.originalname, file.mimetype);
 
         if (!result.success) {
             return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to upload to S3.");
         }
 
-        return sendSuccessResponse(res, HTTP_STATUS.OK, "Image uploaded successfully.", { url: result.url, path: result.path });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "File uploaded successfully.", { url: result.url, path: result.path });
     } catch (error) {
         next(error);
     }
