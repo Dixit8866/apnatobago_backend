@@ -16,8 +16,8 @@ initSocket(server);
 import { initReminderCron } from './utils/reminderCron.js';
 initReminderCron();
 
-import { initDailyOrderNotificationCron } from './utils/dailyOrderNotificationCron.js';
-initDailyOrderNotificationCron();
+import { initOrderNotificationCron } from './utils/orderNotificationCron.js';
+initOrderNotificationCron();
 
 import { syncInactivePartiesReKYC } from './controllers/admin/user.controller.js';
 
