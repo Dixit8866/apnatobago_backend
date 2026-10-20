@@ -39,6 +39,9 @@ const toMinuteOfDay = (timeStr) => {
     return parsed ? parsed.hours * 60 + parsed.minutes : null;
 };
 
+const formatMinuteOfDay = (minuteOfDay) =>
+    `${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`;
+
 /**
  * True when the party's bill print slot is running right now and the
  * minutes elapsed since slot start fall on the configured interval.
@@ -62,6 +65,10 @@ const sendToParties = async (logTag, users, title, body, data) => {
     await Promise.all(users.map(async (user) => {
         try {
             const result = await sendToDevice(user.fcmtoken, title, body, null, data);
+            const tokenResults = (result.results || [])
+                .map(r => `${String(r.token).substring(0, 15)}...: ${r.success ? 'OK' : r.error}`)
+                .join(' | ');
+            console.log(`[${logTag} Debug] ${user.fullname} (${user.number}) -> ${result.success ? 'SENT' : 'FAILED'} | ${tokenResults || result.error}`);
             if (!result.success) {
                 logger.error(`[${logTag}] Failed for ${user.fullname} (${user.number}): ${result.error || 'all tokens failed'}`);
             }
@@ -142,16 +149,18 @@ export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay 
  * at the 3 scheduled timings set in Notification Settings.
  */
 export const runNoOrderNotification = async (setting, { minuteOfDay }) => {
-    if (!setting.noOrderEnabled) return;
+    const scheduledTimes = [setting.noOrderTime1, setting.noOrderTime2, setting.noOrderTime3];
+    const scheduledMinutes = scheduledTimes.map(toMinuteOfDay);
+    const isScheduledNow = scheduledMinutes.includes(minuteOfDay);
 
-    const scheduledMinutes = [setting.noOrderTime1, setting.noOrderTime2, setting.noOrderTime3].map(toMinuteOfDay);
-    if (!scheduledMinutes.includes(minuteOfDay)) return;
+    console.log(`[NoOrderCron Debug] IST ${formatMinuteOfDay(minuteOfDay)} | Enabled: ${setting.noOrderEnabled} | Times: ${scheduledTimes.map((t, i) => `"${t}"=${scheduledMinutes[i] === null ? 'INVALID' : formatMinuteOfDay(scheduledMinutes[i])}`).join(', ')} | Match: ${isScheduledNow ? 'YES' : 'NO'}`);
+    if (!setting.noOrderEnabled || !isScheduledNow) return;
 
-    const usersToNotify = await User.findAll({
+    // Same list as Users page "Non-Order" tab; status/token checked below so skips are logged
+    const nonOrderParties = await User.findAll({
         where: {
-            status: 'Active',
+            status: { [Op.ne]: 'Deleted' },
             kycverification: 'verified',
-            fcmtoken: { [Op.ne]: null },
             [Op.and]: [
                 User.sequelize.literal(`NOT EXISTS (
                     SELECT 1 FROM orders o
@@ -161,9 +170,18 @@ export const runNoOrderNotification = async (setting, { minuteOfDay }) => {
                 )`)
             ]
         },
-        attributes: ['id', 'fullname', 'number', 'fcmtoken']
+        attributes: ['id', 'fullname', 'number', 'status', 'fcmtoken']
     });
-    logger.info(`[NoOrderCron]: Scheduled time matched, ${usersToNotify.length} Non-Order parties with app token`);
+    console.log(`[NoOrderCron Debug] Non-Order list: ${nonOrderParties.length} parties`);
+
+    const usersToNotify = nonOrderParties.filter(u => {
+        const skipReason = u.status !== 'Active'
+            ? `status is "${u.status}"`
+            : (!u.fcmtoken ? 'no FCM token (not logged in on app)' : null);
+        console.log(`[NoOrderCron Debug]   - ${u.fullname} (${u.number}): ${skipReason ? `SKIP, ${skipReason}` : 'SEND'}`);
+        return !skipReason;
+    });
+    logger.info(`[NoOrderCron]: Scheduled time matched, ${usersToNotify.length} of ${nonOrderParties.length} Non-Order parties can receive`);
     if (usersToNotify.length === 0) return;
 
     await sendToParties('NoOrderCron', usersToNotify, setting.noOrderTitle, setting.noOrderMessage, {
