@@ -1238,18 +1238,61 @@ export const updatePartyLedgerTransaction = async ({
                     primaryReturn.returnAmount = newReturnVal;
                     primaryReturn.price = newReturnVal;
                     if (returnNote) primaryReturn.reason = returnNote;
+
+                    if (!primaryReturn.productId || !primaryReturn.variantId) {
+                        let orderItem = await OrderItem.findOne({ where: { orderId: order.id } });
+                        if (!orderItem) {
+                            orderItem = await OrderItem.findOne({ where: { orderId: order.id }, paranoid: false });
+                        }
+                        if (orderItem) {
+                            if (!primaryReturn.productId) primaryReturn.productId = orderItem.productId;
+                            if (!primaryReturn.variantId) primaryReturn.variantId = orderItem.variantId;
+                            if (!primaryReturn.volumeId && orderItem.volumeId) primaryReturn.volumeId = orderItem.volumeId;
+                        } else {
+                            const fallbackVariant = await ProductVariant.findOne({ attributes: ['id', 'productId', 'volumeId'] });
+                            if (fallbackVariant) {
+                                if (!primaryReturn.productId) primaryReturn.productId = fallbackVariant.productId;
+                                if (!primaryReturn.variantId) primaryReturn.variantId = fallbackVariant.id;
+                                if (!primaryReturn.volumeId && fallbackVariant.volumeId) primaryReturn.volumeId = fallbackVariant.volumeId;
+                            }
+                        }
+                    }
+
                     await primaryReturn.save();
                     for (let i = 1; i < returns.length; i++) {
                         await returns[i].destroy();
                     }
                 } else {
+                    let orderItem = await OrderItem.findOne({ where: { orderId: order.id } });
+                    if (!orderItem) {
+                        orderItem = await OrderItem.findOne({ where: { orderId: order.id }, paranoid: false });
+                    }
+
+                    let targetProductId = orderItem?.productId;
+                    let targetVariantId = orderItem?.variantId;
+                    let targetVolumeId = orderItem?.volumeId || null;
+
+                    if (!targetProductId || !targetVariantId) {
+                        const fallbackVariant = await ProductVariant.findOne({ attributes: ['id', 'productId', 'volumeId'] });
+                        if (fallbackVariant) {
+                            targetProductId = fallbackVariant.productId;
+                            targetVariantId = fallbackVariant.id;
+                            targetVolumeId = fallbackVariant.volumeId || null;
+                        }
+                    }
+
                     await SalesReturn.create({
                         orderId: order.id,
                         userId: user.id,
+                        productId: targetProductId,
+                        variantId: targetVariantId,
+                        volumeId: targetVolumeId,
                         returnAmount: newReturnVal,
                         price: newReturnVal,
                         quantity: 1,
-                        reason: returnNote || 'Return recorded via Ledger'
+                        reason: returnNote || 'Return recorded via Ledger',
+                        creditProcessed: true,
+                        status: 'Approved'
                     });
                 }
             } else if (returns.length > 0) {

@@ -67,6 +67,7 @@ app.use('/api/admin', superadminRoutes);
 app.use('/api/godown-panel', godownpanelRoutes);
 app.use('/api/user', userRoutes);
 app.use('/user', userRoutes); // Support compatibility path (without /api prefix) for user endpoints
+app.use('/api/v1/user', userRoutes); // Support /api/v1 prefix compatibility
 app.use('/api/delivery', deliveryRoutes);
 app.use('/delivery', deliveryRoutes); // Support Flutter app base URL without /api prefix
 app.use('/api/v1/delivery', deliveryRoutes);
