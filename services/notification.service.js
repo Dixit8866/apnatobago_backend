@@ -200,6 +200,60 @@ export const sendToDevice = async (tokenInput, title, body, imageUrl = null, dat
 };
 
 /**
+ * Send a data-only message (no `notification` block) to a specific FCM token.
+ * The OS does not show anything by itself, so the app's own (native) code receives it
+ * even in background/killed state and can build the notification + play data.soundUrl.
+ */
+export const sendDataOnlyToDevice = async (tokenInput, data = {}) => {
+    let tokens = Array.isArray(tokenInput) ? tokenInput : [];
+    if (typeof tokenInput === 'string') {
+        const trimmed = tokenInput.trim();
+        try {
+            tokens = trimmed.startsWith('[') ? JSON.parse(trimmed) : [trimmed];
+        } catch (e) {
+            tokens = [trimmed];
+        }
+    }
+    tokens = tokens.map(t => typeof t === 'string' ? t.trim() : '').filter(Boolean);
+    if (tokens.length === 0) {
+        return { success: false, error: 'No valid tokens provided' };
+    }
+
+    if (!firebaseApp) {
+        console.error('[FCM Service Error] Firebase Admin App not initialized!');
+        return { success: false, error: 'Firebase Admin not initialized' };
+    }
+
+    // FCM data values must be strings
+    const stringData = Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, v === null || v === undefined ? '' : String(v)])
+    );
+
+    const results = await Promise.all(tokens.map(async (token) => {
+        try {
+            await getMessaging(firebaseApp).send({
+                token,
+                data: stringData,
+                android: { priority: 'high' },
+                apns: {
+                    headers: { 'apns-priority': '5', 'apns-push-type': 'background' },
+                    payload: { aps: { contentAvailable: true } }
+                }
+            });
+            return { success: true, token };
+        } catch (err) {
+            console.error(`[FCM Service Error] Data-only send failed for token ${token.substring(0, 15)}... Error:`, err.message);
+            return { success: false, token, error: err.message };
+        }
+    }));
+
+    return {
+        success: results.some(r => r.success),
+        results
+    };
+};
+
+/**
  * Send notification to a topic
  */
 export const sendToTopic = async (topic, title, body, imageUrl = null, data = {}) => {
