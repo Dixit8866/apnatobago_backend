@@ -4,6 +4,7 @@ import { User, Order, NotificationSetting } from '../models/index.js';
 import logger from '../logger/apiLogger.js';
 import { sendToDevice } from '../services/notification.service.js';
 import { parseReminderTime } from './reminderCron.js';
+import { getSoundId } from './notificationSounds.js';
 
 const CANCELLED_ORDER_STATUSES = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
 
@@ -149,7 +150,8 @@ export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay 
 
     await sendToParties('DailyOrderCron', usersToNotify, setting.dailyOrderTitle, setting.dailyOrderMessage, {
         type: 'daily_order',
-        soundUrl: setting.dailyOrderSound || ''
+        soundUrl: setting.dailyOrderSound || '',
+        soundId: getSoundId('daily_order', setting.dailyOrderSound)
     });
 };
 
@@ -196,7 +198,8 @@ export const runNoOrderNotification = async (setting, { minuteOfDay }) => {
 
     await sendToParties('NoOrderCron', usersToNotify, setting.noOrderTitle, setting.noOrderMessage, {
         type: 'no_order',
-        soundUrl: setting.noOrderSound || ''
+        soundUrl: setting.noOrderSound || '',
+        soundId: getSoundId('no_order', setting.noOrderSound)
     });
 };
 

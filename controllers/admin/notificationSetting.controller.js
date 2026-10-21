@@ -3,6 +3,7 @@ import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import logger from '../../logger/apiLogger.js';
 import { sendToDevice, sendDataOnlyToDevice } from '../../services/notification.service.js';
+import { buildNotificationSoundList, getSoundId } from '../../utils/notificationSounds.js';
 
 // Notification types that carry an admin-uploaded sound (same as orderNotificationCron)
 const TEST_SOUND_TYPES = {
@@ -71,7 +72,8 @@ export const sendTestSoundNotification = async (req, res, next) => {
 
         const finalTitle = title || setting[fields.title];
         const finalBody = message || setting[fields.message];
-        const data = { type, soundUrl: soundUrl || setting[fields.sound] || '', test: 'true' };
+        const finalSoundUrl = soundUrl || setting[fields.sound] || '';
+        const data = { type, soundUrl: finalSoundUrl, soundId: getSoundId(type, finalSoundUrl), test: 'true' };
 
         const result = dataOnly
             ? await sendDataOnlyToDevice(req.user.fcmtoken, { ...data, title: finalTitle, body: finalBody, action: 'categories' })
@@ -86,7 +88,7 @@ export const sendTestSoundNotification = async (req, res, next) => {
         const payload = {
             type,
             dataOnly,
-            androidChannelId: `${type}_channel`,
+            soundId: data.soundId,
             title: finalTitle,
             body: finalBody,
             soundUrl: data.soundUrl,
@@ -101,6 +103,25 @@ export const sendTestSoundNotification = async (req, res, next) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Test notification sent.', payload);
     } catch (error) {
         logger.error(`Error in sendTestSoundNotification: ${error.message}`);
+        next(error);
+    }
+};
+
+/**
+ * @desc    All admin-uploaded notification tunes, so the app can download each one and create
+ *          an Android notification channel with id = sound id. Pushes carry data.soundId and use
+ *          that channel, so the tune plays even when the app is closed.
+ * @route   GET /api/user/notification-settings/sounds
+ */
+export const getNotificationSounds = async (req, res, next) => {
+    try {
+        let setting = await NotificationSetting.findOne();
+        if (!setting) {
+            setting = await NotificationSetting.create({});
+        }
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Notification sounds fetched successfully.', buildNotificationSoundList(setting));
+    } catch (error) {
+        logger.error(`Error in getNotificationSounds: ${error.message}`);
         next(error);
     }
 };

@@ -122,9 +122,10 @@ export const sendToDevice = async (tokenInput, title, body, imageUrl = null, dat
                 break;
             case 'daily_order':
             case 'no_order':
-                // Admin uploaded tune comes in data.soundUrl; app plays it on this channel
+                // Admin uploaded tune: app pre-creates channel data.soundId with that tune
+                // (GET /api/user/notification-settings/sounds); old apps fall back to the default channel
                 androidSound = 'default';
-                androidChannelId = `${notificationType}_channel`;
+                androidChannelId = data.soundId || `${notificationType}_channel`;
                 apnsSound = 'default';
                 actionValue = 'categories';
                 break;

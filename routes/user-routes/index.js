@@ -26,7 +26,7 @@ import {
     searchCatalogue
 } from '../../controllers/user/catalogue.controller.js';
 import { getAppSettings, getOrderBlockSetting } from '../../controllers/user/settings.controller.js';
-import { getNotificationSettings, sendTestSoundNotification } from '../../controllers/admin/notificationSetting.controller.js';
+import { getNotificationSettings, getNotificationSounds, sendTestSoundNotification } from '../../controllers/admin/notificationSetting.controller.js';
 import { getPublicAppNotice } from '../../controllers/admin/appNotice.controller.js';
 import { protectUser, optionalProtectUser } from '../../middlewares/userAuth.middleware.js';
 import cartRoutes from './cart.routes.js';
@@ -66,6 +66,7 @@ router.get('/offers', optionalProtectUser, getOffers);
 router.get('/settings', getAppSettings);
 router.get('/order-block', getOrderBlockSetting);
 router.get('/notification-settings', getNotificationSettings);
+router.get('/notification-settings/sounds', getNotificationSounds);
 router.post('/notification-settings/test-sound', protectUser, sendTestSoundNotification);
 router.get('/app-notice', getPublicAppNotice);
 router.get('/app-notice/public', getPublicAppNotice);
