@@ -54,6 +54,7 @@ import OutletOrderItem from './superadmin-models/OutletOrderItem.js';
 import DailyReconciliation from './superadmin-models/DailyReconciliation.js';
 import AppNoticeSetting from './superadmin-models/AppNoticeSetting.js';
 import NotificationSetting from './superadmin-models/NotificationSetting.js';
+import BillPrintSetting from './superadmin-models/BillPrintSetting.js';
 
 // ─── Associations ───────────────────────────────────────────────────────────
 // Order -> OrderPayment
@@ -858,5 +859,6 @@ export {
     PartyLedgerEditLog,
     AppNoticeSetting,
     NotificationSetting,
+    BillPrintSetting,
     runManualMigrations
 };
