@@ -25,6 +25,7 @@ import {
     checkPartyActiveShipping
 } from '../../controllers/admin/order.controller.js';
 import { getSalesReturns, approveSalesReturn, approveAllSalesReturnByOrder, getPartyOrdersForReturn, createAdminSalesReturn, updateCompanyReturnStatus } from '../../controllers/common/salesReturn.controller.js';
+import { getAdminCompleteSettleInfo, adminCompleteSettleOrder } from '../../controllers/admin/orderCompleteSettle.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
@@ -60,6 +61,8 @@ router.post('/scan-pack', scanAndPackOrder);
 router.put('/bulk-status', bulkUpdateOrderStatus);
 router.put('/bulk-verify-payments', bulkVerifyPayments);
 router.put('/:id/verify-settlement', verifyAndSettleOrder);
+router.get('/:id/admin-complete-settle', getAdminCompleteSettleInfo);
+router.put('/:id/admin-complete-settle', adminCompleteSettleOrder);
 router.post('/:id/settle-due', settlePastDuePayment);
 router.put('/:id/status', updateOrderStatus);
 router.put('/:id/items/:itemId', updateOrderItem);
