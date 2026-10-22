@@ -33,6 +33,29 @@ const SETTLE_METHODS = ['CASH', 'ONLINE', 'CREDIT', 'SALES_RETURN'];
 const round2 = (v) => Math.round((parseFloat(v) || 0) * 100) / 100;
 const returnAmountOf = (r) => parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0);
 
+// Party's account before this bill, from the Party Ledger (getPartyCurrentDue via getCustomerCreditFinancials).
+// Credit entered in the popup = party's total baki after this bill (old due included, as Party Billing records it):
+// the old due can always be carried, new credit only up to the available credit.
+const getPartyAccount = async (order, transaction = null) => {
+    if (!order.userId) {
+        return { baseCreditLimit: 0, pastDue: 0, advanceJama: 0, openingBalance: 0, availableCredit: 0, maxCredit: 0, blockcredit: false };
+    }
+    const fin = await getCustomerCreditFinancials({ userId: order.userId, excludeOrderId: order.id, transaction });
+    const pastDue = round2(fin.totalPendingDue ?? fin.usedCredit);
+    const advanceJama = round2(fin.advanceJama);
+    const availableCredit = round2(fin.availableCredit);
+    const openingBalance = round2(pastDue - advanceJama);
+    return {
+        baseCreditLimit: round2(fin.baseCreditLimit),
+        pastDue,
+        advanceJama,
+        openingBalance,
+        availableCredit,
+        maxCredit: Math.max(Math.max(0, openingBalance), round2(pastDue + availableCredit - advanceJama)),
+        blockcredit: Boolean(fin.blockcredit)
+    };
+};
+
 // Party's last delivered bills (latest 5) with returnable items and their volume options
 const getReturnableBills = async (order) => {
     if (!order.userId) return [];
@@ -66,9 +89,7 @@ export const getAdminCompleteSettleInfoService = async ({ orderId }) => {
     const ledgerBill = await getLedgerBillReturns(order.id);
     const alreadyReturned = round2(ledgerBill.returns.reduce((sum, r) => sum + returnAmountOf(r), 0));
 
-    const creditFin = order.userId
-        ? await getCustomerCreditFinancials({ userId: order.userId, excludeOrderId: order.id })
-        : null;
+    const account = await getPartyAccount(order);
 
     const previousBills = await getReturnableBills(order);
 
@@ -85,12 +106,7 @@ export const getAdminCompleteSettleInfoService = async ({ orderId }) => {
             deliveryBoyName: order.assignment?.deliveryBoy?.name || null
         },
         alreadyReturned,
-        credit: {
-            baseCreditLimit: round2(creditFin?.baseCreditLimit),
-            usedCredit: round2(creditFin?.totalPendingDue ?? creditFin?.usedCredit),
-            availableCredit: round2(creditFin?.availableCredit),
-            blockcredit: Boolean(creditFin?.blockcredit)
-        },
+        credit: account,
         previousBills
     };
 };
@@ -200,33 +216,26 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
         const newReturnTotal = round2(returnLines.reduce((sum, l) => sum + l.returnAmount, 0));
         const totalReturn = round2(alreadyReturned + newReturnTotal);
 
-        // Bill must be fully accounted: Bill - Kupan - Return - Cash - Online - Credit = 0
-        const remaining = round2(billTotal - coupon - totalReturn - cash - online - credit);
+        // Party's whole account must be accounted: Old Due + Bill - Kupan - Return - Cash - Online - Credit = 0
+        const account = await getPartyAccount(order, t);
+        const remaining = round2(account.openingBalance + billTotal - coupon - totalReturn - cash - online - credit);
         if (Math.abs(remaining) > 0.009) {
             await t.rollback();
             return {
                 error: remaining > 0
-                    ? `બિલ હજુ ₹${remaining.toFixed(2)} બાકી છે. બાકી 0 થાય તો જ ઓર્ડર Complete થશે.`
-                    : `ભરેલ રકમ બિલ કરતાં ₹${Math.abs(remaining).toFixed(2)} વધુ છે.`
+                    ? `હજુ ₹${remaining.toFixed(2)} બાકી છે (જૂની બાકી + બિલ). બાકી 0 થાય તો જ ઓર્ડર Complete થશે.`
+                    : `ભરેલ રકમ લેવાની રકમ કરતાં ₹${Math.abs(remaining).toFixed(2)} વધુ છે.`
             };
         }
 
+        if (credit > account.maxCredit + 0.009) {
+            await t.rollback();
+            return { error: `Credit મહત્તમ ₹${account.maxCredit.toFixed(2)} સુધી જ નાખી શકાય (જૂની બાકી ₹${Math.max(0, account.openingBalance).toFixed(2)} + ઉપલબ્ધ ₹${account.availableCredit.toFixed(2)}).` };
+        }
+
         let user = null;
-        let availableCredit = 0;
         if (order.userId) {
             user = await User.findByPk(order.userId, { transaction: t });
-        }
-        if (credit > 0) {
-            const creditFin = await getCustomerCreditFinancials({
-                userId: order.userId,
-                excludeOrderId: order.id,
-                transaction: t
-            });
-            availableCredit = round2(creditFin.availableCredit);
-            if (credit > availableCredit + 0.009) {
-                await t.rollback();
-                return { error: `પાર્ટી પાસે ફક્ત ₹${availableCredit.toFixed(2)} ક્રેડિટ ઉપલબ્ધ છે. તેનાથી વધુ Credit નાખી શકાય નહીં.` };
-            }
         }
 
         // ── Sales Returns: linked to the bill the goods came from, dated at this bill's ledger time
@@ -290,17 +299,18 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
             }, { transaction: t });
         }
         if (credit > 0) {
+            // Party's total baki after this bill (old due included): the due this delivered bill carries until verified
             await OrderPayment.create({ ...paymentBase, amount: credit, paymentMethod: 'CREDIT', notes: 'Goods given on credit (baki)' }, { transaction: t });
 
-            const newAvailableCredit = Math.max(0, round2(availableCredit - credit));
+            const newAvailableCredit = Math.max(0, round2(account.maxCredit - credit));
             await PartyBalanceLog.create({
                 userId: order.userId,
                 orderId: order.id,
                 type: 'DUE',
                 amount: credit,
-                previousBalance: availableCredit,
+                previousBalance: account.availableCredit,
                 newBalance: newAvailableCredit,
-                note: `Credit (Baki) on Order #${order.orderId || order.id}: ₹${credit.toFixed(2)}. Remaining Available Credit: ₹${newAvailableCredit.toFixed(2)}`,
+                note: `Credit (Baki) on Order #${order.orderId || order.id}: ₹${credit.toFixed(2)} (old due ₹${Math.max(0, account.openingBalance).toFixed(2)} incl.). Remaining Available Credit: ₹${newAvailableCredit.toFixed(2)}`,
                 createdByName: `Admin Settlement • ${actorName}`
             }, { transaction: t });
         }
@@ -311,13 +321,17 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
         if (credit > 0) methodsUsed.push('CREDIT');
         if (totalReturn > 0) methodsUsed.push('SALES_RETURN');
 
+        // Cash / online clear the old due first; the rest of the credit is this bill's own unpaid part
         const netBill = round2(billTotal - coupon);
+        const oldDue = Math.max(0, account.openingBalance);
+        const pastDueSettled = round2(Math.min(oldDue, cash + online));
+        const billUnpaid = Math.min(netBill, Math.max(0, round2(credit - (oldDue - pastDueSettled))));
         order.couponDiscount = coupon.toFixed(2);
         order.discountType = coupon > 0 ? (order.discountType || 'Coupon Discount') : null;
         order.dueAmount = credit.toFixed(2);
-        order.paidAmount = Math.max(0, round2(netBill - credit)).toFixed(2);
-        order.pastDueCollected = '0.00';
-        order.paymentStatus = credit > 0 ? 'Partial' : 'Paid';
+        order.paidAmount = Math.max(0, round2(netBill - billUnpaid)).toFixed(2);
+        order.pastDueCollected = pastDueSettled.toFixed(2);
+        order.paymentStatus = billUnpaid > 0 ? 'Partial' : 'Paid';
         if (methodsUsed.length > 0) {
             order.paymentMethod = methodsUsed.length === 1 ? methodsUsed[0] : 'SPLIT';
         }
@@ -378,6 +392,7 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
                 id: order.id,
                 orderId: order.orderId,
                 orderStatus: order.orderStatus,
+                openingBalance: account.openingBalance,
                 billTotal,
                 coupon,
                 salesReturn: totalReturn,
