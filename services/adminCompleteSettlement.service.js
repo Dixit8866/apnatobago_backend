@@ -121,6 +121,8 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
     const coupon = round2(body.couponAmount);
     const bankSettingId = body.bankSettingId || null;
     const note = String(body.note || '').trim();
+    // Admin confirmed taking more than the account total: the extra stays as the party's jama in the ledger
+    const acceptExtra = body.acceptExtra === true || body.acceptExtra === 'true';
     const returnInput = Array.isArray(body.salesReturnItems) ? body.salesReturnItems : [];
 
     if ([cash, online, credit, coupon].some(v => v < 0)) {
@@ -219,13 +221,18 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
         // Party's whole account must be accounted: Old Due + Bill - Kupan - Return - Cash - Online - Credit = 0
         const account = await getPartyAccount(order, t);
         const remaining = round2(account.openingBalance + billTotal - coupon - totalReturn - cash - online - credit);
-        if (Math.abs(remaining) > 0.009) {
+        if (remaining > 0.009) {
             await t.rollback();
-            return {
-                error: remaining > 0
-                    ? `હજુ ₹${remaining.toFixed(2)} બાકી છે (જૂની બાકી + બિલ). બાકી 0 થાય તો જ ઓર્ડર Complete થશે.`
-                    : `ભરેલ રકમ લેવાની રકમ કરતાં ₹${Math.abs(remaining).toFixed(2)} વધુ છે.`
-            };
+            return { error: `હજુ ₹${remaining.toFixed(2)} બાકી છે (જૂની બાકી + બિલ). બાકી 0 થાય તો જ ઓર્ડર Complete થશે.` };
+        }
+        const extraAmount = remaining < -0.009 ? round2(-remaining) : 0;
+        if (extraAmount > 0 && credit > 0) {
+            await t.rollback();
+            return { error: `ભરેલ રકમ લેવાની રકમ કરતાં ₹${extraAmount.toFixed(2)} વધુ છે, ત્યારે Credit ન નાખી શકાય. Credit 0 કરો.` };
+        }
+        if (extraAmount > 0 && !acceptExtra) {
+            await t.rollback();
+            return { error: `ભરેલ રકમ લેવાની રકમ કરતાં ₹${extraAmount.toFixed(2)} વધુ છે.` };
         }
 
         if (credit > account.maxCredit + 0.009) {
@@ -277,8 +284,9 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
 
         const now = new Date();
         const paymentBase = { orderId: order.id, deliveryBoyId: null, isSubmitted: true, submittedAt: now };
+        const extraNote = extraAmount > 0 ? ` — ₹${extraAmount.toFixed(2)} extra kept as party jama` : '';
         if (cash > 0) {
-            await OrderPayment.create({ ...paymentBase, amount: cash, paymentMethod: 'CASH', notes: 'Cash collected (Admin Complete)' }, { transaction: t });
+            await OrderPayment.create({ ...paymentBase, amount: cash, paymentMethod: 'CASH', notes: `Cash collected (Admin Complete)${extraNote}` }, { transaction: t });
         }
         if (online > 0) {
             await OrderPayment.create({
@@ -287,7 +295,7 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
                 paymentMethod: 'ONLINE',
                 bankSettingId: bank.id,
                 onlineType: 'Bank Account',
-                notes: 'Online payment (Admin Complete)'
+                notes: `Online payment (Admin Complete)${cash > 0 ? '' : extraNote}`
             }, { transaction: t });
         }
         if (totalReturn > 0) {
@@ -398,7 +406,8 @@ export const adminCompleteOrderSettlementService = async ({ orderId, body = {}, 
                 salesReturn: totalReturn,
                 cash,
                 online,
-                credit
+                credit,
+                extraJama: extraAmount
             }
         };
     } catch (error) {
