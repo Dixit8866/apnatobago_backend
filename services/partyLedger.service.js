@@ -143,6 +143,13 @@ const assignReturnsToOrders = (eligibleOrders, allUserReturns) => {
     }
 
     for (const ret of allUserReturns) {
+        // Stock-only return of a bill cancelled after shipping: the party was never charged for that bill,
+        // so it is not a party credit (it only brings the stock back when approved)
+        const isCancelledBillReturn = ret.orderId
+            && !orderReturnsMap.has(ret.orderId)
+            && String(ret.reason || '').trim().toLowerCase().startsWith('cancelled after shipping');
+        if (isCancelledBillReturn) continue;
+
         const retTime = new Date(ret.createdAt || new Date()).getTime();
 
         if (eligibleOrders.length === 0) {
