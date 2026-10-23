@@ -1110,7 +1110,9 @@ export const updatePartyLedgerTransaction = async ({
 
         if (order) {
             // Validate: only allow editing transactions within the last 3 dates (Today, Yesterday, Day Before Yesterday)
-            const orderDate = order.createdAt ? new Date(order.createdAt) : null;
+            // Same date the ledger row shows (deliveredAt → packagingAt → createdAt), so it matches the row's edit button
+            const ledgerDate = order.deliveredAt || order.packagingAt || order.createdAt;
+            const orderDate = ledgerDate ? new Date(ledgerDate) : null;
             if (orderDate && !isNaN(orderDate.getTime())) {
                 const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
                 const todayStr = `${istNow.getUTCFullYear()}-${String(istNow.getUTCMonth() + 1).padStart(2, '0')}-${String(istNow.getUTCDate()).padStart(2, '0')}`;
