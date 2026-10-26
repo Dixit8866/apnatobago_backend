@@ -577,6 +577,48 @@ export const getOutletOrders = async (req, res) => {
 
         const totalProfit = totalSales - totalPurchaseCost;
 
+        // Same filter one period earlier (previous day for a one-day filter), for the "vs. previous day" % on the cards
+        const shiftDateStr = (str, days) => {
+            const d = new Date(`${str}T00:00:00Z`);
+            d.setUTCDate(d.getUTCDate() + days);
+            return d.toISOString().split('T')[0];
+        };
+        let previousRange = null;
+        if (!search && !userId) {
+            if (startDate && endDate) {
+                const days = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+                if (days > 0) {
+                    const prevStart = new Date(shiftDateStr(startDate, -days));
+                    prevStart.setHours(0, 0, 0, 0);
+                    previousRange = [prevStart, new Date(`${shiftDateStr(endDate, -days)}T23:59:59.999Z`)];
+                }
+            } else if (!startDate && !endDate && (status === 'Today' || today === 'true' || (date && date !== '' && date !== 'undefined'))) {
+                const prevDayStr = shiftDateStr((date && date !== '' && date !== 'undefined') ? date : new Date().toISOString().split('T')[0], -1);
+                const prevStart = new Date(prevDayStr);
+                prevStart.setHours(0, 0, 0, 0);
+                const prevEnd = new Date(prevDayStr);
+                prevEnd.setHours(23, 59, 59, 999);
+                previousRange = [prevStart, prevEnd];
+            }
+        }
+
+        let previous = null;
+        if (previousRange) {
+            const prevOrders = await OutletOrder.findAll({
+                where: { ...whereCondition, createdAt: { [Op.between]: previousRange } },
+                attributes: ['grandTotal', 'totalAmount', 'paidAmount'],
+                raw: true
+            });
+            previous = { totalOrders: prevOrders.length, totalSales: 0, totalPaid: 0, totalDue: 0 };
+            prevOrders.forEach(o => {
+                const gt = Number(o.grandTotal || o.totalAmount || 0);
+                const paid = Number(o.paidAmount || 0);
+                previous.totalSales += gt;
+                previous.totalPaid += paid;
+                previous.totalDue += Math.max(0, gt - paid);
+            });
+        }
+
         const totalsSummary = {
             totalSales,
             totalPaid,
@@ -585,7 +627,8 @@ export const getOutletOrders = async (req, res) => {
             bankPaid,
             totalPurchaseCost,
             totalProfit,
-            employeeBreakdown: Object.values(employeeMap)
+            employeeBreakdown: Object.values(employeeMap),
+            previous
         };
 
         // Tab counts
