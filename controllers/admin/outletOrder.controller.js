@@ -474,8 +474,8 @@ export const getOutletOrders = async (req, res) => {
             limit,
             offset,
             order: [['createdAt', 'DESC']],
-            distinct: true,
-            subQuery: false
+            distinct: true
+            // No subQuery: false here: limit/offset must page the orders, not the order × items joined rows
         });
 
         // Calculate Purchase Cost & Profit for each returned order
