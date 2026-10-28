@@ -431,6 +431,21 @@ export const getAllUsers = async (req, res, next) => {
             User.count({ where: { ...searchWhere, status: 'Deleted' }, include: countInclude, distinct: true, col: 'id' }),
         ]);
 
+        // Total baki of all Party Due parties (same filter as the Party Due count)
+        const partyDueTotalRow = await User.findOne({
+            where: {
+                ...searchWhere,
+                [Op.and]: [
+                    sequelize.literal(PARTY_DUE_SQL)
+                ]
+            },
+            include: search ? [{ model: BusinessProfile, as: 'businessProfile', attributes: [], required: false }] : [],
+            attributes: [[sequelize.fn('COALESCE', sequelize.fn('SUM', sequelize.col('User.closingBalance')), 0), 'total']],
+            subQuery: false,
+            raw: true
+        });
+        const partyDueTotal = Math.round(parseFloat(partyDueTotalRow?.total || 0) * 100) / 100;
+
         const statusCounts = {
             '': totalCount,
             'All': totalCount,
@@ -564,6 +579,7 @@ export const getAllUsers = async (req, res, next) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Users fetched.', {
             ...responseData,
             statusCounts,
+            partyDueTotal,
             routeCounts,
             timingCounts,
             godownCounts

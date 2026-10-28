@@ -9,6 +9,7 @@ import { roundTotal } from '../../utils/roundHelper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
 import { broadcastOrderCreated, broadcastOrderStatusChanged } from '../../services/socketEvent.service.js';
 import { isSystemOrAuditNotice } from '../../services/financialSettlement.service.js';
+import { adminCompleteOrderSettlementService } from '../../services/adminCompleteSettlement.service.js';
 
 /**
  * Generate a unique human-readable Order ID for Direct Sales
@@ -66,6 +67,7 @@ export const createCustomSale = async (req, res) => {
             paidAmount: rawPaidAmount,
             payments,
             deliveryCharge: rawDeliveryCharge,
+            couponAmount: rawCouponAmount,
             godownId,
             notes,
             orderStatus,
@@ -247,6 +249,17 @@ export const createCustomSale = async (req, res) => {
 
         const deliveryCharge = parseFloat(rawDeliveryCharge || 0);
         const grandTotalAmount = roundTotal(totalAmount + deliveryCharge);
+        // Kupan is kept on couponDiscount (Party Ledger kupan column)
+        const couponDiscount = Math.round((parseFloat(rawCouponAmount || 0) || 0) * 100) / 100;
+
+        if (couponDiscount < 0) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "કુપન રકમ માઇનસ (-) ન હોઈ શકે.");
+        }
+        if (couponDiscount > grandTotalAmount) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, "કુપન રકમ બિલ કરતાં વધુ ન હોઈ શકે.");
+        }
 
         // Resolve multiple payments
         let resolvedPayments = payments;
@@ -268,10 +281,11 @@ export const createCustomSale = async (req, res) => {
             }
         }
 
-        const dueAmount = Math.max(0, grandTotalAmount - paidAmount);
-        
+        const netBillAmount = Math.round((grandTotalAmount - couponDiscount) * 100) / 100;
+        const dueAmount = Math.max(0, netBillAmount - paidAmount);
+
         let paymentStatus = 'Pending';
-        if (paidAmount >= grandTotalAmount) paymentStatus = 'Paid';
+        if (paidAmount >= netBillAmount) paymentStatus = 'Paid';
         else if (paidAmount > 0) paymentStatus = 'Partial';
 
         let orderPaymentMethod = 'Cash';
@@ -309,7 +323,8 @@ export const createCustomSale = async (req, res) => {
         let targetSale = null;
         let isMerged = false;
 
-        if (userId && status === 'Pending') {
+        // Merge recalculates the bill from its items only, so a bill with Kupan is never merged (kept as its own bill)
+        if (userId && status === 'Pending' && couponDiscount <= 0) {
             const existingPendingOrder = await Order.findOne({
                 where: {
                     userId,
@@ -319,7 +334,9 @@ export const createCustomSale = async (req, res) => {
                 transaction: t
             });
 
-            if (existingPendingOrder) {
+            const pendingHasKupan = existingPendingOrder?.saleType === 'Direct' && Number(existingPendingOrder.couponDiscount || 0) > 0;
+
+            if (existingPendingOrder && !pendingHasKupan) {
                 targetSale = existingPendingOrder;
                 isMerged = true;
                 logger.info(`[createCustomSale] Found existing pending order #${targetSale.orderId} for party ${userId}. Auto-merging.`);
@@ -337,6 +354,8 @@ export const createCustomSale = async (req, res) => {
                 paidAmount,
                 dueAmount,
                 discount: totalDiscount,
+                couponDiscount,
+                discountType: couponDiscount > 0 ? 'Coupon Discount' : null,
                 paymentMethod: orderPaymentMethod,
                 paymentStatus,
                 orderStatus: status,
@@ -674,6 +693,71 @@ export const getCustomSales = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, "Custom sales fetched successfully.", responseData);
     } catch (error) {
         logger.error(`[Get Custom Sales Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * @desc    Payment Status step of New Outlet Order: settle the printed custom sale bill and complete it.
+ *          The bill is moved to Shipping, then settled by the admin Complete & Settle service (→ Payment Collect),
+ *          so Cash / Online / Kupan / Credit reach the Party Ledger the same way as every other completed bill.
+ * @route   PUT /api/admin/custom-sales/:id/complete
+ * @access  Private (Admin)
+ */
+export const completeCustomSale = async (req, res) => {
+    try {
+        const order = await Order.findByPk(req.params.id);
+        if (!order) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.");
+        }
+        if (!['Pending', 'Packaging', 'Packed', 'Shipping'].includes(order.orderStatus)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `આ ઓર્ડર ${order.orderStatus} માં છે, અહીંથી Complete થઈ શકે નહીં.`);
+        }
+
+        // Restored if the settlement is refused (e.g. amount still remaining)
+        const previousState = {
+            orderStatus: order.orderStatus,
+            packagingAt: order.packagingAt,
+            packedAt: order.packedAt,
+            shippingAt: order.shippingAt
+        };
+
+        if (order.orderStatus !== 'Shipping') {
+            const now = new Date();
+            await order.update({
+                orderStatus: 'Shipping',
+                packagingAt: order.packagingAt || now,
+                packedAt: order.packedAt || now,
+                shippingAt: order.shippingAt || now
+            });
+        }
+
+        const actorName = req.user?.fullname || req.user?.name || 'Admin';
+        let result;
+        try {
+            result = await adminCompleteOrderSettlementService({ orderId: order.id, body: req.body, actorName });
+        } catch (settleError) {
+            await order.update(previousState);
+            throw settleError;
+        }
+
+        if (result.notFound || result.error) {
+            await order.update(previousState);
+            return result.notFound
+                ? sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Order not found.")
+                : sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, result.error);
+        }
+
+        logActivity(req, {
+            module: 'Custom Sales',
+            action: 'PAYMENT',
+            description: `Custom Sale #${result.order.orderId} payment confirmed & completed`,
+            metadata: result.order
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, "ઓર્ડર Complete થયો અને પેમેન્ટ સેટલ થયું.", result.order);
+    } catch (error) {
+        logger.error(`[Complete Custom Sale Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

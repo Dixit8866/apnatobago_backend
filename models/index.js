@@ -318,6 +318,13 @@ const runManualMigrations = async () => {
             console.log('[Migration Warning] enum_orders_orderStatus type alter failed or value already exists:', e.message);
         }
 
+        // Ensure Outlet exists in enum_orders_deliveryMode (Custom Sales / New Outlet Order saves deliveryMode 'Outlet')
+        try {
+            await sequelize.query('ALTER TYPE "enum_orders_deliveryMode" ADD VALUE IF NOT EXISTS \'Outlet\'');
+        } catch (e) {
+            console.log('[Migration Warning] enum_orders_deliveryMode type alter failed or value already exists:', e.message);
+        }
+
         // Ensure SALES_RETURN exists in enum_inventory_transactions_type enum type
         try {
             await sequelize.query('ALTER TYPE "enum_inventory_transactions_type" ADD VALUE IF NOT EXISTS \'SALES_RETURN\'');
