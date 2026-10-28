@@ -921,6 +921,29 @@ export const getAllOrders = async (req, res) => {
                 return adjusted;
             });
 
+            // Delivered / Payment Confirm tabs: Grand Total of each bill is the Party Ledger "Total Amount"
+            // (balance carried till this bill + this bill), e.g. opening 3,675 + bill 2,944 -> 6,619
+            const ledgerByUserId = new Map();
+            if (isDeliveredType && !isCustomerSpecificQuery) {
+                const partyIds = Array.from(new Set(result.rows
+                    .map(o => o && (o.userId || o.user?.id))
+                    .filter(Boolean)
+                    .map(String)));
+                await Promise.all(partyIds.map(async (uid) => {
+                    try {
+                        ledgerByUserId.set(uid, await syncPartyLedger(uid, { persist: false }));
+                    } catch (ledErr) {
+                        logger.warn(`[getAllOrders party ledger grand total warning]: ${ledErr.message}`);
+                    }
+                }));
+                result.rows.forEach(o => {
+                    if (!o) return;
+                    const led = ledgerByUserId.get(String(o.userId || o.user?.id || ''));
+                    const ledRow = (led?.ledgerRows || []).find(r => String(r.orderId) === String(o.id));
+                    if (ledRow) o.grandTotal = ledRow.totalAmount;
+                });
+            }
+
             // Party Ledger jama (DR), e.g. bill 98 paid 100 -> closing -2: shown on the party's latest verified bill,
             // same bill that carries the baki (CR) as dueAmount. Ledger read only for parties whose closing is DR.
             const jamaUserIds = Array.from(new Set(result.rows
@@ -931,7 +954,7 @@ export const getAllOrders = async (req, res) => {
                 const jamaByOrderId = new Map();
                 await Promise.all(jamaUserIds.map(async (uid) => {
                     try {
-                        const led = await syncPartyLedger(uid, { persist: false });
+                        const led = ledgerByUserId.get(String(uid)) || await syncPartyLedger(uid, { persist: false });
                         const verifiedRows = (led?.ledgerRows || []).filter(r => r.orderId && r.isPaymentVerified);
                         const latestVerified = verifiedRows[verifiedRows.length - 1];
                         if (latestVerified && getBalanceType(led.closingBalance) === 'DR') {
