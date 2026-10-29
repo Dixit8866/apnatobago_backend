@@ -210,7 +210,7 @@ export const downloadDeliveryLabel = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
     try {
-        const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming, godownId } = req.query;
+        const { status, date, search, deliveryBoyId, startDate, endDate, userId, routeCategoryId, deliveryTiming, godownId, paymentStatus, sortOrder } = req.query;
         const baseWhere = {};
         let searchClause = null;
         let dateClause = null;
@@ -322,6 +322,11 @@ export const getAllOrders = async (req, res) => {
             } else {
                 baseWhere.orderStatus = status;
             }
+        }
+
+        // Order History: Payment Status filter (Paid / Partial / Pending)
+        if (paymentStatus && paymentStatus !== 'All') {
+            baseWhere.paymentStatus = paymentStatus;
         }
 
         const parseISTDate = (dateStr, isEnd = false) => {
@@ -572,7 +577,8 @@ export const getAllOrders = async (req, res) => {
             include: orderIncludes,
             limit,
             offset,
-            order: [['createdAt', 'DESC']],
+            // Order History: oldest first with sortOrder=asc
+            order: [['createdAt', sortOrder === 'asc' ? 'ASC' : 'DESC']],
             distinct: true,
             subQuery: false
         });

@@ -5,6 +5,9 @@ import { BusinessProfile, RouteCategory, AppSettings, Order } from '../../models
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
 
+// Statuses a caller can log for a party (Order Complete is set automatically when the party orders)
+const CALL_LOG_STATUSES = ['Pending Call', 'Refollowup Call', 'No Order'];
+
 /**
  * Fetch daily calling list for parties (customers)
  * India timezone midnight-to-midnight (12 to 12) handling
@@ -135,37 +138,17 @@ export const getDailyPartyCalls = async (req, res, next) => {
             subQuery: false
         });
 
-        // Calculate 30-day inactivity threshold based on calendar date start
-        const thirtyDaysAgo = new Date(todayStart.getTime() - 30 * 24 * 60 * 60 * 1000);
-
         // Map users to resolve their daily calling status
         const mappedUsers = users.map(user => {
             const call = user.calls && user.calls[0];
             const hasOrderToday = user.orders && user.orders.length > 0;
-            const lastOrderDate = user.getDataValue('lastOrderDate') ? new Date(user.getDataValue('lastOrderDate')) : null;
-            const userCreatedAt = user.createdAt ? new Date(user.createdAt) : new Date();
-            const isKycVerified = String(user.kycverification || '').toLowerCase() === 'verified';
 
-            // R-KYC: Inactive >= 30 days and KYC is pending
-            const isRkyc = (lastOrderDate && lastOrderDate < thirtyDaysAgo) || (!lastOrderDate && userCreatedAt < thirtyDaysAgo);
-
-            let resolvedStatus = 'Pending Call';
-            if (hasOrderToday) {
-                // 4) Order Complete: Party has placed/completed an order today
-                resolvedStatus = 'Order Complete';
-            } else if (isRkyc && !isKycVerified) {
-                // 3) Rekyc Call: Inactive >= 30 days and KYC is pending
-                resolvedStatus = 'Rekyc Call';
-            } else if (!lastOrderDate) {
-                // 2) Refollowup Call: Non Order parties (never ordered)
-                resolvedStatus = 'Refollowup Call';
-            } else {
-                // 1) Pending Call: Active ordering parties (Start Order / Daily Order) who have not ordered today
-                resolvedStatus = 'Pending Call';
-            }
+            // Order Complete: Party has placed/completed an order today (automatic)
+            // Otherwise every party starts as Pending Call until the caller logs Refollowup Call / No Order
+            let resolvedStatus = hasOrderToday ? 'Order Complete' : 'Pending Call';
 
             // If an admin manually logged a specific recognized status today and no order was placed:
-            if (!hasOrderToday && call && ['Pending Call', 'Refollowup Call', 'Rekyc Call'].includes(call.status)) {
+            if (!hasOrderToday && call && CALL_LOG_STATUSES.includes(call.status)) {
                 resolvedStatus = call.status;
             }
 
@@ -193,12 +176,12 @@ export const getDailyPartyCalls = async (req, res, next) => {
             return userJson;
         });
 
-        // Compute tab counts in order: Order Pending, Pending Call, Refollowup Call, Rekyc Call, Order Complete, All
+        // Compute tab counts in order: Order Pending, Pending Call, Refollowup Call, No Order, Order Complete, All
         const tabCounts = {
             'Order Pending': 0,
             'Pending Call': 0,
             'Refollowup Call': 0,
-            'Rekyc Call': 0,
+            'No Order': 0,
             'Order Complete': 0,
             All: 0,
         };
@@ -303,6 +286,9 @@ export const logOrUpdateCall = async (req, res, next) => {
         if (!userId || !status) {
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'UserId and status are required.');
         }
+        if (!CALL_LOG_STATUSES.includes(status)) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Invalid call status. Allowed: ${CALL_LOG_STATUSES.join(', ')}.`);
+        }
 
         const user = await User.findByPk(userId);
         if (!user) {
@@ -317,7 +303,7 @@ export const logOrUpdateCall = async (req, res, next) => {
             day: '2-digit'
         }).format(new Date());
 
-        const finalFollowup = (status === 'Re-Followup' || status === 'Refollowup Call') ? (followupDateTime || null) : null;
+        const finalFollowup = status === 'Refollowup Call' ? (followupDateTime || null) : null;
 
         // Find or create today's call log
         let [callRecord, created] = await PartyCalling.findOrCreate({
