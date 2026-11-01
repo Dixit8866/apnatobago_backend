@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing, OutletOrder, OutletOrderItem, PartyBalanceLog, PartyLedger } from '../../models/index.js';
+import { Order, OrderItem, Product, ProductVariant, User, Volume, OrderAssignment, DeliveryBoy, BusinessProfile, OrderPayment, InventoryStock, SalesReturn, Notification, AppSettings, RouteCategory, BankSetting, Admin, Godown, Cart, ProductPricing, OutletOrder, OutletOrderItem, PartyBalanceLog, PartyLedger, CustomLevel } from '../../models/index.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -1427,6 +1427,7 @@ export const updateOrderStatus = async (req, res) => {
                     order.deliveredAt = order.deliveredAt || new Date();
                 }
             }
+            order.paymentVerifiedAt = orderStatus === 'Payment Verify' ? (order.paymentVerifiedAt || new Date()) : null;
 
             if (notes) {
                 const timestamp = new Date().toLocaleString();
@@ -1830,6 +1831,7 @@ export const bulkUpdateOrderStatus = async (req, res) => {
             updateFields.shippingAt = Order.sequelize.literal('COALESCE("shippingAt", NOW())');
             updateFields.deliveredAt = Order.sequelize.literal('COALESCE("deliveredAt", NOW())');
         }
+        updateFields.paymentVerifiedAt = orderStatus === 'Payment Verify' ? Order.sequelize.literal('COALESCE("paymentVerifiedAt", NOW())') : null;
 
         await Order.update(
             updateFields,
@@ -1987,6 +1989,7 @@ export const bulkVerifyPayments = async (req, res) => {
             order.orderStatus = 'Payment Verify';
             order.paymentCollectStatus = 'Verified';
             order.verifiedByAdminId = req.admin?.id || req.user?.id || null;
+            order.paymentVerifiedAt = order.paymentVerifiedAt || new Date();
             order.deliveredAt = order.deliveredAt || new Date();
 
             if (note) {
@@ -2229,6 +2232,7 @@ export const verifyAndSettleOrder = async (req, res) => {
 
         order.orderStatus = 'Payment Verify';
         order.paymentCollectStatus = 'Verified';
+        order.paymentVerifiedAt = order.paymentVerifiedAt || new Date();
         order.cashAmount = parsedCash;
         order.onlineAmount = parsedOnline;
         order.creditAmount = finalDue;
@@ -2666,14 +2670,29 @@ export const getOrderDetails = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'deliveryNotice'],
+                    attributes: ['id', 'fullname', 'number', 'city', 'postcode', 'dialcode', 'applevel', 'walletBalance', 'creditline', 'advanceJama', 'balanceType', 'blockcredit', 'deliveryNotice', 'latitude', 'longitude'],
                     include: [
                         {
                             model: BusinessProfile,
                             as: 'businessProfile',
-                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'area', 'postcode']
+                            attributes: ['id', 'shopName', 'shopNameAlt', 'shopAddress', 'area', 'postcode', 'gstNumber']
+                        },
+                        {
+                            model: CustomLevel,
+                            as: 'rewardLevel',
+                            attributes: ['id', 'name']
+                        },
+                        {
+                            model: RouteCategory,
+                            as: 'routeCategory',
+                            attributes: ['id', 'name']
                         }
                     ]
+                },
+                {
+                    model: RouteCategory,
+                    as: 'routeCategory',
+                    attributes: ['id', 'name']
                 },
                 {
                     model: OrderItem,

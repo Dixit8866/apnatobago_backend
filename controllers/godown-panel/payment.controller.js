@@ -84,6 +84,7 @@ export const bulkVerifyPayments = async (req, res, next) => {
             {
                 orderStatus: 'Payment Verify',
                 paymentCollectStatus: 'Verified',
+                paymentVerifiedAt: new Date(),
                 ...(note && { paymentNote: note }),
             },
             { where: whereClause }

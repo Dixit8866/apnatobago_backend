@@ -135,6 +135,10 @@ const Order = sequelize.define(
             type: DataTypes.DATE,
             allowNull: true,
         },
+        paymentVerifiedAt: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
         routeCategoryId: {
             type: DataTypes.UUID,
             allowNull: true,

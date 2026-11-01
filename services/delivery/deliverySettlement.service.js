@@ -1105,6 +1105,7 @@ export const submitDeliveryBankPaymentService = async ({ orderIdOrUuid, delivery
 
         await order.update({
             orderStatus: 'Payment Verify',
+            paymentVerifiedAt: order.paymentVerifiedAt || new Date(),
             deliveredAt: order.deliveredAt || new Date(),
             notes: customDeliveryNote || order.notes,
             deliveryNotice: (!isSystemOrAuditNotice(customDeliveryNote) ? customDeliveryNote : null) || (isSystemOrAuditNotice(order.deliveryNotice) ? null : order.deliveryNotice)

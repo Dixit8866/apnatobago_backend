@@ -1082,7 +1082,7 @@ export const createAdminSalesReturn = async (req, res) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Sales return created successfully.', {
             salesReturns: salesReturnEntries,
-            newOrderTotal: newTotalAmount
+            newOrderTotal: order.totalAmount
         });
 
     } catch (error) {
