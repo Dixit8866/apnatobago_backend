@@ -855,12 +855,19 @@ export const getPartyCurrentDue = async (userId, { excludeOrderId = null, transa
  * @param {Object} query - { startDate, endDate, search, limit, page }
  * @returns {Promise<Object>}
  */
+// Only the party's last 3 bills (in ledger order) can be edited from the Party Ledger
+const LEDGER_EDITABLE_BILLS = 3;
+const getLastLedgerBillIds = (rows = []) =>
+    new Set(rows.filter(r => r.orderId).slice(-LEDGER_EDITABLE_BILLS).map(r => r.orderId));
+
 export const getPartyLedger = async (userId, query = {}) => {
     try {
         const { startDate, endDate, search } = query;
 
         const synced = await syncPartyLedger(userId, { forceRebuild: true });
         const allRows = synced.ledgerRows || [];
+        // Taken from the whole ledger, so a date filter or search does not change which bills are editable
+        const editableBillIds = getLastLedgerBillIds(allRows);
 
         // Apply Date Range Filter if provided
         let startTimestamp = null;
@@ -914,7 +921,8 @@ export const getPartyLedger = async (userId, query = {}) => {
         // Re-index SR for filtered view
         filteredRows = filteredRows.map((r, idx) => ({
             ...r,
-            sr: idx + 1
+            sr: idx + 1,
+            isEditableBill: editableBillIds.has(r.orderId)
         }));
 
         // Compute Summary Totals for UI Cards (hisab from the latest Balance Reset: older rows are not counted)
@@ -1109,24 +1117,10 @@ export const updatePartyLedgerTransaction = async ({
         const updatedById = adminUser?.id || null;
 
         if (order) {
-            // Validate: only allow editing transactions within the last 3 dates (Today, Yesterday, Day Before Yesterday)
-            // Same date the ledger row shows (deliveredAt → packagingAt → createdAt), so it matches the row's edit button
-            const ledgerDate = order.deliveredAt || order.packagingAt || order.createdAt;
-            const orderDate = ledgerDate ? new Date(ledgerDate) : null;
-            if (orderDate && !isNaN(orderDate.getTime())) {
-                const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-                const todayStr = `${istNow.getUTCFullYear()}-${String(istNow.getUTCMonth() + 1).padStart(2, '0')}-${String(istNow.getUTCDate()).padStart(2, '0')}`;
-                const todayDate = new Date(`${todayStr}T00:00:00`);
-                const cutoffDate = new Date(todayDate);
-                cutoffDate.setDate(cutoffDate.getDate() - 2);
-                const cutoffStr = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
-
-                const orderIst = new Date(orderDate.getTime() + 5.5 * 60 * 60 * 1000);
-                const orderDateStr = `${orderIst.getUTCFullYear()}-${String(orderIst.getUTCMonth() + 1).padStart(2, '0')}-${String(orderIst.getUTCDate()).padStart(2, '0')}`;
-
-                if (orderDateStr < cutoffStr) {
-                    throw new Error('માત્ર છેલ્લા ૩ દિવસ (Last 3 dates) ના રેકોર્ડ જ એડિટ કરી શકાય છે.');
-                }
+            // Validate: only the party's last 3 bills can be edited (same rule as the row's edit button)
+            const { ledgerRows: partyLedgerRows = [] } = await syncPartyLedger(user.id, { persist: false });
+            if (!getLastLedgerBillIds(partyLedgerRows).has(order.id)) {
+                throw new Error('માત્ર છેલ્લા ૩ બિલ (Last 3 bills) જ એડિટ કરી શકાય છે.');
             }
 
             const payments = order.payments || [];

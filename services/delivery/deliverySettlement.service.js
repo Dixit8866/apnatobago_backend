@@ -937,12 +937,17 @@ export const settleSingleOrderPaymentService = async ({ deliveryBoyId, body, req
                 finalMethod = 'SPLIT';
             }
 
+            // Delivery time = when the delivery boy delivers. Only for a bill being delivered now,
+            // so an old due bill settled here keeps its date (the Party Ledger date comes from deliveredAt).
+            const isBeingDelivered = !order.deliveredAt && !['Delivered', 'Payment Collect', 'Payment Verify', 'Completed'].includes(order.orderStatus);
+
             await order.update({
                 paidAmount: order.paidAmount,
                 dueAmount: due,
                 paymentStatus: newPaymentStatus,
                 paymentMethod: finalMethod,
                 orderStatus: 'Payment Collect',
+                ...(isBeingDelivered && { deliveredAt: new Date() }),
                 notes: customDeliveryNote || order.notes,
                 deliveryNotice: (!isSystemOrAuditNotice(customDeliveryNote) ? customDeliveryNote : null) || (isSystemOrAuditNotice(order.deliveryNotice) ? null : order.deliveryNotice)
             }, { transaction: t });
