@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import sequelize from '../../config/db.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
@@ -838,6 +838,495 @@ export const deleteInventoryStock = async (req, res, next) => {
 
         return sendSuccessResponse(res, HTTP_STATUS.OK, 'Inventory stock deleted successfully.');
     } catch (error) {
+        next(error);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Volume Wise Stock (Inventory Overview page)
+//
+// One row per product volume (variant):  Opening + Purchase − Sales = Available
+//  - Available = live stock (inventory_stocks), the same stock that orders use.
+//  - Purchase  = PURCHASE entries of the inventory log.
+//  - Sales     = SALE entries minus stock that came back (good sales returns,
+//                cancelled / edited / deleted order restores).
+//  - Opening   = Available − Purchase + Sales, so the formula always matches live
+//                stock. Editing Opening adds/removes stock as an ADJUSTMENT.
+// Quantities are shown in the volume's own unit (stock is stored in base units),
+// and the rate is the volume's purchase rate from product details.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const round3 = (n) => Number(Number(n || 0).toFixed(3));
+
+const getVolumeLabel = (variant) => {
+    const ref = variant?.volumeRef?.name;
+    const en = ref && typeof ref === 'object' ? (ref.en || '') : (ref || '');
+    const gu = ref && typeof ref === 'object' ? (ref.gu || '') : '';
+    let unitName = en || gu || (ref && typeof ref === 'object' ? (Object.values(ref)[0] || '') : '');
+    if (en && gu && en !== gu) unitName = `${en} (${gu})`;
+
+    const value = String(variant?.volume || '').trim();
+    const showValue = value && value !== '1' && !(en && value.toLowerCase().includes(en.toLowerCase()));
+    let label = unitName ? (showValue ? `${value} ${unitName}` : unitName) : value;
+    if (variant?.extra && String(variant.extra).trim()) {
+        label = `${String(variant.extra).trim()} ${label}`.trim();
+    }
+    return label || '-';
+};
+
+// Base-unit totals per variant from the inventory log (optionally for one godown / one variant)
+const getVariantMovementTotals = async ({ godownId = null, variantId = null, transaction = null } = {}) => {
+    return sequelize.query(
+        `SELECT "variantId",
+            COALESCE(SUM(CASE WHEN "type" = 'PURCHASE' THEN "totalQtyBaseUnits" ELSE 0 END), 0) AS "purchaseUnits",
+            COALESCE(SUM(CASE WHEN "type" = 'SALE' THEN "totalQtyBaseUnits" ELSE 0 END), 0) AS "saleUnits",
+            COALESCE(SUM(CASE
+                WHEN "type" = 'SALES_RETURN' AND COALESCE("note", '') NOT ILIKE '%Damaged%' THEN "totalQtyBaseUnits"
+                WHEN "type" = 'ADJUSTMENT' AND COALESCE("note", '') ILIKE '%Stock Restored%' THEN "totalQtyBaseUnits"
+                ELSE 0 END), 0) AS "saleBackUnits"
+        FROM "inventory_transactions"
+        WHERE "deletedAt" IS NULL
+          ${godownId ? 'AND "godownId" = :godownId' : ''}
+          ${variantId ? 'AND "variantId" = :variantId' : ''}
+        GROUP BY "variantId"`,
+        { replacements: { godownId, variantId }, type: QueryTypes.SELECT, transaction }
+    );
+};
+
+const getVariantStockUnits = async ({ godownId = null, variantId = null, transaction = null } = {}) => {
+    return sequelize.query(
+        `SELECT "variantId", COALESCE(SUM("totalBaseUnits"), 0) AS "units"
+        FROM "inventory_stocks"
+        WHERE "deletedAt" IS NULL
+          AND "status" = 'Active'
+          ${godownId ? 'AND "godownId" = :godownId' : ''}
+          ${variantId ? 'AND "variantId" = :variantId' : ''}
+        GROUP BY "variantId"`,
+        { replacements: { godownId, variantId }, type: QueryTypes.SELECT, transaction }
+    );
+};
+
+const getVariantAlertQty = (product, variant) => {
+    const list = Array.isArray(product.lowStockVolumes) ? product.lowStockVolumes : [];
+    const match = list.find((x) => x && x.volumeId && x.volumeId === variant.volumeId)
+        || list.find((x) => x && x.volumeId && x.volumeId === variant.baseUnitLabel);
+    if (match) return Number(match.qty || 0);
+    if (product.lowStockVolumeId && [variant.volumeId, variant.baseUnitLabel].includes(product.lowStockVolumeId)) {
+        return Number(product.lowStockQuantity || 0);
+    }
+    return null;
+};
+
+// PURCHASE entries per variant, newest first (unit rate is stored per base unit)
+const getVariantPurchaseEntries = async ({ godownId = null } = {}) => {
+    const rows = await sequelize.query(
+        `SELECT "variantId", "totalQtyBaseUnits" AS "units", "purchasePricePerBaseUnit" AS "unitRate"
+        FROM "inventory_transactions"
+        WHERE "deletedAt" IS NULL
+          AND "type" = 'PURCHASE'
+          AND "totalQtyBaseUnits" > 0
+          ${godownId ? 'AND "godownId" = :godownId' : ''}
+        ORDER BY "variantId", "createdAt" DESC`,
+        { replacements: { godownId }, type: QueryTypes.SELECT }
+    );
+    const map = new Map();
+    rows.forEach((r) => {
+        if (!map.has(r.variantId)) map.set(r.variantId, []);
+        map.get(r.variantId).push({ units: Number(r.units || 0), unitRate: Number(r.unitRate || 0) });
+    });
+    return map;
+};
+
+// Per-base-unit rates are stored with 2 decimals; bring the pack rate back to the bill rate
+const toPackRate = (unitRate, perPack, productRate) => {
+    const raw = unitRate * perPack;
+    const tolerance = perPack * 0.005 + 0.001;
+    if (productRate > 0 && Math.abs(raw - productRate) <= tolerance) return productRate;
+    if (Math.abs(raw - Math.round(raw)) <= tolerance) return Math.round(raw);
+    return round2(raw);
+};
+
+// FIFO: stock lying now = the latest purchases (old stock is sold first).
+// Anything not covered by a purchase (opening / adjustments) is valued at the product rate.
+// With the purchase-bill hold ON, the first `oldStockLimitQty` packs are "selling now", the rest is on hold.
+const buildStockLots = ({ availableUnits, purchases = [], perPack, productRate, holdActive, holdOldPacks }) => {
+    if (availableUnits <= 0) return [];
+
+    const lots = []; // oldest first
+    let remaining = availableUnits;
+    for (const p of purchases) {
+        if (remaining <= 0) break;
+        const take = Math.min(remaining, p.units);
+        lots.unshift({ units: take, rate: toPackRate(p.unitRate, perPack, productRate), fromOpening: false });
+        remaining -= take;
+    }
+    if (remaining > 0) lots.unshift({ units: remaining, rate: productRate, fromOpening: true });
+
+    let oldLeftUnits = holdActive ? Math.min(Math.round(holdOldPacks * perPack), availableUnits) : Infinity;
+    const marked = [];
+    for (const lot of lots) {
+        if (oldLeftUnits >= lot.units) {
+            marked.push({ ...lot, hold: false });
+            oldLeftUnits -= lot.units;
+        } else if (oldLeftUnits > 0) {
+            marked.push({ ...lot, units: oldLeftUnits, hold: false });
+            marked.push({ ...lot, units: lot.units - oldLeftUnits, hold: true });
+            oldLeftUnits = 0;
+        } else {
+            marked.push({ ...lot, hold: true });
+        }
+    }
+
+    const merged = [];
+    for (const lot of marked) {
+        const last = merged[merged.length - 1];
+        if (last && last.rate === lot.rate && last.hold === lot.hold) last.units += lot.units;
+        else merged.push({ ...lot });
+    }
+    return merged.map((l) => ({
+        qty: round3(l.units / perPack),
+        rate: l.rate,
+        value: round2((l.units / perPack) * l.rate),
+        hold: l.hold,
+        fromOpening: l.fromOpening,
+    }));
+};
+
+export const getVolumeWiseStock = async (req, res, next) => {
+    try {
+        const { search = '', status = '', godownId, mainCategoryId } = req.query;
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 50));
+        const scopeGodownId = godownId || null;
+
+        const where = { status: { [Op.ne]: 'Deleted' } };
+        if (mainCategoryId) where.mainCategoryId = mainCategoryId;
+
+        const terms = String(search).trim().split(/\s+/).filter(Boolean);
+        if (terms.length) {
+            where[Op.and] = terms.map((term) => ({
+                [Op.or]: [
+                    { 'name.en': { [Op.iLike]: `%${term}%` } },
+                    { 'name.gu': { [Op.iLike]: `%${term}%` } },
+                    { 'name.hn': { [Op.iLike]: `%${term}%` } },
+                    { serialNumber: { [Op.iLike]: `%${term}%` } },
+                    { boxNumber: { [Op.iLike]: `%${term}%` } },
+                    sequelize.literal(`EXISTS (SELECT 1 FROM unnest("Product"."keywords") AS k WHERE k ILIKE ${sequelize.escape(`%${term}%`)})`),
+                ],
+            }));
+        }
+
+        const [products, stockRows, movementRows, purchaseMap] = await Promise.all([
+            Product.findAll({
+                where,
+                attributes: ['id', 'name', 'thumbnail', 'serialNumber', 'boxNumber', 'lowStockVolumeId', 'lowStockQuantity', 'lowStockVolumes', 'position', 'createdAt'],
+                include: [
+                    {
+                        model: ProductVariant,
+                        as: 'variants',
+                        required: false,
+                        attributes: ['id', 'volume', 'extra', 'volumeId', 'purchasePrice', 'baseUnitsPerPack', 'baseUnitLabel', 'innerUnitLabel', 'position', 'createdAt', 'status', 'oldStockLockToggle', 'oldStockLimitQty'],
+                        include: [
+                            { model: Volume, as: 'volumeRef', attributes: ['id', 'name'] },
+                            { model: Volume, as: 'innerUnitRef', attributes: ['id', 'name'] },
+                        ],
+                    },
+                ],
+                order: [
+                    ['position', 'ASC'],
+                    ['createdAt', 'DESC'],
+                    [{ model: ProductVariant, as: 'variants' }, 'position', 'ASC'],
+                    [{ model: ProductVariant, as: 'variants' }, 'createdAt', 'ASC'],
+                ],
+            }),
+            getVariantStockUnits({ godownId: scopeGodownId }),
+            getVariantMovementTotals({ godownId: scopeGodownId }),
+            getVariantPurchaseEntries({ godownId: scopeGodownId }),
+        ]);
+
+        const stockMap = new Map(stockRows.map((r) => [r.variantId, Number(r.units || 0)]));
+        const moveMap = new Map(movementRows.map((r) => [r.variantId, r]));
+
+        const allRows = products.map((p) => {
+            const product = p.toJSON();
+            const variants = (product.variants || []).map((v) => {
+                const perPack = Number(v.baseUnitsPerPack) > 0 ? Number(v.baseUnitsPerPack) : 1;
+                const mv = moveMap.get(v.id) || {};
+                const availableUnits = stockMap.get(v.id) || 0;
+                const purchaseUnits = Number(mv.purchaseUnits || 0);
+                const salesUnits = Number(mv.saleUnits || 0) - Number(mv.saleBackUnits || 0);
+                const openingUnits = availableUnits - purchaseUnits + salesUnits;
+                const productRate = Number(v.purchasePrice || 0);
+                const available = availableUnits / perPack;
+                const alertQty = getVariantAlertQty(product, v);
+
+                const holdActive = !!v.oldStockLockToggle && Number(v.oldStockLimitQty || 0) > 0;
+                const lots = buildStockLots({
+                    availableUnits,
+                    purchases: purchaseMap.get(v.id) || [],
+                    perPack,
+                    productRate,
+                    holdActive,
+                    holdOldPacks: Number(v.oldStockLimitQty || 0),
+                });
+                const rate = lots.length ? lots[0].rate : productRate; // rate of the stock being sold now
+                const stockValue = lots.length
+                    ? round2(lots.reduce((s, l) => s + l.value, 0))
+                    : round2(available * productRate);
+                const openingAmount = round2((openingUnits / perPack) * productRate);
+                const purchaseAmount = round2((purchaseMap.get(v.id) || []).reduce((s, p) => s + (p.units / perPack) * toPackRate(p.unitRate, perPack, productRate), 0));
+                const holdQty = round3(lots.filter((l) => l.hold).reduce((s, l) => s + l.qty, 0));
+
+                let stockStatus = 'in';
+                if (available <= 0) stockStatus = 'out';
+                else if (alertQty != null && alertQty > 0 && available <= alertQty) stockStatus = 'low';
+
+                return {
+                    id: v.id,
+                    volumeId: v.volumeId,
+                    volumeLabel: getVolumeLabel(v),
+                    innerUnitName: v.innerUnitRef?.name
+                        ? (v.innerUnitRef.name.en || v.innerUnitRef.name.gu || Object.values(v.innerUnitRef.name)[0] || '')
+                        : '',
+                    perPack,
+                    opening: round3(openingUnits / perPack),
+                    purchase: round3(purchaseUnits / perPack),
+                    sales: round3(salesUnits / perPack),
+                    available: round3(available),
+                    availableUnits,
+                    rate,
+                    productRate,
+                    lots,
+                    holdActive,
+                    holdQty,
+                    stockValue,
+                    openingAmount,
+                    purchaseAmount,
+                    // FIFO cost of what went out, so Opening + Purchase − Sales = Stock Value
+                    salesAmount: round2(openingAmount + purchaseAmount - stockValue),
+                    alertQty,
+                    stockStatus,
+                };
+            });
+
+            const totalAvailable = variants.reduce((s, v) => s + v.availableUnits, 0);
+            let status = 'in';
+            if (!variants.length || totalAvailable <= 0) status = 'out';
+            else if (variants.some((v) => v.alertQty != null && v.alertQty > 0 && v.available <= v.alertQty)) status = 'low';
+
+            return {
+                id: product.id,
+                name: product.name,
+                thumbnail: product.thumbnail,
+                serialNumber: product.serialNumber,
+                boxNumber: product.boxNumber,
+                status,
+                variants,
+            };
+        });
+
+        const statusCounts = { '': allRows.length, in: 0, low: 0, out: 0 };
+        allRows.forEach((r) => { statusCounts[r.status] += 1; });
+
+        const filtered = ['in', 'low', 'out'].includes(status) ? allRows.filter((r) => r.status === status) : allRows;
+
+        const totals = {
+            openingAmount: 0,
+            purchaseAmount: 0,
+            salesAmount: 0,
+            availableAmount: 0,
+            outOfStockAmount: 0,
+            outOfStockVolumes: 0,
+        };
+        filtered.forEach((r) => {
+            r.variants.forEach((v) => {
+                totals.openingAmount += v.openingAmount;
+                totals.purchaseAmount += v.purchaseAmount;
+                totals.salesAmount += v.salesAmount;
+                if (v.available < 0) totals.outOfStockAmount += Math.abs(v.stockValue);
+                else totals.availableAmount += v.stockValue;
+                if (v.available <= 0) totals.outOfStockVolumes += 1;
+            });
+        });
+        Object.keys(totals).forEach((k) => {
+            if (k !== 'outOfStockVolumes') totals[k] = round2(totals[k]);
+        });
+
+        const totalRecords = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(totalRecords / limit));
+        const currentPage = Math.min(page, totalPages);
+        const data = filtered.slice((currentPage - 1) * limit, currentPage * limit);
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Volume wise stock fetched successfully.', {
+            data,
+            totalRecords,
+            totalPages,
+            currentPage,
+            statusCounts,
+            totals,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const updateVolumeOpeningStock = async (req, res, next) => {
+    const t = await sequelize.transaction();
+    try {
+        const { variantId } = req.body;
+        // Same godown as the list view (admin axios also sends the global godown as a query param)
+        const godownId = req.body.godownId || req.query.godownId || null;
+        const newOpening = Number(req.body.openingQty);
+
+        if (!variantId) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'variantId is required.');
+        }
+        if (req.body.openingQty === '' || req.body.openingQty == null || !Number.isFinite(newOpening) || newOpening < 0) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Opening must be zero or more.');
+        }
+
+        const variant = await ProductVariant.findByPk(variantId, { transaction: t });
+        if (!variant) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product volume not found.');
+        }
+        const product = await Product.findOne({
+            where: { id: variant.productId, status: { [Op.ne]: 'Deleted' } },
+            transaction: t,
+        });
+        if (!product) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Product not found.');
+        }
+
+        // Stock goes into the godown chosen on screen; with "All Godowns" it goes into the main godown.
+        let godown = null;
+        if (godownId) {
+            godown = await validateGodown(godownId, t);
+        } else {
+            godown = await Godown.findOne({ where: { status: 'Active', type: 'main' }, order: [['createdAt', 'ASC']], transaction: t })
+                || await Godown.findOne({ where: { status: 'Active' }, order: [['createdAt', 'ASC']], transaction: t });
+        }
+        if (!godown) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Godown not found.');
+        }
+
+        const perPack = Number(variant.baseUnitsPerPack) > 0 ? Number(variant.baseUnitsPerPack) : 1;
+        const scopeGodownId = godownId ? godown.id : null;
+
+        const rows = await InventoryStock.findAll({
+            where: { variantId, godownId: godown.id, status: 'Active' },
+            order: [['createdAt', 'DESC']],
+            transaction: t,
+            lock: t.LOCK.UPDATE,
+        });
+
+        const [stockAgg] = await getVariantStockUnits({ godownId: scopeGodownId, variantId, transaction: t });
+        const [movement] = await getVariantMovementTotals({ godownId: scopeGodownId, variantId, transaction: t });
+        const availableUnits = Number(stockAgg?.units || 0);
+        const purchaseUnits = Number(movement?.purchaseUnits || 0);
+        const salesUnits = Number(movement?.saleUnits || 0) - Number(movement?.saleBackUnits || 0);
+        const currentOpeningUnits = availableUnits - purchaseUnits + salesUnits;
+        const targetOpeningUnits = Math.round(newOpening * perPack);
+        const deltaUnits = targetOpeningUnits - currentOpeningUnits;
+
+        if (deltaUnits === 0) {
+            await t.rollback();
+            return sendSuccessResponse(res, HTTP_STATUS.OK, 'Opening stock unchanged.', { opening: round3(currentOpeningUnits / perPack) });
+        }
+
+        const godownUnits = rows.reduce((s, r) => s + Number(r.totalBaseUnits || 0), 0);
+        if (godownUnits + deltaUnits < 0) {
+            await t.rollback();
+            const minOpening = round3((currentOpeningUnits - godownUnits) / perPack);
+            return sendErrorResponse(
+                res,
+                HTTP_STATUS.BAD_REQUEST,
+                `Opening cannot be less than ${Math.max(0, minOpening)} here, otherwise stock in ${godown.name} would go below zero.`
+            );
+        }
+
+        const ratePerUnit = Number(variant.purchasePrice || 0) / perPack;
+        const changes = [];
+
+        if (deltaUnits > 0) {
+            let row = rows[0];
+            if (!row) {
+                row = await InventoryStock.create({
+                    productId: variant.productId,
+                    variantId,
+                    godownId: godown.id,
+                    primaryUnitId: variant.baseUnitLabel || variant.volumeId || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
+                    secondaryUnitId: variant.innerUnitLabel || null,
+                    secondaryPerPrimary: perPack,
+                    totalBaseUnits: 0,
+                    avgPurchasePricePerBaseUnit: round2(ratePerUnit),
+                    lastPurchasePricePerBaseUnit: round2(ratePerUnit),
+                    status: 'Active',
+                }, { transaction: t });
+            }
+            const oldUnits = Number(row.totalBaseUnits || 0);
+            const oldAvg = Number(row.avgPurchasePricePerBaseUnit || 0);
+            const newUnits = oldUnits + deltaUnits;
+            const newAvg = oldUnits > 0 && ratePerUnit > 0
+                ? ((oldUnits * oldAvg) + (deltaUnits * ratePerUnit)) / newUnits
+                : (ratePerUnit > 0 ? ratePerUnit : oldAvg);
+            await row.update({ totalBaseUnits: newUnits, avgPurchasePricePerBaseUnit: round2(newAvg) }, { transaction: t });
+            changes.push({ row, change: deltaUnits, balance: newUnits, avg: newAvg });
+        } else {
+            let remaining = -deltaUnits;
+            for (const row of rows) {
+                if (remaining <= 0) break;
+                const have = Number(row.totalBaseUnits || 0);
+                if (have <= 0) continue;
+                const take = Math.min(have, remaining);
+                await row.update({ totalBaseUnits: have - take }, { transaction: t });
+                changes.push({ row, change: -take, balance: have - take, avg: Number(row.avgPurchasePricePerBaseUnit || 0) });
+                remaining -= take;
+            }
+        }
+
+        const oldOpening = round3(currentOpeningUnits / perPack);
+        for (const c of changes) {
+            const split = splitBaseUnits(Math.abs(c.change), perPack);
+            await InventoryTransaction.create({
+                stockId: c.row.id,
+                productId: variant.productId,
+                variantId,
+                godownId: godown.id,
+                type: 'ADJUSTMENT',
+                primaryUnitId: c.row.primaryUnitId,
+                secondaryUnitId: c.row.secondaryUnitId || null,
+                secondaryPerPrimary: Number(c.row.secondaryPerPrimary || perPack),
+                qtyPrimary: split.qtyPrimary,
+                qtySecondary: split.qtySecondary,
+                totalQtyBaseUnits: c.change,
+                purchasePricePerBaseUnit: c.change > 0 ? round2(ratePerUnit) : null,
+                avgPriceAfterTxn: round2(c.avg),
+                balanceAfterBaseUnits: c.balance,
+                note: `Opening Stock Edit: ${oldOpening} → ${round3(newOpening)} (Volume Wise Stock)`,
+                createdBy: getCreatorName(req),
+            }, { transaction: t });
+        }
+
+        await t.commit();
+
+        logActivity(req, {
+            module: 'Stock Inventory',
+            action: 'STOCK_UPDATE',
+            description: `Opening stock changed from ${oldOpening} to ${round3(newOpening)} for product ID #${variant.productId} (${godown.name})`,
+            metadata: { productId: variant.productId, variantId, godownId: godown.id, oldOpening, newOpening: round3(newOpening), deltaUnits },
+        });
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, 'Opening stock updated successfully.', {
+            opening: round3(newOpening),
+            deltaUnits,
+        });
+    } catch (error) {
+        await t.rollback();
         next(error);
     }
 };
