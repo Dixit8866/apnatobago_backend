@@ -231,7 +231,7 @@ export const getStockSummary = async (req, res, next) => {
         const g = scope ? 'AND "godownId" = :scope' : '';
         const repl = { scope, from, to };
 
-        const [products, lotRows, sellingRows, holdRows, moveRows, afterRows, lineRows, pricingRows, pendingRows] = await Promise.all([
+        const [products, lotRows, sellingRows, holdRows, moveRows, afterRows, lineRows, pricingRows, pendingRows, volumeRows] = await Promise.all([
             loadProducts({ search, mainCategoryId }),
             sequelize.query(
                 `SELECT "productId",
@@ -286,7 +286,25 @@ export const getStockSummary = async (req, res, next) => {
                  WHERE "deletedAt" IS NULL AND "pricingApplied" = false AND "pricingData" IS NOT NULL ${g}`,
                 { replacements: repl, type: QueryTypes.SELECT }
             ),
+            sequelize.query(
+                `SELECT "productId", "variantId",
+                        COALESCE(SUM(CASE WHEN movement IN ('PURCHASE', 'MANUAL_IN', 'PURCHASE_RETURN') THEN "qtyChange" ELSE 0 END), 0) AS purchase,
+                        -COALESCE(SUM(CASE WHEN movement IN ('SALE', 'SALE_REVERSAL', 'SALES_RETURN') THEN "qtyChange" ELSE 0 END), 0) AS sales
+                 FROM inventory_transactions
+                 WHERE "deletedAt" IS NULL AND movement IN ('PURCHASE', 'MANUAL_IN', 'PURCHASE_RETURN', 'SALE', 'SALE_REVERSAL', 'SALES_RETURN')
+                   AND "createdAt" > :from AND "createdAt" <= :to ${g}
+                 GROUP BY 1, 2`,
+                { replacements: repl, type: QueryTypes.SELECT }
+            ),
         ]);
+        const volumeMovesByProduct = new Map();
+        for (const vr of volumeRows) {
+            const purchase = Number(vr.purchase || 0);
+            const sales = Number(vr.sales || 0);
+            if (!purchase && !sales) continue;
+            if (!volumeMovesByProduct.has(vr.productId)) volumeMovesByProduct.set(vr.productId, []);
+            volumeMovesByProduct.get(vr.productId).push({ variantId: vr.variantId, purchase, sales });
+        }
         const linesByProduct = groupLotLines(lineRows);
         const pricingByVariant = new Map();
         for (const pr of pricingRows) {
@@ -377,6 +395,7 @@ export const getStockSummary = async (req, res, next) => {
                 alertBase,
                 holdUnits,
                 priceIssues,
+                volumeMoves: volumeMovesByProduct.get(product.id) || [],
                 lots: Number(lot.lots || 0),
                 status: rowStatus,
             };
