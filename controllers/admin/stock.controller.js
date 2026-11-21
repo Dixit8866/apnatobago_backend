@@ -319,7 +319,7 @@ export const getStockSummary = async (req, res, next) => {
 
             const closing = Number(lot.units || 0) - Number(after.qty || 0);
             const closingValue = Number(lot.value || 0) - Number(after.value || 0);
-            const purchase = mv(m, 'PURCHASE', 'MANUAL_IN');
+            const purchase = mv(m, 'PURCHASE', 'MANUAL_IN', 'PURCHASE_RETURN'); // net of purchase returns
             const salesNet = mv(m, 'SALE', 'SALE_REVERSAL', 'SALES_RETURN'); // negative = went out
             const returns = mv(m, 'SALES_RETURN');
             const transfer = mv(m, 'TRANSFER_IN', 'TRANSFER_OUT');
@@ -428,7 +428,7 @@ export const getStockSummary = async (req, res, next) => {
 /* ─────────────────────────── Edit Stock (popup) ─────────────────────────── */
 
 const SALE_MOVES = ['SALE', 'SALE_REVERSAL', 'SALES_RETURN'];
-const PURCHASE_MOVES = ['PURCHASE', 'MANUAL_IN'];
+const PURCHASE_MOVES = ['PURCHASE', 'MANUAL_IN', 'PURCHASE_RETURN'];
 
 /** One product in one godown for a period: opening / purchase / sales per volume + available. */
 const productPeriod = async ({ productId, godownId, from, to, t = null }) => {
@@ -750,6 +750,8 @@ export const getProductLots = async (req, res, next) => {
                 godown: l.godown?.name || '',
                 godownId: l.godownId,
                 source: MOVEMENT_LABELS[l.sourceType] || (l.sourceType ? l.sourceType : 'Old stock'),
+                sourceType: l.sourceType || null,
+                isPurchase: ['PURCHASE', 'MANUAL_IN'].includes(l.sourceType),
                 sourceRef: l.sourceRef || l.batchNumber || '',
                 receivedAt: l.receivedAt || l.createdAt,
                 received: l.receivedBaseUnits !== null && l.receivedBaseUnits !== undefined ? Number(l.receivedBaseUnits) : null,
@@ -808,6 +810,44 @@ export const createStockAdjustment = async (req, res, next) => {
         });
 
         return sendSuccessResponse(res, HTTP_STATUS.CREATED, 'Stock adjusted successfully.', { before, after, qtyBase });
+    } catch (error) {
+        if (error.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message);
+        next(error);
+    }
+};
+
+const LOT_REMOVE_REASONS = ['Purchase return', 'Wrong entry', 'Damage', 'Expired', 'Shortage', 'Other'];
+
+/** Remove stock from one chosen lot (e.g. the ₹2,190 purchase), with a reason. */
+export const removeFromLot = async (req, res, next) => {
+    try {
+        const { quantities = {}, reason, note } = req.body;
+        if (!LOT_REMOVE_REASONS.includes(reason)) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Choose a reason.');
+        if (reason === 'Other' && !String(note || '').trim()) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Write a note when the reason is "Other".');
+        const lot = await InventoryStock.findByPk(req.params.id);
+        if (!lot) return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Lot not found.');
+        const variants = await ProductVariant.findAll({ where: { productId: lot.productId }, paranoid: false });
+        let qtyBase = 0;
+        for (const [variantId, raw] of Object.entries(quantities || {})) {
+            const v = variants.find((x) => x.id === variantId);
+            const q = Number(raw || 0);
+            if (!v || !Number.isFinite(q) || q < 0) return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Quantities must be zero or more.');
+            qtyBase += q * perPackOf(v);
+        }
+        qtyBase = Math.round(qtyBase);
+        const isPurchaseLot = ['PURCHASE', 'MANUAL_IN'].includes(lot.sourceType);
+        if (reason === 'Purchase return' && !isPurchaseLot) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Purchase return is only for stock that came from a purchase. Choose another reason.');
+        }
+        const movement = isPurchaseLot && ['Purchase return', 'Wrong entry'].includes(reason) ? 'PURCHASE_RETURN' : 'ADJUSTMENT_OUT';
+        const result = await stockService.issueFromLot({ lotId: lot.id, qtyBase, movement, reason, note: note || null, actor: req.user });
+        logActivity(req, {
+            module: 'Stock Inventory',
+            action: 'STOCK_UPDATE',
+            description: `Removed ${qtyBase} base units from lot ${lot.sourceRef || lot.id} (${reason}) for product ID #${lot.productId}`,
+            metadata: { lotId: lot.id, productId: lot.productId, godownId: lot.godownId, qtyBase, reason, movement, cancelHeld: result.cancelHeld },
+        });
+        return sendSuccessResponse(res, HTTP_STATUS.OK, result.cancelHeld ? 'Removed. The held new prices of this purchase were cancelled.' : 'Removed from this lot.', { qtyBase, movement, left: Number(result.lot.totalBaseUnits) });
     } catch (error) {
         if (error.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message);
         next(error);

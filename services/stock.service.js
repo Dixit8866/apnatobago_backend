@@ -40,6 +40,7 @@ export const MOVEMENT_LABELS = {
     ADJUSTMENT_OUT: 'Adjustment −',
     CUTOFF_ARCHIVE: 'Closed at cut-off',
     REVALUE: 'Rate updated',
+    PURCHASE_RETURN: 'Purchase return',
 };
 
 // Old `type` column kept for screens that still read it
@@ -57,6 +58,7 @@ const LEGACY_TYPE = {
     ADJUSTMENT_OUT: 'ADJUSTMENT',
     CUTOFF_ARCHIVE: 'ADJUSTMENT',
     REVALUE: 'ADJUSTMENT',
+    PURCHASE_RETURN: 'ADJUSTMENT',
 };
 
 export const ADJUSTMENT_REASONS = ['Shortage', 'Damage', 'Expired', 'Excess', 'Count correction', 'Other'];
@@ -460,6 +462,34 @@ export const reverseRef = async (opts, transaction) =>
         return { restored };
     });
 
+/**
+ * Take stock out of ONE chosen lot (not FIFO), e.g. return a purchase at its own rate.
+ * PURCHASE_RETURN reduces the Purchase column; ADJUSTMENT_OUT goes with the other corrections.
+ * Returning a whole held purchase also cancels the new prices waiting on it.
+ */
+export const issueFromLot = async ({ lotId, qtyBase, movement = 'ADJUSTMENT_OUT', reason, note = null, actor = null }, transaction) =>
+    withTx(transaction, async (t) => {
+        const qty = Math.round(Number(qtyBase));
+        if (!Number.isFinite(qty) || qty <= 0) throw new StockError('Enter a quantity to remove.');
+        if (!reason || !String(reason).trim()) throw new StockError('Reason is required.');
+        const lot = await InventoryStock.findByPk(lotId, { transaction: t, lock: t.LOCK.UPDATE });
+        if (!lot) throw new StockError('Lot not found.');
+        const have = Number(lot.totalBaseUnits || 0);
+        if (qty > have) throw new StockError(`This lot has only ${have} (base units) left.`);
+        const left = have - qty;
+        const cancelHeld = movement === 'PURCHASE_RETURN' && left === 0 && lot.pricingApplied === false;
+        await lot.update({ totalBaseUnits: left, ...(cancelHeld ? { pricingApplied: true, pricingData: null } : {}) }, { transaction: t });
+        const balanceAfter = await getProductBalance(lot.productId, lot.godownId, t);
+        const entry = await writeEntry({
+            lot, productId: lot.productId, variantId: lot.variantId, godownId: lot.godownId, movement, qtyChange: -qty, unitCost: lotCost(lot),
+            ref: { refType: 'MANUAL', refNo: lot.sourceRef || (movement === 'PURCHASE_RETURN' ? 'RETURN' : 'ADJUSTMENT') },
+            reason, note: cancelHeld ? `${note ? note + ' · ' : ''}held new prices cancelled` : note, actor, balanceAfter,
+            meta: { lotId: lot.id, lotSource: lot.sourceType || null },
+        }, t);
+        await refreshHoldState(lot.productId, t);
+        return { lot, entry, cancelHeld };
+    });
+
 /** Godown → godown. Cost travels with the stock. */
 export const transfer = async (opts, transaction) =>
     withTx(transaction, async (t) => {
@@ -699,6 +729,7 @@ export default {
     reverseRef,
     transfer,
     adjust,
+    issueFromLot,
     recordDamagedReturn,
     refreshHoldState,
     applyPricingSet,

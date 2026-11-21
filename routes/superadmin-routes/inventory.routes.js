@@ -27,6 +27,7 @@ import {
     resolveLegacyHold,
     getStockEdit,
     saveStockEdit,
+    removeFromLot,
 } from '../../controllers/admin/stock.controller.js';
 
 const router = express.Router();
@@ -46,6 +47,7 @@ router.get('/stock-meta', protect, admin, getStockMeta);
 router.get('/stock-summary', protect, admin, getStockSummary);
 router.get('/stock-ledger', protect, admin, getStockLedger);
 router.get('/stock-lots', protect, admin, getProductLots);
+router.post('/stock-lots/:id/remove', protect, admin, removeFromLot);
 router.post('/stock-adjust', protect, admin, createStockAdjustment);
 router.get('/stock-edit', protect, admin, getStockEdit);
 router.put('/stock-edit', protect, admin, saveStockEdit);
