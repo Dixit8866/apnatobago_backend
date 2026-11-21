@@ -62,6 +62,45 @@ const InventoryStock = sequelize.define(
             type: DataTypes.STRING,
             defaultValue: 'Active',
         },
+        // ── Lot (FIFO) fields: every receipt is its own lot; sales use the oldest lot first ──
+        sourceType: {
+            // OPENING | PURCHASE | MANUAL_IN | SALES_RETURN | SALE_REVERSAL | TRANSFER_IN | ADJUSTMENT_IN | LEGACY
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: null,
+        },
+        sourceRef: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: null,
+        },
+        receivedBaseUnits: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            defaultValue: null,
+        },
+        unitCost: {
+            // purchase cost per base unit, kept with 4 decimals so pack rates stay exact
+            type: DataTypes.DECIMAL(14, 4),
+            allowNull: true,
+            defaultValue: null,
+        },
+        pricingData: {
+            // selling price set that goes live when this lot starts selling (purchase-bill hold)
+            type: DataTypes.JSONB,
+            allowNull: true,
+            defaultValue: null,
+        },
+        pricingApplied: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: true,
+        },
+        receivedAt: {
+            type: DataTypes.DATE,
+            allowNull: true,
+            defaultValue: null,
+        },
     },
     {
         timestamps: true,

@@ -1,4 +1,5 @@
 import { Order, OrderItem, Product, ProductVariant, ProductPricing, User, Volume, InventoryStock, InventoryTransaction, AppSettings, OrderPayment, BusinessProfile } from '../../models/index.js';
+import { issueOrderStock } from '../../helpers/inventory.helper.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -441,54 +442,16 @@ export const createCustomSale = async (req, res) => {
             }, { transaction: t });
         }
 
-        // 4. Deduct Stock from Inventory
-        for (const item of orderItemsData) {
-            const isLoose = item.sellUnit === 'Inner';
-            const deductionRequired = isLoose ? item.quantity : (item.quantity * (item.variantInfo.baseUnitsPerPack || 1));
-            
-            const stocks = await InventoryStock.findAll({
-                where: { 
-                    productId: item.productId, 
-                    godownId, 
-                    totalBaseUnits: { [Op.gt]: 0 } 
-                },
-                order: [['createdAt', 'ASC']],
-                transaction: t
-            });
-
-            let remainingToDeduct = deductionRequired;
-            for (const stock of stocks) {
-                if (remainingToDeduct <= 0) break;
-
-                const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-                
-                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                // Log the transaction
-                await InventoryTransaction.create({
-                    stockId: stock.id,
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    godownId,
-                    type: 'SALE',
-                    primaryUnitId: stock.primaryUnitId,
-                    secondaryUnitId: stock.secondaryUnitId,
-                    secondaryPerPrimary: stock.secondaryPerPrimary,
-                    totalQtyBaseUnits: deductFromThis,
-                    balanceAfterBaseUnits: newTotalBaseUnits,
-                    note: isMerged ? `Direct Sale (Merged into #${targetSale.orderId})` : `Direct Sale #${targetSale.orderId}`,
-                    createdBy: req.user?.name || 'Admin'
-                }, { transaction: t });
-
-                remainingToDeduct -= deductFromThis;
-            }
-            
-            if (remainingToDeduct > 0) {
-                // For direct sales, we might allow negative stock or just log a warning
-                logger.warn(`[Direct Sale Stock Warning]: Order #${targetSale.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId}`);
-            }
-        }
+        // 4. Take stock out (Stock Service: oldest lot first, this godown only, ledger entry per lot)
+        await issueOrderStock({
+            refType: 'ORDER',
+            refId: targetSale.id,
+            refNo: targetSale.orderId,
+            godownId,
+            items: orderItemsData.map((it) => ({ variantId: it.variantId, quantity: it.quantity, sellUnit: it.sellUnit })),
+            actor: req.user,
+            note: isMerged ? `Direct Sale (merged into #${targetSale.orderId})` : `Direct Sale #${targetSale.orderId}`,
+        }, t);
 
         // 5. Create Order Payment Records
         if (resolvedPayments && resolvedPayments.length > 0) {
@@ -579,6 +542,7 @@ export const createCustomSale = async (req, res) => {
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Create Custom Sale Error]: ${error.message}`);
+        if (error.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message, { stock: error.details });
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

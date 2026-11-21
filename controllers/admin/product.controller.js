@@ -12,7 +12,22 @@ import SubCategory from '../../models/superadmin-models/SubCategory.js';
 import CompanyCategory from '../../models/superadmin-models/CompanyCategory.js';
 import Volume from '../../models/superadmin-models/Volume.js';
 import InventoryStock from '../../models/superadmin-models/InventoryStock.js';
+import StockCutoff from '../../models/superadmin-models/StockCutoff.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
+
+// Every volume of a product must count stock in the same smallest unit (Item Unit),
+// e.g. Box = 1 Box, Dando = 20 Box, Kato = 1560 Padiki. Returns an error message or null.
+function baseUnitError(variants) {
+    const bases = new Set(
+        (variants || [])
+            .map((v) => (v.innerUnitLabel || v.baseUnitLabel || v.volumeId || '').toString().trim())
+            .filter(Boolean)
+    );
+    if (bases.size > 1) {
+        return 'All volumes must use the same smallest unit (Item Unit). Example: Box → 1 Box, Dando → 20 Box. (બધા વોલ્યુમનું Item Unit એક જ સૌથી નાનું યુનિટ હોવું જોઈએ, દા.ત. Box = 1 Box, Dando = 20 Box.)';
+    }
+    return null;
+}
 
 function hasAnyLangValue(obj) {
     return !!(obj && typeof obj === 'object' && Object.values(obj).some((v) => String(v || '').trim()));
@@ -233,6 +248,11 @@ export const createProduct = async (req, res, next) => {
         if (volumeError) {
             await t.rollback();
             return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, volumeError);
+        }
+        const unitErrorOnCreate = isCombo ? null : baseUnitError(variants);
+        if (unitErrorOnCreate) {
+            await t.rollback();
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, unitErrorOnCreate);
         }
 
         const maxPos = await Product.max('position', {
@@ -563,7 +583,7 @@ export const getProducts = async (req, res, next) => {
                     sequelize.literal(`(
                                 SELECT COALESCE(SUM("totalBaseUnits"), 0)
                                 FROM "inventory_stocks" AS "stock"
-                                WHERE "stock"."variantId" = "variants"."id"
+                                WHERE "stock"."productId" = "variants"."productId"
                                   AND "stock"."status" = 'Active'
                                   AND "stock"."deletedAt" IS NULL
                                   ${godownId ? `AND "stock"."godownId" = ${sequelize.escape(godownId)}` : ''}
@@ -787,7 +807,38 @@ export const updateProduct = async (req, res, next) => {
             },
             transaction: t
         });
-        const activeStockVariantIds = new Set(stocks.map(s => s.variantId));
+        // While a cut-off (stock count) is open, units may be corrected: the count replaces the stock at Post.
+        const openCutoff = await StockCutoff.findOne({ where: { status: 'DRAFT' }, transaction: t });
+        const activeStockVariantIds = openCutoff ? new Set() : new Set(stocks.map(s => s.variantId));
+        const productHasStock = stocks.length > 0 && !openCutoff;
+
+        // Units changed? Then all volumes must share one smallest unit.
+        const unitsChanged = variants.some((v) => {
+            const ev = v.id ? existingVariants.find((x) => x.id === v.id) : null;
+            if (!ev) return true;
+            return (ev.innerUnitLabel || null) !== (v.innerUnitLabel || null)
+                || (ev.baseUnitLabel || null) !== (v.baseUnitLabel || null)
+                || (ev.volumeId || null) !== (v.volumeId || null)
+                || Number(ev.baseUnitsPerPack || 1) !== Number(v.baseUnitsPerPack || 1);
+        }) || variants.length !== existingVariants.length;
+        if (unitsChanged && !(isCombo ?? product.isCombo)) {
+            const unitError = baseUnitError(variants);
+            if (unitError) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, unitError);
+            }
+        }
+        // Pack size of any volume cannot change while the product has stock (it would change the stock meaning)
+        if (productHasStock) {
+            const packChanged = variants.some((v) => {
+                const ev = v.id ? existingVariants.find((x) => x.id === v.id) : null;
+                return ev && Number(ev.baseUnitsPerPack || 1) !== Number(v.baseUnitsPerPack || 1);
+            });
+            if (packChanged) {
+                await t.rollback();
+                return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, 'Pack size (Qty in Unit) cannot change while stock exists. Start a Cut-off (stock count) to correct units. (સ્ટોક હોય ત્યારે પેકિંગ જથ્થો બદલી શકાતો નથી — Cut-off શરૂ કરીને સુધારો.)');
+            }
+        }
 
         // Validation 1: Check if any existing variant that has active stock is missing from the incoming variants payload (attempted deletion of a variant with stock)
         for (const ev of existingVariants) {

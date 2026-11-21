@@ -124,7 +124,7 @@ export const getGodownInventory = async (req, res, next) => {
                                 sequelize.literal(`(
                                     SELECT COALESCE(SUM("totalBaseUnits"), 0)
                                     FROM "inventory_stocks" AS "stock"
-                                    WHERE "stock"."variantId" = "variants"."id"
+                                    WHERE "stock"."productId" = "variants"."productId"
                                       AND "stock"."status" = 'Active'
                                       AND "stock"."deletedAt" IS NULL
                                       ${godownId ? `AND "stock"."godownId" = ${sequelize.escape(godownId)}` : ''}

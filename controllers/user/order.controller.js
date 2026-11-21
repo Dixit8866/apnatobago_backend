@@ -11,7 +11,8 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { sendToDevice } from '../../services/notification.service.js';
-import { restoreOrderStock } from '../../helpers/inventory.helper.js';
+import { restoreOrderStock, issueOrderStock, buildStockLines } from '../../helpers/inventory.helper.js';
+import stockService from '../../services/stock.service.js';
 import { isSystemOrAuditNotice } from '../../services/financialSettlement.service.js';
 
 /**
@@ -723,17 +724,16 @@ export const createOrder = async (req, res) => {
         await Cart.destroy({ where: { userId }, transaction: t });
 
         logger.info(`[Create Order] Cart cleared. Deducting stock from Godown: ${targetGodownId}`);
-        // 8. Deduct Stock from Inventory
+        // 8. Deduct Stock (Stock Service: oldest lot first, this godown only, one ledger entry per lot)
         if (targetGodownId) {
             for (const item of orderItemsData) {
-                const variant = await ProductVariant.findByPk(item.variantId, {
-                    include: [{ model: Product, as: 'product' }],
-                    transaction: t
-                });
+                const variant = await ProductVariant.findByPk(item.variantId, { transaction: t });
                 if (!variant) continue;
 
-                // Process Old Stock Lock Toggle deduction & auto-activation of new pricings
-                if (variant.oldStockLockToggle) {
+                // Old purchase-bill hold (set before lot pricing) keeps counting down here.
+                // New holds live on the stock lots and are handled by the Stock Service.
+                const isLotManagedHold = variant.newPricingData && !Array.isArray(variant.newPricingData) && variant.newPricingData.lotManaged;
+                if (variant.oldStockLockToggle && !isLotManagedHold) {
                     const bUPP = Number(variant.baseUnitsPerPack || 1);
                     const purchasedPacks = item.sellUnit === 'Inner'
                         ? (Number(item.quantity) / bUPP)
@@ -819,166 +819,16 @@ export const createOrder = async (req, res) => {
                         }, { transaction: t });
                     }
                 }
-
-                if (variant.product?.isCombo) {
-                    // DEDUCT FROM COMBO COMPONENTS!
-                    const comboProducts = [
-                        { id: variant.product.comboProduct1Id, key: 'comboProduct1' },
-                        { id: variant.product.comboProduct2Id, key: 'comboProduct2' }
-                    ];
-
-                    for (const cp of comboProducts) {
-                        const compVariant = await ProductVariant.findOne({
-                            where: { 
-                                productId: cp.id,
-                                ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
-                            },
-                            transaction: t
-                        }) || await ProductVariant.findOne({
-                            where: { productId: cp.id },
-                            transaction: t
-                        });
-
-                        if (!compVariant) continue;
-
-                        const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
-                        const compDeduction = Math.round(item.sellUnit === 'Inner'
-                            ? Number(item.quantity)
-                            : Number(item.quantity) * compBUPP);
-
-                        const stocks = await InventoryStock.findAll({
-                            where: {
-                                productId: cp.id,
-                                godownId: targetGodownId,
-                                totalBaseUnits: { [Op.gt]: 0 }
-                            },
-                            order: [['createdAt', 'ASC']],
-                            transaction: t
-                        });
-
-                        let remainingToDeduct = compDeduction;
-                        for (const stock of stocks) {
-                            if (remainingToDeduct <= 0) break;
-
-                            const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                            const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-
-                            await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                            // Log the transaction
-                            await InventoryTransaction.create({
-                                stockId: stock.id,
-                                productId: cp.id,
-                                variantId: compVariant.id,
-                                godownId: targetGodownId,
-                                type: 'SALE',
-                                primaryUnitId: stock.primaryUnitId,
-                                secondaryUnitId: stock.secondaryUnitId,
-                                secondaryPerPrimary: stock.secondaryPerPrimary,
-                                totalQtyBaseUnits: deductFromThis,
-                                balanceAfterBaseUnits: newTotalBaseUnits,
-                                note: `Sales Order #${targetOrder.orderId} (Combo Component)`,
-                                createdBy: req.user?.fullname || 'Customer'
-                            }, { transaction: t });
-
-                            remainingToDeduct -= deductFromThis;
-                        }
-
-                        if (remainingToDeduct > 0) {
-                            logger.warn(`[Stock Deduction Shortfall]: Order #${targetOrder.orderId} - Shortfall of ${remainingToDeduct} base units for combo component variant ${compVariant.id} in Godown ${targetGodownId}`);
-                        }
-                    }
-                } else {
-                    // NORMAL PRODUCT STOCK DEDUCTION
-                    const deductionRequired = Math.round(item.sellUnit === 'Inner'
-                        ? Number(item.quantity)
-                        : Number(item.quantity) * (variant.baseUnitsPerPack || 1));
-
-                    // First try target godown, then fallback to any godown with stock (FIFO)
-                    let stocks = [];
-                    if (targetGodownId) {
-                        stocks = await InventoryStock.findAll({
-                            where: {
-                                productId: item.productId,
-                                godownId: targetGodownId,
-                                totalBaseUnits: { [Op.gt]: 0 }
-                            },
-                            order: [['createdAt', 'ASC']],
-                            transaction: t
-                        });
-                    }
-
-                    let remainingToDeduct = deductionRequired;
-                    for (const stock of stocks) {
-                        if (remainingToDeduct <= 0) break;
-
-                        const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                        const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-
-                        await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                        // Log the transaction
-                        await InventoryTransaction.create({
-                            stockId: stock.id,
-                            productId: item.productId,
-                            variantId: item.variantId,
-                            godownId: stock.godownId,
-                            type: 'SALE',
-                            primaryUnitId: stock.primaryUnitId,
-                            secondaryUnitId: stock.secondaryUnitId,
-                            secondaryPerPrimary: stock.secondaryPerPrimary,
-                            totalQtyBaseUnits: deductFromThis,
-                            balanceAfterBaseUnits: newTotalBaseUnits,
-                            note: `Sales Order #${targetOrder.orderId}`,
-                            createdBy: req.user?.fullname || 'Customer'
-                        }, { transaction: t });
-
-                        remainingToDeduct -= deductFromThis;
-                    }
-
-                    // Fallback to any godown if target godown didn't have enough base units
-                    if (remainingToDeduct > 0) {
-                        const fallbackStocks = await InventoryStock.findAll({
-                            where: {
-                                productId: item.productId,
-                                totalBaseUnits: { [Op.gt]: 0 }
-                            },
-                            order: [['createdAt', 'ASC']],
-                            transaction: t
-                        });
-
-                        for (const stock of fallbackStocks) {
-                            if (remainingToDeduct <= 0) break;
-
-                            const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                            const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-
-                            await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                            await InventoryTransaction.create({
-                                stockId: stock.id,
-                                productId: item.productId,
-                                variantId: item.variantId,
-                                godownId: stock.godownId,
-                                type: 'SALE',
-                                primaryUnitId: stock.primaryUnitId,
-                                secondaryUnitId: stock.secondaryUnitId,
-                                secondaryPerPrimary: stock.secondaryPerPrimary,
-                                totalQtyBaseUnits: deductFromThis,
-                                balanceAfterBaseUnits: newTotalBaseUnits,
-                                note: `Sales Order #${targetOrder.orderId}`,
-                                createdBy: req.user?.fullname || 'Customer'
-                            }, { transaction: t });
-
-                            remainingToDeduct -= deductFromThis;
-                        }
-                    }
-
-                    if (remainingToDeduct > 0) {
-                        logger.warn(`[Stock Deduction]: Order #${targetOrder.orderId} - Shortfall of ${remainingToDeduct} base units for variant ${item.variantId} in Godown ${targetGodownId}`);
-                    }
-                }
             }
+
+            await issueOrderStock({
+                refType: 'ORDER',
+                refId: targetOrder.id,
+                refNo: targetOrder.orderId,
+                godownId: targetGodownId,
+                items: orderItemsData,
+                actor: req.user,
+            }, t);
         } else {
             logger.error(`[Stock Deduction]: No Godown found to deduct stock for Order #${targetOrder.orderId}`);
         }
@@ -1075,6 +925,9 @@ export const createOrder = async (req, res) => {
             } catch (rollbackErr) {
                 logger.error(`[Create Order] Rollback failed: ${rollbackErr.message}`);
             }
+        }
+        if (error.name === 'StockError') {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message, { stock: error.details });
         }
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
@@ -1924,76 +1777,21 @@ export const updateOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "No fulfillment center found to check stock.");
         }
 
-        // 1. Temporarily RESTORE stock of all OLD items of this order so we check stock correctly
-        if (order.items && order.items.length > 0) {
-            for (const item of order.items) {
-                const variant = await ProductVariant.findByPk(item.variantId, {
-                    include: [{ model: Product, as: 'product' }],
-                    transaction: t
-                });
-                if (!variant) continue;
-
-                if (variant.product?.isCombo) {
-                    const comboProducts = [
-                        variant.product.comboProduct1Id,
-                        variant.product.comboProduct2Id
-                    ];
-                    for (const cpId of comboProducts) {
-                        const compVariant = await ProductVariant.findOne({
-                            where: { 
-                                productId: cpId,
-                                ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
-                            },
-                            transaction: t
-                        }) || await ProductVariant.findOne({
-                            where: { productId: cpId },
-                            transaction: t
-                        });
-
-                        if (!compVariant) continue;
-
-                        const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
-                        const compSellingVolume = Number(variant?.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                        const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner'
-                            ? Number(item.quantity)
-                            : Number(item.quantity) * compSellingVolume * compBUPP);
-
-                        const stock = await InventoryStock.findOne({
-                            where: { productId: cpId, godownId: targetGodownId },
-                            order: [['createdAt', 'DESC']],
-                            transaction: t
-                        }) || await InventoryStock.findOne({
-                            where: { productId: cpId },
-                            order: [['createdAt', 'DESC']],
-                            transaction: t
-                        });
-
-                        if (stock) {
-                            await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore }, { transaction: t });
-                        }
-                    }
-                } else {
-                    const bUPP = Number(variant.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                    const sellingVolume = Number(variant.sellingVolume || item.variantInfo?.sellingVolume || 1);
-                    const baseUnitsToRestore = Math.round(item.sellUnit === 'Inner' 
-                        ? Number(item.quantity) 
-                        : Number(item.quantity) * sellingVolume * bUPP);
-
-                    const stock = await InventoryStock.findOne({
-                        where: { productId: item.productId, godownId: targetGodownId },
-                        order: [['createdAt', 'DESC']],
-                        transaction: t
-                    }) || await InventoryStock.findOne({
-                        where: { productId: item.productId },
-                        order: [['createdAt', 'DESC']],
-                        transaction: t
-                    });
-
-                    if (stock) {
-                        await stock.update({ totalBaseUnits: Number(stock.totalBaseUnits) + baseUnitsToRestore }, { transaction: t });
-                    }
-                }
-            }
+        // 1. Put back everything this order took (exact lots, ledger entries) so the new lines are checked correctly
+        if (order.godownId) targetGodownId = order.godownId;
+        {
+            const legacyLines = await buildStockLines(order.items || [], t);
+            await stockService.reverseRef({
+                refType: 'ORDER',
+                refId: order.id,
+                ref: { refType: 'ORDER', refId: order.id, refNo: order.orderId },
+                movement: 'SALE_REVERSAL',
+                note: `Order #${order.orderId} edited (old lines put back)`,
+                actor: req.user,
+                legacyItems: legacyLines.map((l) => ({ ...l, godownId: targetGodownId })),
+                legacyMode: 'return',
+                fallbackGodownId: targetGodownId,
+            }, t);
         }
 
         // 2. Perform stock check for all NEW items
@@ -2215,120 +2013,16 @@ export const updateOrder = async (req, res) => {
 
         await OrderItem.bulkCreate(newOrderItemsData, { transaction: t });
 
-        // 5. Deduct new stock
-        for (const item of newOrderItemsData) {
-            const variant = await ProductVariant.findByPk(item.variantId, {
-                include: [{ model: Product, as: 'product' }],
-                transaction: t
-            });
-            if (!variant) continue;
-
-            if (variant.product?.isCombo) {
-                const comboProducts = [
-                    { id: variant.product.comboProduct1Id, key: 'comboProduct1' },
-                    { id: variant.product.comboProduct2Id, key: 'comboProduct2' }
-                ];
-
-                for (const cp of comboProducts) {
-                    const compVariant = await ProductVariant.findOne({
-                        where: { 
-                            productId: cp.id,
-                            ...(variant.volumeId ? { volumeId: variant.volumeId } : {})
-                        },
-                        transaction: t
-                    }) || await ProductVariant.findOne({
-                        where: { productId: cp.id },
-                        transaction: t
-                    });
-
-                    if (!compVariant) continue;
-
-                    const compBUPP = Number(compVariant.baseUnitsPerPack || 1);
-                    const compDeduction = Math.round(item.sellUnit === 'Inner'
-                        ? Number(item.quantity)
-                        : Number(item.quantity) * compBUPP);
-
-                    const stocks = await InventoryStock.findAll({
-                        where: {
-                            productId: cp.id,
-                            godownId: targetGodownId,
-                            totalBaseUnits: { [Op.gt]: 0 }
-                        },
-                        order: [['createdAt', 'ASC']],
-                        transaction: t
-                    });
-
-                    let remainingToDeduct = compDeduction;
-                    for (const stock of stocks) {
-                        if (remainingToDeduct <= 0) break;
-
-                        const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                        const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-
-                        await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                        await InventoryTransaction.create({
-                            stockId: stock.id,
-                            productId: cp.id,
-                            variantId: compVariant.id,
-                            godownId: targetGodownId,
-                            type: 'SALE',
-                            primaryUnitId: stock.primaryUnitId,
-                            secondaryUnitId: stock.secondaryUnitId,
-                            secondaryPerPrimary: stock.secondaryPerPrimary,
-                            totalQtyBaseUnits: deductFromThis,
-                            balanceAfterBaseUnits: newTotalBaseUnits,
-                            note: `Sales Order #${order.orderId} (Updated Combo Component)`,
-                            createdBy: req.user?.fullname || 'Customer'
-                        }, { transaction: t });
-
-                        remainingToDeduct -= deductFromThis;
-                    }
-                }
-            } else {
-                const bUPP = Number(variant.baseUnitsPerPack || 1);
-                const deductionRequired = Math.round(item.sellUnit === 'Inner'
-                    ? Number(item.quantity)
-                    : Number(item.quantity) * bUPP);
-
-                const stocks = await InventoryStock.findAll({
-                    where: {
-                        productId: item.productId,
-                        godownId: targetGodownId,
-                        totalBaseUnits: { [Op.gt]: 0 }
-                    },
-                    order: [['createdAt', 'ASC']],
-                    transaction: t
-                });
-
-                let remainingToDeduct = deductionRequired;
-                for (const stock of stocks) {
-                    if (remainingToDeduct <= 0) break;
-
-                    const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                    const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-
-                    await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                    await InventoryTransaction.create({
-                        stockId: stock.id,
-                        productId: item.productId,
-                        variantId: item.variantId,
-                        godownId: targetGodownId,
-                        type: 'SALE',
-                        primaryUnitId: stock.primaryUnitId,
-                        secondaryUnitId: stock.secondaryUnitId,
-                        secondaryPerPrimary: stock.secondaryPerPrimary,
-                        totalQtyBaseUnits: deductFromThis,
-                        balanceAfterBaseUnits: newTotalBaseUnits,
-                        note: `Sales Order #${order.orderId} (Updated)`,
-                        createdBy: req.user?.fullname || 'Customer'
-                    }, { transaction: t });
-
-                    remainingToDeduct -= deductFromThis;
-                }
-            }
-        }
+        // 5. Take the new lines out (Stock Service)
+        await issueOrderStock({
+            refType: 'ORDER',
+            refId: order.id,
+            refNo: order.orderId,
+            godownId: targetGodownId,
+            items: newOrderItemsData,
+            actor: req.user,
+            note: `Order #${order.orderId} (edited)`,
+        }, t);
 
         // 6. Recalculate delivery charges & update order totals
         const settings = await AppSettings.findOne({ transaction: t });
@@ -2413,6 +2107,7 @@ export const updateOrder = async (req, res) => {
     } catch (error) {
         if (t) await t.rollback();
         logger.error(`[Update Order Error]: ${error.message}`);
+        if (error.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message, { stock: error.details });
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, error.message);
     }
 };

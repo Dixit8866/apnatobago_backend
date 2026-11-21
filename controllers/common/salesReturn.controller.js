@@ -1,4 +1,6 @@
 import { Op } from 'sequelize';
+import { returnOrderStock } from '../../helpers/inventory.helper.js';
+import { toBaseUnits } from '../../services/stock.service.js';
 import sequelize from '../../config/db.js';
 import {
     Order,
@@ -299,99 +301,17 @@ export const approveSalesReturn = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, "Product variant not found.");
         }
 
-        // E. Put Stock Back to Inventory
-        const returnQty = parseFloat(salesReturn.quantity);
-        const bUPP = Number(variant.baseUnitsPerPack || 1);
-
-        // Deduce the original sell unit from the reason prefix
+        // E. Put stock back (same lots the sale used; damaged goods are only recorded)
         const isInner = salesReturn.reason && salesReturn.reason.startsWith('[Inner]');
-        const baseUnitsToRestore = Math.round(isInner ? returnQty : returnQty * bUPP);
-
-        // Find the SALE transaction to restore stock to the exact godown and stock batch if possible
-        const saleTxn = await InventoryTransaction.findOne({
-            where: {
-                productId: salesReturn.productId,
-                variantId: variant.id,
-                type: 'SALE',
-                note: { [Op.like]: `%${order.orderId}%` }
-            },
-            order: [['createdAt', 'DESC']],
-            transaction: t
-        });
-
-        let targetStock = null;
-        if (saleTxn) {
-            targetStock = await InventoryStock.findOne({
-                where: { id: saleTxn.stockId },
-                transaction: t
-            });
-            if (targetStock) {
-                await targetStock.update({
-                    totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
-                }, { transaction: t });
-            }
-        }
-
-        // Fallback: If no SALE txn or specific batch found, find/create stock batch in user postcode godown or any godown
-        if (!targetStock) {
-            let targetGodownId = null;
-            if (order.userId) {
-                const user = await User.findByPk(order.userId, { transaction: t });
-                if (user && user.postcode) {
-                    const godown = await Godown.findOne({
-                        where: { pincodes: { [Op.contains]: [user.postcode] } },
-                        transaction: t
-                    });
-                    if (godown) targetGodownId = godown.id;
-                }
-            }
-            if (!targetGodownId) {
-                const godown = await Godown.findOne({ transaction: t });
-                if (godown) targetGodownId = godown.id;
-            }
-
-            if (!targetGodownId) {
-                await t.rollback();
-                return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "No Godown available to return stock to.");
-            }
-
-            targetStock = await InventoryStock.findOne({
-                where: { productId: salesReturn.productId, variantId: variant.id, godownId: targetGodownId },
-                transaction: t
-            });
-
-            if (targetStock) {
-                await targetStock.update({
-                    totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
-                }, { transaction: t });
-            } else {
-                targetStock = await InventoryStock.create({
-                    productId: salesReturn.productId,
-                    variantId: variant.id,
-                    godownId: targetGodownId,
-                    primaryUnitId: variant.baseUnitLabel || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
-                    totalBaseUnits: baseUnitsToRestore,
-                    status: 'Active'
-                }, { transaction: t });
-            }
-        }
-
-        // Log the stock adjustment transaction - ACTION BY: Logged-in admin/user name!
-        const actorName = req.user?.fullname || req.user?.name || 'Admin';
-        await InventoryTransaction.create({
-            stockId: targetStock.id,
+        await returnOrderStock({
+            order,
             productId: salesReturn.productId,
             variantId: variant.id,
-            godownId: targetStock.godownId,
-            type: 'SALES_RETURN',
-            primaryUnitId: targetStock.primaryUnitId,
-            secondaryUnitId: targetStock.secondaryUnitId,
-            secondaryPerPrimary: targetStock.secondaryPerPrimary,
-            totalQtyBaseUnits: baseUnitsToRestore,
-            balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
+            qtyBase: toBaseUnits(parseFloat(salesReturn.quantity), isInner ? 'Inner' : 'Base', variant),
+            condition: salesReturn.condition || 'GOOD',
+            actor: req.user,
             note: `Sales Return Approved for Order #${order.orderId}`,
-            createdBy: actorName
-        }, { transaction: t });
+        }, t);
 
         // H. Finally update status to Approved and clean the unit prefix from reason if visible
         salesReturn.status = 'Approved';
@@ -538,91 +458,16 @@ export const approveAllSalesReturnByOrder = async (req, res) => {
             const variant = await ProductVariant.findByPk(salesReturn.variantId, { transaction: t });
             if (!variant) continue;
 
-            const returnQty = parseFloat(salesReturn.quantity);
-            const bUPP = Number(variant.baseUnitsPerPack || 1);
             const isInner = salesReturn.reason && salesReturn.reason.startsWith('[Inner]');
-            const baseUnitsToRestore = Math.round(isInner ? returnQty : returnQty * bUPP);
-
-            // Find the SALE transaction for precise stock restoration
-            const saleTxn = await InventoryTransaction.findOne({
-                where: {
-                    productId: salesReturn.productId,
-                    variantId: variant.id,
-                    type: 'SALE',
-                    note: { [Op.like]: `%${order.orderId}%` }
-                },
-                order: [['createdAt', 'DESC']],
-                transaction: t
-            });
-
-            let targetStock = null;
-            if (saleTxn) {
-                targetStock = await InventoryStock.findOne({
-                    where: { id: saleTxn.stockId },
-                    transaction: t
-                });
-                if (targetStock) {
-                    await targetStock.update({
-                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
-                    }, { transaction: t });
-                }
-            }
-
-            if (!targetStock) {
-                let targetGodownId = null;
-                if (order.userId) {
-                    const user = await User.findByPk(order.userId, { transaction: t });
-                    if (user && user.postcode) {
-                        const godown = await Godown.findOne({
-                            where: { pincodes: { [Op.contains]: [user.postcode] } },
-                            transaction: t
-                        });
-                        if (godown) targetGodownId = godown.id;
-                    }
-                }
-                if (!targetGodownId) {
-                    const godown = await Godown.findOne({ transaction: t });
-                    if (godown) targetGodownId = godown.id;
-                }
-
-                if (!targetGodownId) continue; // Skip if no godown found
-
-                targetStock = await InventoryStock.findOne({
-                    where: { productId: salesReturn.productId, variantId: variant.id, godownId: targetGodownId },
-                    transaction: t
-                });
-
-                if (targetStock) {
-                    await targetStock.update({
-                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
-                    }, { transaction: t });
-                } else {
-                    targetStock = await InventoryStock.create({
-                        productId: salesReturn.productId,
-                        variantId: variant.id,
-                        godownId: targetGodownId,
-                        primaryUnitId: variant.baseUnitLabel || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
-                        totalBaseUnits: baseUnitsToRestore,
-                        status: 'Active'
-                    }, { transaction: t });
-                }
-            }
-
-            // Log inventory transaction
-            await InventoryTransaction.create({
-                stockId: targetStock.id,
+            await returnOrderStock({
+                order,
                 productId: salesReturn.productId,
                 variantId: variant.id,
-                godownId: targetStock.godownId,
-                type: 'SALES_RETURN',
-                primaryUnitId: targetStock.primaryUnitId,
-                secondaryUnitId: targetStock.secondaryUnitId,
-                secondaryPerPrimary: targetStock.secondaryPerPrimary,
-                totalQtyBaseUnits: baseUnitsToRestore,
-                balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
+                qtyBase: toBaseUnits(parseFloat(salesReturn.quantity), isInner ? 'Inner' : 'Base', variant),
+                condition: salesReturn.condition || 'GOOD',
+                actor: req.user,
                 note: `Sales Return Approved (Bulk) for Order #${order.orderId}`,
-                createdBy: actorName
-            }, { transaction: t });
+            }, t);
 
             // Update return status
             salesReturn.status = 'Approved';
@@ -936,80 +781,16 @@ export const createAdminSalesReturn = async (req, res) => {
 
             salesReturnEntries.push(salesReturn);
 
-            // Handle Stock Inventory Adjustment based on Condition
-            const bUPP = Number(variant.baseUnitsPerPack || 1);
-            const isInner = (sellUnit || orderItem.sellUnit) === 'Inner';
-            const baseUnitsToRestore = Math.round(isInner ? returnQty : returnQty * bUPP);
-
-            // Find Godown target
-            let targetGodownId = order.godownId;
-            if (!targetGodownId && user.postcode) {
-                const godown = await Godown.findOne({
-                    where: { pincodes: { [Op.contains]: [user.postcode] } },
-                    transaction: t
-                });
-                if (godown) targetGodownId = godown.id;
-            }
-            if (!targetGodownId) {
-                const godown = await Godown.findOne({ transaction: t });
-                if (godown) targetGodownId = godown.id;
-            }
-
-            if (targetGodownId) {
-                let targetStock = await InventoryStock.findOne({
-                    where: { productId, variantId, godownId: targetGodownId },
-                    transaction: t
-                });
-
-                if (!targetStock) {
-                    targetStock = await InventoryStock.create({
-                        productId,
-                        variantId,
-                        godownId: targetGodownId,
-                        primaryUnitId: variant.baseUnitLabel || variant.innerUnitLabel || '00000000-0000-0000-0000-000000000000',
-                        totalBaseUnits: 0,
-                        status: 'Active'
-                    }, { transaction: t });
-                }
-
-                if (itemCond === 'GOOD') {
-                    // Restore stock for saleable inventory
-                    await targetStock.update({
-                        totalBaseUnits: Number(targetStock.totalBaseUnits) + baseUnitsToRestore
-                    }, { transaction: t });
-
-                    await InventoryTransaction.create({
-                        stockId: targetStock.id,
-                        productId,
-                        variantId,
-                        godownId: targetGodownId,
-                        type: 'SALES_RETURN',
-                        primaryUnitId: targetStock.primaryUnitId,
-                        secondaryUnitId: targetStock.secondaryUnitId,
-                        secondaryPerPrimary: targetStock.secondaryPerPrimary,
-                        totalQtyBaseUnits: baseUnitsToRestore,
-                        balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
-                        note: `Sales Return Restocked (Good) for Order #${order.orderId}`,
-                        createdBy: actorName
-                    }, { transaction: t });
-                } else {
-                    // Log Damaged Loss Transaction without increasing sellable stock
-                    await InventoryTransaction.create({
-                        stockId: targetStock.id,
-                        productId,
-                        variantId,
-                        godownId: targetGodownId,
-                        type: 'SALES_RETURN',
-                        primaryUnitId: targetStock.primaryUnitId,
-                        secondaryUnitId: targetStock.secondaryUnitId,
-                        secondaryPerPrimary: targetStock.secondaryPerPrimary,
-                        totalQtyBaseUnits: baseUnitsToRestore,
-                        balanceAfterBaseUnits: Number(targetStock.totalBaseUnits),
-                        note: `Sales Return Damaged Loss (Scrap) for Order #${order.orderId}`,
-                        createdBy: actorName
-                    }, { transaction: t });
-                }
-            }
+            // Stock: GOOD goes back into the lots the sale used; DAMAGED is only recorded
+            await returnOrderStock({
+                order,
+                productId,
+                variantId,
+                qtyBase: toBaseUnits(returnQty, (sellUnit || orderItem.sellUnit) === 'Inner' ? 'Inner' : 'Base', variant),
+                condition: itemCond,
+                actor: req.user,
+                note: itemCond === 'DAMAGED' ? `Sales Return Damaged Loss (Scrap) for Order #${order.orderId}` : `Sales Return Restocked (Good) for Order #${order.orderId}`,
+            }, t);
 
             // Adjust Order Item ONLY for in-flight/unsettled orders!
             // Past closed orders must preserve their original delivered line items.

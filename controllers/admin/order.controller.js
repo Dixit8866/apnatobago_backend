@@ -9,7 +9,7 @@ import { generateOrderInvoice, generateDeliveryLabel, generateDeliveryLabelHTML 
 import { sendToDevice } from '../../services/notification.service.js';
 import { roundTotal } from '../../utils/roundHelper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
-import { restoreOrderStock } from '../../helpers/inventory.helper.js';
+import { restoreOrderStock, syncOrderLineStock } from '../../helpers/inventory.helper.js';
 import { getIO } from '../../socket.js';
 import { broadcastOrderStatusChanged, broadcastOrderDelivered, broadcastUserUpdated } from '../../services/socketEvent.service.js';
 import { getCustomerCreditFinancials } from '../../services/financialSettlement.service.js';
@@ -2958,6 +2958,7 @@ export const updateOrderItem = async (req, res) => {
         const oldSellUnit = orderItem.sellUnit;
         const newQuantity = parseFloat(quantity || 0);
         const newSellUnit = sellUnit || oldSellUnit;
+        const oldStockLine = { variantId: orderItem.variantId, quantity: oldQuantity, sellUnit: oldSellUnit };
 
         let variant = null;
         if (variantId && variantId !== orderItem.variantId) {
@@ -3017,17 +3018,22 @@ export const updateOrderItem = async (req, res) => {
             };
         }
 
-        await orderItem.save();
-
-        // Adjust stock if base units changed
-        if (baseUnitsDiff !== 0) {
-            const stock = await InventoryStock.findOne({
-                where: { productId: orderItem.productId },
-                order: [['createdAt', 'DESC']]
+        // Save the line and move only the stock difference (Stock Service, same transaction)
+        try {
+            await sequelize.transaction(async (t) => {
+                await orderItem.save({ transaction: t });
+                if (baseUnitsDiff !== 0 || oldStockLine.variantId !== orderItem.variantId) {
+                    await syncOrderLineStock({
+                        order,
+                        oldLine: oldStockLine,
+                        newLine: { variantId: orderItem.variantId, quantity: newQuantity, sellUnit: newSellUnit },
+                        actor: req.user,
+                    }, t);
+                }
             });
-            if (stock) {
-                await stock.update({ totalBaseUnits: Math.max(0, stock.totalBaseUnits - baseUnitsDiff) });
-            }
+        } catch (stockErr) {
+            if (stockErr.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, stockErr.message);
+            throw stockErr;
         }
 
         // Recalculate order totals
@@ -3133,25 +3139,29 @@ export const addOrderItem = async (req, res) => {
             baseUnitsPerPack: variant.baseUnitsPerPack
         };
 
-        // Create the new order item
-        const newItem = await OrderItem.create({
-            orderId: order.id,
-            productId: variant.productId,
-            variantId: variant.id,
-            quantity: qty,
-            price: parseFloat(price),
-            sellUnit: unitSell,
-            variantInfo
-        });
-
-        // Deduct from stock
-        const baseUnitsToDeduct = unitSell === 'Inner' ? qty : qty * bUPP;
-        const stock = await InventoryStock.findOne({
-            where: { productId: variant.productId },
-            order: [['createdAt', 'DESC']]
-        });
-        if (stock) {
-            await stock.update({ totalBaseUnits: Math.max(0, stock.totalBaseUnits - baseUnitsToDeduct) });
+        // Create the new order item and take its stock out (Stock Service, same transaction)
+        let newItem;
+        try {
+            newItem = await sequelize.transaction(async (t) => {
+                const created = await OrderItem.create({
+                    orderId: order.id,
+                    productId: variant.productId,
+                    variantId: variant.id,
+                    quantity: qty,
+                    price: parseFloat(price),
+                    sellUnit: unitSell,
+                    variantInfo
+                }, { transaction: t });
+                await syncOrderLineStock({
+                    order,
+                    newLine: { variantId: variant.id, quantity: qty, sellUnit: unitSell },
+                    actor: req.user,
+                }, t);
+                return created;
+            });
+        } catch (stockErr) {
+            if (stockErr.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, stockErr.message);
+            throw stockErr;
         }
 
         // Recalculate order totals
@@ -3222,20 +3232,16 @@ export const deleteOrderItem = async (req, res) => {
 
         const qty = parseFloat(orderItem.quantity || 0);
         const unitSell = orderItem.sellUnit || 'Base';
-        const variant = await ProductVariant.findByPk(orderItem.variantId);
-        const bUPP = parseFloat(variant?.baseUnitsPerPack || orderItem.variantInfo?.baseUnitsPerPack || 1);
 
-        // Restore stock
-        const baseUnitsToRestore = unitSell === 'Inner' ? qty : qty * bUPP;
-        const stock = await InventoryStock.findOne({
-            where: { productId: orderItem.productId },
-            order: [['createdAt', 'DESC']]
+        // Put this line's stock back (same lots) and remove the line, in one transaction
+        await sequelize.transaction(async (t) => {
+            await syncOrderLineStock({
+                order,
+                oldLine: { variantId: orderItem.variantId, quantity: qty, sellUnit: unitSell },
+                actor: req.user,
+            }, t);
+            await orderItem.destroy({ transaction: t });
         });
-        if (stock) {
-            await stock.update({ totalBaseUnits: stock.totalBaseUnits + baseUnitsToRestore });
-        }
-
-        await orderItem.destroy();
 
         // Recalculate order totals
         const allItems = await OrderItem.findAll({ where: { orderId: order.id } });

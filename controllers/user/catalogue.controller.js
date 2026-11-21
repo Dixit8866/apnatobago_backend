@@ -269,7 +269,7 @@ export const getProducts = async (req, res) => {
                                 sequelize.literal(`(
                                     SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
                                     FROM "inventory_stocks" AS "stock"
-                                    WHERE "stock"."variantId" = "variants"."id"
+                                    WHERE "stock"."productId" = "variants"."productId"
                                       AND "stock"."status" = 'Active'
                                       AND "stock"."deletedAt" IS NULL
                                       ${user?.godownId ? `AND "stock"."godownId" = ${sequelize.escape(user.godownId)}` : ''}
@@ -627,7 +627,7 @@ export const searchCatalogue = async (req, res) => {
                                 sequelize.literal(`(
                                     SELECT COALESCE(SUM("stock"."totalBaseUnits"), 0)
                                     FROM "inventory_stocks" AS "stock"
-                                    WHERE "stock"."variantId" = "variants"."id"
+                                    WHERE "stock"."productId" = "variants"."productId"
                                       AND "stock"."status" = 'Active'
                                       AND "stock"."deletedAt" IS NULL
                                       ${user?.godownId ? `AND "stock"."godownId" = ${sequelize.escape(user.godownId)}` : ''}

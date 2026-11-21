@@ -1,4 +1,5 @@
 import { OutletOrder, OutletOrderItem, Product, ProductVariant, ProductPricing, CustomLevel, User, Volume, InventoryStock, InventoryTransaction, Godown } from '../../models/index.js';
+import { issueOrderStock, restoreOutletOrderStock } from '../../helpers/inventory.helper.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../utils/response.util.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import logger from '../../logger/apiLogger.js';
@@ -323,53 +324,15 @@ export const createOutletOrder = async (req, res) => {
             }, { transaction: t });
         }
 
-        // 3. Stock Deduction Logic
-        for (const pItem of processedItems) {
-            const deductionRequired = Math.round(pItem.sellUnit === 'Inner'
-                ? pItem.quantity
-                : pItem.quantity * (pItem.variant.baseUnitsPerPack || 1));
-
-            const stocks = await InventoryStock.findAll({
-                where: {
-                    productId: pItem.productId,
-                    godownId: targetGodownId,
-                    totalBaseUnits: { [Op.gt]: 0 }
-                },
-                order: [['createdAt', 'ASC']],
-                transaction: t
-            });
-
-            let remainingToDeduct = deductionRequired;
-            for (const stock of stocks) {
-                if (remainingToDeduct <= 0) break;
-
-                const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-
-                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                await InventoryTransaction.create({
-                    stockId: stock.id,
-                    productId: pItem.productId,
-                    variantId: pItem.variantId,
-                    godownId: stock.godownId,
-                    type: 'SALE',
-                    primaryUnitId: stock.primaryUnitId,
-                    secondaryUnitId: stock.secondaryUnitId,
-                    secondaryPerPrimary: stock.secondaryPerPrimary,
-                    totalQtyBaseUnits: deductFromThis,
-                    balanceAfterBaseUnits: newTotalBaseUnits,
-                    note: `Outlet Order #${generatedOrderId}`,
-                    createdBy: req.user?.fullname || 'Admin'
-                }, { transaction: t });
-
-                remainingToDeduct -= deductFromThis;
-            }
-
-            if (remainingToDeduct > 0) {
-                logger.warn(`[Outlet Order Stock Shortfall]: Order #${generatedOrderId} - Shortfall of ${remainingToDeduct} base units for product ${pItem.productId} in Godown ${targetGodownId}`);
-            }
-        }
+        // 3. Take stock out (Stock Service: oldest lot first, this godown only, ledger entry per lot)
+        await issueOrderStock({
+            refType: 'OUTLET_ORDER',
+            refId: targetOutletOrder.id,
+            refNo: targetOutletOrder.orderId || generatedOrderId,
+            godownId: targetGodownId,
+            items: processedItems.map((p) => ({ variantId: p.variantId, quantity: p.quantity, sellUnit: p.sellUnit })),
+            actor: req.user,
+        }, t);
 
         await t.commit();
 
@@ -396,6 +359,7 @@ export const createOutletOrder = async (req, res) => {
     } catch (error) {
         await t.rollback();
         logger.error(`[createOutletOrder Error]: ${error.message}`, { stack: error.stack });
+        if (error.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message, { stock: error.details });
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to create outlet order.', error.message);
     }
 };
@@ -685,75 +649,13 @@ export const updateOutletOrderStatus = async (req, res) => {
         const wasOldCancelled = oldStatus === 'Cancelled' || oldStatus === 'Admin Cancel' || String(oldStatus).includes('Cancel');
 
         if (isNewCancelled && !wasOldCancelled) {
-            const items = await OutletOrderItem.findAll({
-                where: { outletOrderId: order.id }
+            await sequelize.transaction(async (t) => {
+                await restoreOutletOrderStock(order, req.user, t, `Cancelled Outlet Order #${order.orderId} (stock put back)`);
+                await order.update({ orderStatus }, { transaction: t });
             });
-
-            for (const item of items) {
-                const variant = await ProductVariant.findByPk(item.variantId);
-                const bUPP = Number(variant?.baseUnitsPerPack || item.variantInfo?.baseUnitsPerPack || 1);
-                const qtyToRestore = Math.round(item.sellUnit === 'Inner'
-                    ? Number(item.quantity)
-                    : Number(item.quantity) * bUPP);
-
-                let stock = await InventoryStock.findOne({
-                    where: {
-                        productId: item.productId,
-                        godownId: order.godownId
-                    },
-                    order: [['createdAt', 'DESC']]
-                });
-
-                if (stock) {
-                    const newTotalBaseUnits = Number(stock.totalBaseUnits || 0) + qtyToRestore;
-                    await stock.update({ totalBaseUnits: newTotalBaseUnits });
-
-                    await InventoryTransaction.create({
-                        stockId: stock.id,
-                        productId: item.productId,
-                        variantId: item.variantId,
-                        godownId: order.godownId,
-                        type: 'ADJUSTMENT',
-                        primaryUnitId: stock.primaryUnitId,
-                        secondaryUnitId: stock.secondaryUnitId,
-                        secondaryPerPrimary: stock.secondaryPerPrimary,
-                        totalQtyBaseUnits: qtyToRestore,
-                        balanceAfterBaseUnits: newTotalBaseUnits,
-                        note: `Cancelled Outlet Order #${order.orderId} Stock Restored`,
-                        createdBy: req.user?.fullname || 'Admin'
-                    });
-                } else {
-                    const newStock = await InventoryStock.create({
-                        productId: item.productId,
-                        variantId: item.variantId,
-                        godownId: order.godownId,
-                        primaryUnitId: variant?.volumeId || null,
-                        secondaryUnitId: null,
-                        secondaryPerPrimary: bUPP,
-                        totalBaseUnits: qtyToRestore,
-                        avgPurchasePricePerBaseUnit: item.price || 0,
-                        lastPurchasePricePerBaseUnit: item.price || 0
-                    });
-
-                    await InventoryTransaction.create({
-                        stockId: newStock.id,
-                        productId: item.productId,
-                        variantId: item.variantId,
-                        godownId: order.godownId,
-                        type: 'ADJUSTMENT',
-                        primaryUnitId: newStock.primaryUnitId,
-                        secondaryUnitId: newStock.secondaryUnitId,
-                        secondaryPerPrimary: newStock.secondaryPerPrimary,
-                        totalQtyBaseUnits: qtyToRestore,
-                        balanceAfterBaseUnits: qtyToRestore,
-                        note: `Cancelled Outlet Order #${order.orderId} Stock Restored`,
-                        createdBy: req.user?.fullname || 'Admin'
-                    });
-                }
-            }
+        } else {
+            await order.update({ orderStatus });
         }
-
-        await order.update({ orderStatus });
 
         logActivity(req, {
             module: 'Outlet Orders',
@@ -848,75 +750,8 @@ export const updateOutletOrder = async (req, res) => {
 
         const targetGodownId = godownId || order.godownId;
 
-        // 1. STEP 1: RESTORE PREVIOUS STOCK FOR ALL OLD ITEMS
-        const oldItems = await OutletOrderItem.findAll({
-            where: { outletOrderId: order.id },
-            transaction: t
-        });
-
-        for (const oldItem of oldItems) {
-            const variant = await ProductVariant.findByPk(oldItem.variantId, { transaction: t });
-            const bUPP = Number(variant?.baseUnitsPerPack || oldItem.variantInfo?.baseUnitsPerPack || 1);
-            const qtyToRestore = Math.round(oldItem.sellUnit === 'Inner'
-                ? Number(oldItem.quantity)
-                : Number(oldItem.quantity) * bUPP);
-
-            let stock = await InventoryStock.findOne({
-                where: {
-                    productId: oldItem.productId,
-                    godownId: order.godownId
-                },
-                order: [['createdAt', 'DESC']],
-                transaction: t
-            });
-
-            if (stock) {
-                const newTotalBaseUnits = Number(stock.totalBaseUnits || 0) + qtyToRestore;
-                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                await InventoryTransaction.create({
-                    stockId: stock.id,
-                    productId: oldItem.productId,
-                    variantId: oldItem.variantId,
-                    godownId: order.godownId,
-                    type: 'ADJUSTMENT',
-                    primaryUnitId: stock.primaryUnitId,
-                    secondaryUnitId: stock.secondaryUnitId,
-                    secondaryPerPrimary: stock.secondaryPerPrimary,
-                    totalQtyBaseUnits: qtyToRestore,
-                    balanceAfterBaseUnits: newTotalBaseUnits,
-                    note: `Updated Outlet Order #${order.orderId} (Stock Restored for recalculation)`,
-                    createdBy: req.user?.fullname || 'Admin'
-                }, { transaction: t });
-            } else {
-                const newStock = await InventoryStock.create({
-                    productId: oldItem.productId,
-                    variantId: oldItem.variantId,
-                    godownId: order.godownId,
-                    primaryUnitId: variant?.volumeId || null,
-                    secondaryUnitId: null,
-                    secondaryPerPrimary: bUPP,
-                    totalBaseUnits: qtyToRestore,
-                    avgPurchasePricePerBaseUnit: oldItem.price || 0,
-                    lastPurchasePricePerBaseUnit: oldItem.price || 0
-                }, { transaction: t });
-
-                await InventoryTransaction.create({
-                    stockId: newStock.id,
-                    productId: oldItem.productId,
-                    variantId: oldItem.variantId,
-                    godownId: order.godownId,
-                    type: 'ADJUSTMENT',
-                    primaryUnitId: newStock.primaryUnitId,
-                    secondaryUnitId: newStock.secondaryUnitId,
-                    secondaryPerPrimary: newStock.secondaryPerPrimary,
-                    totalQtyBaseUnits: qtyToRestore,
-                    balanceAfterBaseUnits: qtyToRestore,
-                    note: `Updated Outlet Order #${order.orderId} (Stock Restored for recalculation)`,
-                    createdBy: req.user?.fullname || 'Admin'
-                }, { transaction: t });
-            }
-        }
+        // 1. STEP 1: PUT BACK EVERYTHING THIS ORDER TOOK (same lots, ledger entries)
+        await restoreOutletOrderStock(order, req.user, t, `Updated Outlet Order #${order.orderId} (old lines put back)`);
 
         // Delete old items
         await OutletOrderItem.destroy({
@@ -1010,47 +845,17 @@ export const updateOutletOrder = async (req, res) => {
                 variantInfo: pItem.variantInfo
             }, { transaction: t });
 
-            const deductionRequired = Math.round(pItem.sellUnit === 'Inner'
-                ? pItem.quantity
-                : pItem.quantity * (pItem.variant.baseUnitsPerPack || 1));
-
-            const stocks = await InventoryStock.findAll({
-                where: {
-                    productId: pItem.productId,
-                    godownId: targetGodownId,
-                    totalBaseUnits: { [Op.gt]: 0 }
-                },
-                order: [['createdAt', 'ASC']],
-                transaction: t
-            });
-
-            let remainingToDeduct = deductionRequired;
-            for (const stock of stocks) {
-                if (remainingToDeduct <= 0) break;
-
-                const deductFromThis = Math.min(stock.totalBaseUnits, remainingToDeduct);
-                const newTotalBaseUnits = stock.totalBaseUnits - deductFromThis;
-
-                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                await InventoryTransaction.create({
-                    stockId: stock.id,
-                    productId: pItem.productId,
-                    variantId: pItem.variantId,
-                    godownId: stock.godownId,
-                    type: 'SALE',
-                    primaryUnitId: stock.primaryUnitId,
-                    secondaryUnitId: stock.secondaryUnitId,
-                    secondaryPerPrimary: stock.secondaryPerPrimary,
-                    totalQtyBaseUnits: deductFromThis,
-                    balanceAfterBaseUnits: newTotalBaseUnits,
-                    note: `Updated Outlet Order #${order.orderId}`,
-                    createdBy: req.user?.fullname || 'Admin'
-                }, { transaction: t });
-
-                remainingToDeduct -= deductFromThis;
-            }
         }
+
+        await issueOrderStock({
+            refType: 'OUTLET_ORDER',
+            refId: order.id,
+            refNo: order.orderId,
+            godownId: targetGodownId,
+            items: processedItems.map((p) => ({ variantId: p.variantId, quantity: p.quantity, sellUnit: p.sellUnit })),
+            actor: req.user,
+            note: `Updated Outlet Order #${order.orderId}`,
+        }, t);
 
         // 4. STEP 4: UPDATE ORDER RECORD
         await order.update({
@@ -1084,6 +889,7 @@ export const updateOutletOrder = async (req, res) => {
     } catch (error) {
         await t.rollback();
         logger.error(`[updateOutletOrder Error]: ${error.message}`, { stack: error.stack });
+        if (error.name === 'StockError') return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message, { stock: error.details });
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, 'Failed to update outlet order.', error.message);
     }
 };
@@ -1104,75 +910,8 @@ export const deleteOutletOrder = async (req, res) => {
             return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, 'Outlet order not found.');
         }
 
-        // 1. Restore stock for all order items
-        const oldItems = await OutletOrderItem.findAll({
-            where: { outletOrderId: order.id },
-            transaction: t
-        });
-
-        for (const oldItem of oldItems) {
-            const variant = await ProductVariant.findByPk(oldItem.variantId, { transaction: t });
-            const bUPP = Number(variant?.baseUnitsPerPack || oldItem.variantInfo?.baseUnitsPerPack || 1);
-            const qtyToRestore = Math.round(oldItem.sellUnit === 'Inner'
-                ? Number(oldItem.quantity)
-                : Number(oldItem.quantity) * bUPP);
-
-            let stock = await InventoryStock.findOne({
-                where: {
-                    productId: oldItem.productId,
-                    godownId: order.godownId
-                },
-                order: [['createdAt', 'DESC']],
-                transaction: t
-            });
-
-            if (stock) {
-                const newTotalBaseUnits = Number(stock.totalBaseUnits || 0) + qtyToRestore;
-                await stock.update({ totalBaseUnits: newTotalBaseUnits }, { transaction: t });
-
-                await InventoryTransaction.create({
-                    stockId: stock.id,
-                    productId: oldItem.productId,
-                    variantId: oldItem.variantId,
-                    godownId: order.godownId,
-                    type: 'ADJUSTMENT',
-                    primaryUnitId: stock.primaryUnitId,
-                    secondaryUnitId: stock.secondaryUnitId,
-                    secondaryPerPrimary: stock.secondaryPerPrimary,
-                    totalQtyBaseUnits: qtyToRestore,
-                    balanceAfterBaseUnits: newTotalBaseUnits,
-                    note: `Deleted Outlet Order #${order.orderId} (Stock Restored)`,
-                    createdBy: req.user?.fullname || 'Admin'
-                }, { transaction: t });
-            } else {
-                const newStock = await InventoryStock.create({
-                    productId: oldItem.productId,
-                    variantId: oldItem.variantId,
-                    godownId: order.godownId,
-                    primaryUnitId: variant?.volumeId || null,
-                    secondaryUnitId: null,
-                    secondaryPerPrimary: bUPP,
-                    totalBaseUnits: qtyToRestore,
-                    avgPurchasePricePerBaseUnit: oldItem.price || 0,
-                    lastPurchasePricePerBaseUnit: oldItem.price || 0
-                }, { transaction: t });
-
-                await InventoryTransaction.create({
-                    stockId: newStock.id,
-                    productId: oldItem.productId,
-                    variantId: oldItem.variantId,
-                    godownId: order.godownId,
-                    type: 'ADJUSTMENT',
-                    primaryUnitId: newStock.primaryUnitId,
-                    secondaryUnitId: newStock.secondaryUnitId,
-                    secondaryPerPrimary: newStock.secondaryPerPrimary,
-                    totalQtyBaseUnits: qtyToRestore,
-                    balanceAfterBaseUnits: qtyToRestore,
-                    note: `Deleted Outlet Order #${order.orderId} (Stock Restored)`,
-                    createdBy: req.user?.fullname || 'Admin'
-                }, { transaction: t });
-            }
-        }
+        // 1. Put back everything this order still holds (same lots, ledger entries; a cancelled order has nothing left)
+        await restoreOutletOrderStock(order, req.user, t, `Deleted Outlet Order #${order.orderId} (stock put back)`);
 
         // 2. Delete order items
         await OutletOrderItem.destroy({

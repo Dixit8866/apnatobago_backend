@@ -1,4 +1,5 @@
 import { Op } from 'sequelize';
+import stockService from '../../services/stock.service.js';
 import sequelize from '../../config/db.js';
 import HTTP_STATUS from '../../constants/httpStatusCodes.js';
 import { sendErrorResponse, sendSuccessResponse } from '../../utils/response.util.js';
@@ -199,9 +200,9 @@ export const createTransfer = async (req, res, next) => {
             const factor = Number(variant?.baseUnitsPerPack || 1);
             const qtyInBaseUnits = Number(qty) * factor;
 
-            // Sum total available stock in source godown across all stock records
+            // Product stock in the source godown (all lots, all volumes share the base unit)
             const totalStockBaseUnits = parseFloat(await InventoryStock.sum('totalBaseUnits', {
-                where: { productId, variantId, godownId: fromGodownId },
+                where: { productId, godownId: fromGodownId },
                 transaction: t
             })) || 0;
 
@@ -290,76 +291,28 @@ export const updateTransferStatus = async (req, res, next) => {
             const toGodownName = toGodown?.name || 'Destination Godown';
 
             for (const item of transfer.items) {
-                // Fetch variant to get the baseUnitsPerPack factor
                 const variant = await ProductVariant.findByPk(item.variantId, { transaction: t });
-                const factor = Number(variant?.baseUnitsPerPack || 1);
-                const qtyInBaseUnits = Number(item.qty) * factor;
+                const qtyInBaseUnits = Math.round(Number(item.qty) * stockService.perPackOf(variant));
 
-                // 1. Decrement source stock
-                const totalSourceStockUnits = parseFloat(await InventoryStock.sum('totalBaseUnits', {
-                    where: { productId: item.productId, variantId: item.variantId, godownId: transfer.fromGodownId },
-                    transaction: t
-                })) || 0;
-
-                if (totalSourceStockUnits < qtyInBaseUnits) {
-                    await t.rollback();
-                    return sendErrorResponse(
-                        res,
-                        HTTP_STATUS.BAD_REQUEST,
-                        `Insufficient stock in source godown to complete receipt for product ID ${item.productId}.`
-                    );
-                }
-
-                let sourceStock = await InventoryStock.findOne({
-                    where: { productId: item.productId, variantId: item.variantId, godownId: transfer.fromGodownId },
-                    order: [['totalBaseUnits', 'DESC']],
-                    transaction: t
-                });
-
-                const newSourceQty = Number(sourceStock.totalBaseUnits) - qtyInBaseUnits;
-                await sourceStock.update({ totalBaseUnits: newSourceQty }, { transaction: t });
-
-                // Log InventoryTransaction for Outgoing
-                await InventoryTransaction.create({
-                    stockId: sourceStock.id,
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    godownId: transfer.fromGodownId,
-                    type: 'ADJUSTMENT',
-                    primaryUnitId: sourceStock.primaryUnitId,
-                    secondaryUnitId: sourceStock.secondaryUnitId,
-                    secondaryPerPrimary: sourceStock.secondaryPerPrimary,
-                    qtyPrimary: 0,
-                    qtySecondary: 0,
-                    totalQtyBaseUnits: -qtyInBaseUnits,
-                    avgPriceAfterTxn: sourceStock.avgPurchasePricePerBaseUnit || 0,
-                    balanceAfterBaseUnits: newSourceQty,
-                    note: `Stock Transfer Out to ${toGodownName} (TRF: ${transfer.transferNo})`,
-                    createdBy: req.user?.name || req.user?.fullname || 'System'
-                }, { transaction: t });
-
-                // 2. Increment destination stock
-                let destStock = await InventoryStock.findOne({
-                    where: { productId: item.productId, variantId: item.variantId, godownId: transfer.toGodownId },
-                    transaction: t
-                });
-
-                if (!destStock) {
-                    destStock = await InventoryStock.create({
+                // Oldest lots out of the source godown, same cost into the destination (ledger entries both sides)
+                try {
+                    await stockService.transfer({
                         productId: item.productId,
                         variantId: item.variantId,
-                        godownId: transfer.toGodownId,
-                        primaryUnitId: sourceStock.primaryUnitId,
-                        secondaryUnitId: sourceStock.secondaryUnitId,
-                        secondaryPerPrimary: sourceStock.secondaryPerPrimary,
-                        totalBaseUnits: 0,
-                        avgPurchasePricePerBaseUnit: sourceStock.avgPurchasePricePerBaseUnit || 0,
-                        status: 'Active'
-                    }, { transaction: t });
+                        fromGodownId: transfer.fromGodownId,
+                        toGodownId: transfer.toGodownId,
+                        qtyBase: qtyInBaseUnits,
+                        ref: { refType: 'TRANSFER', refId: transfer.id, refNo: transfer.transferNo },
+                        note: `Stock Transfer ${fromGodownName} → ${toGodownName} (TRF: ${transfer.transferNo})`,
+                        actor: req.user,
+                    }, t);
+                } catch (stockErr) {
+                    if (stockErr.name === 'StockError') {
+                        await t.rollback();
+                        return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Insufficient stock in source godown: ${stockErr.message}`);
+                    }
+                    throw stockErr;
                 }
-
-                const newDestQty = Number(destStock.totalBaseUnits) + qtyInBaseUnits;
-                await destStock.update({ totalBaseUnits: newDestQty }, { transaction: t });
 
                 // Sync level pricing from source godown (or global) to destination godown
                 try {
@@ -406,24 +359,6 @@ export const updateTransferStatus = async (req, res, next) => {
                     console.error("Error syncing destination godown pricing during transfer:", pErr);
                 }
 
-                // Log InventoryTransaction for Incoming
-                await InventoryTransaction.create({
-                    stockId: destStock.id,
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    godownId: transfer.toGodownId,
-                    type: 'ADJUSTMENT',
-                    primaryUnitId: destStock.primaryUnitId,
-                    secondaryUnitId: destStock.secondaryUnitId,
-                    secondaryPerPrimary: destStock.secondaryPerPrimary,
-                    qtyPrimary: 0,
-                    qtySecondary: 0,
-                    totalQtyBaseUnits: qtyInBaseUnits,
-                    avgPriceAfterTxn: destStock.avgPurchasePricePerBaseUnit || 0,
-                    balanceAfterBaseUnits: newDestQty,
-                    note: `Stock Transfer In from ${fromGodownName} (TRF: ${transfer.transferNo})`,
-                    createdBy: req.user?.name || req.user?.fullname || 'System'
-                }, { transaction: t });
             }
         }
 
@@ -465,24 +400,29 @@ export const getGodownStock = async (req, res, next) => {
 
         const stocks = await InventoryStock.findAll({
             where: { godownId },
-            attributes: ['productId', 'variantId', 'totalBaseUnits', 'lastPurchasePricePerBaseUnit', 'avgPurchasePricePerBaseUnit']
+            attributes: ['productId', 'variantId', 'totalBaseUnits', 'unitCost', 'lastPurchasePricePerBaseUnit', 'avgPurchasePricePerBaseUnit']
         });
 
+        // Product stock = sum of all its lots in this godown; price = value-weighted cost per base unit
         const stockMap = {};
         stocks.forEach(s => {
-            const key = `${s.productId}_${s.variantId}`;
-            stockMap[key] = {
-                totalBaseUnits: s.totalBaseUnits || 0,
-                lastPurchasePricePerBaseUnit: parseFloat(s.lastPurchasePricePerBaseUnit) || 0,
-                avgPurchasePricePerBaseUnit: parseFloat(s.avgPurchasePricePerBaseUnit) || 0
-            };
+            const units = Number(s.totalBaseUnits || 0);
+            const cost = s.unitCost !== null && s.unitCost !== undefined ? parseFloat(s.unitCost) : (parseFloat(s.avgPurchasePricePerBaseUnit) || 0);
+            const cur = stockMap[s.productId] || { totalBaseUnits: 0, value: 0 };
+            cur.totalBaseUnits += units;
+            cur.value += units * cost;
+            stockMap[s.productId] = cur;
+        });
+        Object.values(stockMap).forEach(sd => {
+            const avg = sd.totalBaseUnits > 0 ? sd.value / sd.totalBaseUnits : 0;
+            sd.lastPurchasePricePerBaseUnit = avg;
+            sd.avgPurchasePricePerBaseUnit = avg;
         });
 
         const options = [];
         variants.forEach(v => {
             if (!v.product) return;
-            const key = `${v.productId}_${v.id}`;
-            const sData = stockMap[key] || { totalBaseUnits: 0, lastPurchasePricePerBaseUnit: 0, avgPurchasePricePerBaseUnit: 0 };
+            const sData = stockMap[v.productId] || { totalBaseUnits: 0, lastPurchasePricePerBaseUnit: 0, avgPurchasePricePerBaseUnit: 0 };
             const qtyAvailableBase = sData.totalBaseUnits;
             const factor = Number(v.baseUnitsPerPack || 1);
             const qtyAvailable = qtyAvailableBase / factor;

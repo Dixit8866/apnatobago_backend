@@ -7,6 +7,7 @@ import { generatePurchaseBill } from '../../utils/invoiceGenerator.js';
 import logger from '../../logger/apiLogger.js';
 import { getPaginationOptions, formatPaginatedResponse } from '../../helpers/query.helper.js';
 import { logActivity } from '../../helpers/activityLog.helper.js';
+import stockService from '../../services/stock.service.js';
 
 export const convertToBill = async (req, res, next) => {
     const t = await sequelize.transaction();
@@ -56,25 +57,41 @@ export const convertToBill = async (req, res, next) => {
         // 2. Update Vendor Order and sync totalAmount
         await order.update({ isConverted: true, status: 'Received', totalAmount }, { transaction: t });
 
-        // 3. Update Inventory & Pricing for all volume variants
+        // 3. Stock + purchase rates + selling prices
+        //    - every received line = one new lot at the bill rate (Stock Service, ledger entry)
+        //    - "hold" ON + older stock in this godown → new selling prices wait on the lot and go live
+        //      automatically when the older lots are sold out
+        const olderStockByProduct = new Map();   // productId → base units in this godown before this bill
+        const firstLotByProduct = new Map();     // productId → first lot created by this bill
+        const heldPricesByProduct = new Map();   // productId → [{ variantId, purchasePrice, pricings }]
+        const liveScopeProducts = new Set();     // held prices that should also update global (live) pricing
+        const touchedProducts = new Set();
+
         for (const item of items) {
             const variant = await ProductVariant.findByPk(item.variantId, {
                 include: [{ model: Product, as: 'product' }],
                 transaction: t
             });
             if (!variant) continue;
+            touchedProducts.add(item.productId);
 
             const baseUnitsMultiplier = Number(variant.baseUnitsPerPack || 1);
             const receivedQty = item.receivedQty !== undefined ? Number(item.receivedQty) : Number(item.qty);
-            const addedBaseUnits = receivedQty * baseUnitsMultiplier;
-            const purchasePricePerBaseUnit = Number(item.purchasePrice || 0) / baseUnitsMultiplier;
+            const addedBaseUnits = Math.round(receivedQty * baseUnitsMultiplier);
+            const itemPurchasePrice = Number(item.purchasePrice || 0);
+            const hasPrice = itemPurchasePrice > 0;
+            const pricings = Array.isArray(item.pricings) ? item.pricings.filter(p => p && p.customLevelId) : [];
 
-            const primaryUnitId = variant.baseUnitLabel || variant.volumeId;
-            const secondaryUnitId = variant.innerUnitLabel || variant.volumeId;
+            if (!olderStockByProduct.has(item.productId)) {
+                const older = await InventoryStock.sum('totalBaseUnits', {
+                    where: { productId: item.productId, godownId, totalBaseUnits: { [Op.gt]: 0 } },
+                    transaction: t
+                });
+                olderStockByProduct.set(item.productId, Number(older || 0));
+            }
 
-            let stock = null;
             if (addedBaseUnits > 0) {
-                // Validation: Ensure same batch number isn't used for same product with different details
+                // Same batch number cannot be reused for another volume / expiry of this product
                 if (item.batchNumber) {
                     const existingBatch = await InventoryStock.findOne({
                         where: {
@@ -87,131 +104,76 @@ export const convertToBill = async (req, res, next) => {
                         },
                         transaction: t
                     });
-
                     if (existingBatch) {
                         await t.rollback();
                         return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, `Batch number "${item.batchNumber}" already exists for this product with different variant or expiry date.`);
                     }
                 }
 
-                // Find or create stock entry for this variant in this godown + expiryDate + batchNumber
-                stock = await InventoryStock.findOne({
-                    where: {
-                        productId: item.productId,
-                        variantId: item.variantId,
-                        godownId,
-                        expiryDate: item.expiryDate || null,
-                        batchNumber: item.batchNumber || null
-                    },
-                    transaction: t
-                });
-
-                if (!stock) {
-                    stock = await InventoryStock.create({
-                        productId: item.productId,
-                        variantId: item.variantId,
-                        godownId,
-                        primaryUnitId,
-                        secondaryUnitId,
-                        secondaryPerPrimary: baseUnitsMultiplier,
-                        totalBaseUnits: addedBaseUnits,
-                        avgPurchasePricePerBaseUnit: purchasePricePerBaseUnit,
-                        lastPurchasePricePerBaseUnit: purchasePricePerBaseUnit,
-                        expiryDate: item.expiryDate || null,
-                        batchNumber: item.batchNumber || null
-                    }, { transaction: t });
-                } else {
-                    const currentTotalUnits = Number(stock.totalBaseUnits || 0);
-                    const currentAvgPrice = Number(stock.avgPurchasePricePerBaseUnit || 0);
-                    const newTotalUnits = currentTotalUnits + addedBaseUnits;
-
-                    // Calculate new average price
-                    const newAvgPrice = newTotalUnits > 0
-                        ? ((currentAvgPrice * currentTotalUnits) + (purchasePricePerBaseUnit * addedBaseUnits)) / newTotalUnits
-                        : purchasePricePerBaseUnit;
-
-                    await stock.update({
-                        primaryUnitId,
-                        secondaryUnitId,
-                        secondaryPerPrimary: baseUnitsMultiplier,
-                        totalBaseUnits: newTotalUnits,
-                        avgPurchasePricePerBaseUnit: newAvgPrice,
-                        lastPurchasePricePerBaseUnit: purchasePricePerBaseUnit
-                    }, { transaction: t });
-                }
-            }
-
-            const existingStockBaseUnits = await InventoryStock.sum('totalBaseUnits', {
-                where: {
+                const { lot } = await stockService.receive({
                     productId: item.productId,
+                    godownId,
                     variantId: item.variantId,
-                    totalBaseUnits: { [Op.gt]: 0 }
-                },
-                transaction: t
-            }) || 0;
-
-            const isLockEnabled = !!item.oldStockLockToggle;
-            let oldStockLimitQty = isLockEnabled ? Number(item.oldStockLimitQty || 0) : 0;
-
-            // If lock toggle is ON and limit is 0, auto-default to existing physical inventory stock (in Packs/Cartons)
-            if (isLockEnabled && oldStockLimitQty <= 0 && existingStockBaseUnits > 0) {
-                const bUPP = Number(variant.baseUnitsPerPack || 1);
-                oldStockLimitQty = bUPP > 0 ? Math.floor(existingStockBaseUnits / bUPP) : existingStockBaseUnits;
+                    qtyBase: addedBaseUnits,
+                    unitCost: hasPrice ? itemPurchasePrice / baseUnitsMultiplier : null,
+                    movement: 'PURCHASE',
+                    ref: { refType: 'PURCHASE_BILL', refId: bill.id, refNo: billNo },
+                    note: note || `Purchase Bill ${billNo}`,
+                    actor: req.user,
+                    expiryDate: item.expiryDate || null,
+                    batchNumber: item.batchNumber || null,
+                    receivedAt: receivedDate,
+                    skipHoldRefresh: true,
+                }, t);
+                if (!firstLotByProduct.has(item.productId)) firstLotByProduct.set(item.productId, lot);
             }
-
-            const newPricingsPayload = (isLockEnabled && item.pricings && Array.isArray(item.pricings))
-                ? item.pricings.map(p => ({ ...p, purchasePrice: item.purchasePrice }))
-                : null;
 
             const shouldUpdateLivePricing = !!item.updateLiveProductPricing;
+            // LOCK ON = new prices wait until the old stock in this godown is sold out.
+            // LIVE decides where they apply then: live = global + this godown, off = this godown only.
+            const holdNewPrices = !!item.oldStockLockToggle && olderStockByProduct.get(item.productId) > 0;
+
+            if (holdNewPrices) {
+                // keep the new rate + prices on the lot; they go live when the older stock is sold out
+                if (shouldUpdateLivePricing) liveScopeProducts.add(item.productId);
+                if (hasPrice || pricings.length) {
+                    if (!heldPricesByProduct.has(item.productId)) heldPricesByProduct.set(item.productId, []);
+                    heldPricesByProduct.get(item.productId).push({
+                        variantId: item.variantId,
+                        purchasePrice: hasPrice ? itemPurchasePrice : null,
+                        pricings: pricings.map(p => ({ ...p, purchasePrice: hasPrice ? itemPurchasePrice : p.purchasePrice }))
+                    });
+                }
+                continue;
+            }
 
             if (shouldUpdateLivePricing) {
-                await ProductVariant.update(
-                    {
-                        purchasePrice: item.purchasePrice,
-                        ...(item.mrp ? { mrp: item.mrp } : {})
-                    },
-                    { where: { id: item.variantId }, transaction: t }
-                );
+                if (hasPrice) {
+                    await ProductVariant.update(
+                        {
+                            purchasePrice: itemPurchasePrice,
+                            ...(item.mrp ? { mrp: item.mrp } : {})
+                        },
+                        { where: { id: item.variantId }, transaction: t }
+                    );
+                }
 
-                if (item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
-                    // Update default global level pricing (godownId = null)
-                    await ProductPricing.destroy({
-                        where: { variantId: item.variantId, godownId: null },
-                        transaction: t
-                    });
-
-                    for (const p of item.pricings) {
-                        await ProductPricing.create({
-                            variantId: item.variantId,
-                            godownId: null,
-                            customLevelId: p.customLevelId,
-                            quantityRange: `${p.minQty}-${p.maxQty}`,
-                            minQty: p.minQty,
-                            maxQty: p.maxQty,
-                            purchasePrice: item.purchasePrice,
-                            price: p.price,
-                            mrp: p.mrp || p.price,
-                            status: 'Active'
-                        }, { transaction: t });
-                    }
-
-                    // Also update godown-specific level pricing if godownId is provided
-                    if (godownId) {
+                if (pricings.length > 0) {
+                    // Update default global level pricing (godownId = null) and this godown's pricing
+                    for (const scope of godownId ? [null, godownId] : [null]) {
                         await ProductPricing.destroy({
-                            where: { variantId: item.variantId, godownId },
+                            where: { variantId: item.variantId, godownId: scope },
                             transaction: t
                         });
-
-                        for (const p of item.pricings) {
+                        for (const p of pricings) {
                             await ProductPricing.create({
                                 variantId: item.variantId,
-                                godownId,
+                                godownId: scope,
                                 customLevelId: p.customLevelId,
                                 quantityRange: `${p.minQty}-${p.maxQty}`,
                                 minQty: p.minQty,
                                 maxQty: p.maxQty,
-                                purchasePrice: item.purchasePrice,
+                                purchasePrice: hasPrice ? itemPurchasePrice : (p.purchasePrice || 0),
                                 price: p.price,
                                 mrp: p.mrp || p.price,
                                 status: 'Active'
@@ -219,76 +181,54 @@ export const convertToBill = async (req, res, next) => {
                         }
                     }
                 }
+                continue;
             }
 
-            if (isLockEnabled && oldStockLimitQty > 0) {
+            // No hold: new rate + prices go live now (this godown's pricing, as before)
+            if (hasPrice) {
                 await ProductVariant.update(
-                    {
-                        purchasePrice: item.purchasePrice,
-                        oldStockLockToggle: true,
-                        oldStockLimitQty: oldStockLimitQty,
-                        newPricingData: newPricingsPayload
-                    },
+                    { purchasePrice: itemPurchasePrice },
                     { where: { id: item.variantId }, transaction: t }
                 );
-            } else {
-                await ProductVariant.update(
-                    {
-                        purchasePrice: item.purchasePrice,
-                        oldStockLockToggle: false,
-                        oldStockLimitQty: 0,
-                        newPricingData: null
+            }
+            if (pricings.length > 0) {
+                await ProductPricing.destroy({
+                    where: {
+                        variantId: item.variantId,
+                        ...(godownId ? { godownId } : { godownId: null })
                     },
-                    { where: { id: item.variantId }, transaction: t }
-                );
+                    transaction: t
+                });
 
-                if (!shouldUpdateLivePricing && item.pricings && Array.isArray(item.pricings) && item.pricings.length > 0) {
-                    await ProductPricing.destroy({
-                        where: {
-                            variantId: item.variantId,
-                            ...(godownId ? { godownId } : { godownId: null })
-                        },
-                        transaction: t
-                    });
-
-                    for (const p of item.pricings) {
-                        await ProductPricing.create({
-                            variantId: item.variantId,
-                            godownId: godownId || null,
-                            customLevelId: p.customLevelId,
-                            quantityRange: `${p.minQty}-${p.maxQty}`,
-                            minQty: p.minQty,
-                            maxQty: p.maxQty,
-                            purchasePrice: item.purchasePrice,
-                            price: p.price,
-                            mrp: p.mrp,
-                            status: 'Active'
-                        }, { transaction: t });
-                    }
+                for (const p of pricings) {
+                    await ProductPricing.create({
+                        variantId: item.variantId,
+                        godownId: godownId || null,
+                        customLevelId: p.customLevelId,
+                        quantityRange: `${p.minQty}-${p.maxQty}`,
+                        minQty: p.minQty,
+                        maxQty: p.maxQty,
+                        purchasePrice: hasPrice ? itemPurchasePrice : (p.purchasePrice || 0),
+                        price: p.price,
+                        mrp: p.mrp,
+                        status: 'Active'
+                    }, { transaction: t });
                 }
             }
+        }
 
-            // Create Inventory Transaction if stock was received
-            if (stock && addedBaseUnits > 0) {
-                await InventoryTransaction.create({
-                    stockId: stock.id,
-                    productId: item.productId,
-                    variantId: item.variantId,
-                    godownId,
-                    type: 'PURCHASE',
-                    primaryUnitId,
-                    secondaryUnitId,
-                    secondaryPerPrimary: baseUnitsMultiplier,
-                    qtyPrimary: receivedQty, // E.g. 20 dando
-                    qtySecondary: 0,
-                    totalQtyBaseUnits: addedBaseUnits, // E.g. 400 box
-                    purchasePricePerBaseUnit: purchasePricePerBaseUnit,
-                    avgPriceAfterTxn: stock.avgPurchasePricePerBaseUnit,
-                    balanceAfterBaseUnits: stock.totalBaseUnits,
-                    note: note || `Purchase Bill ${billNo}`,
-                    createdBy: req.user?.name || 'Admin'
-                }, { transaction: t });
+        // Held prices: park them on this bill's first lot of the product (or apply now if nothing was received)
+        for (const [productId, variantsSet] of heldPricesByProduct) {
+            const lot = firstLotByProduct.get(productId);
+            const pricingData = { billNo, billId: bill.id, scope: liveScopeProducts.has(productId) ? 'live' : 'godown', variants: variantsSet };
+            if (lot) {
+                await lot.update({ pricingData, pricingApplied: false }, { transaction: t });
+            } else {
+                await stockService.applyPricingSet(pricingData, godownId, t);
             }
+        }
+        for (const productId of touchedProducts) {
+            await stockService.refreshHoldState(productId, t);
         }
 
         await t.commit();

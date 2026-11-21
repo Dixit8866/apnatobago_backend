@@ -19,6 +19,8 @@ import ProductVariant from './superadmin-models/ProductVariant.js';
 import ProductPricing from './superadmin-models/ProductPricing.js';
 import InventoryStock from './superadmin-models/InventoryStock.js';
 import InventoryTransaction from './superadmin-models/InventoryTransaction.js';
+import StockCutoff from './superadmin-models/StockCutoff.js';
+import StockOpeningCount from './superadmin-models/StockOpeningCount.js';
 import User from './user/User.js';
 import OTP from './user/Otp.js';
 import PartyCalling from './user/PartyCalling.js';
@@ -330,6 +332,34 @@ const runManualMigrations = async () => {
             await sequelize.query('ALTER TYPE "enum_inventory_transactions_type" ADD VALUE IF NOT EXISTS \'SALES_RETURN\'');
         } catch (e) {
             console.log('[Migration Warning] enum_inventory_transactions_type type alter failed or value already exists:', e.message);
+        }
+
+        // Stock lots + stock ledger + cut-off (Opening) tables
+        try {
+            await sequelize.query('ALTER TABLE inventory_stocks ADD COLUMN IF NOT EXISTS "sourceType" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_stocks ADD COLUMN IF NOT EXISTS "sourceRef" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_stocks ADD COLUMN IF NOT EXISTS "receivedBaseUnits" INTEGER DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_stocks ADD COLUMN IF NOT EXISTS "unitCost" DECIMAL(14, 4) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_stocks ADD COLUMN IF NOT EXISTS "pricingData" JSONB DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_stocks ADD COLUMN IF NOT EXISTS "pricingApplied" BOOLEAN NOT NULL DEFAULT true');
+            await sequelize.query('ALTER TABLE inventory_stocks ADD COLUMN IF NOT EXISTS "receivedAt" TIMESTAMP WITH TIME ZONE DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "movement" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "qtyChange" INTEGER DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "unitCost" DECIMAL(14, 4) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "refType" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "refId" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "refNo" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "reversedQty" INTEGER NOT NULL DEFAULT 0');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "sourceEntryId" UUID DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "reason" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "createdById" VARCHAR(255) DEFAULT NULL');
+            await sequelize.query('ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS "meta" JSONB DEFAULT NULL');
+            // indexes come from the model (sequelize.sync); drop the duplicates an earlier build created by hand
+            await sequelize.query('DROP INDEX IF EXISTS inventory_transactions_ref_idx');
+            await sequelize.query('DROP INDEX IF EXISTS inventory_transactions_product_godown_created_idx');
+            // stock_cutoffs / stock_opening_counts tables are created by sequelize.sync() at server start
+        } catch (e) {
+            console.log('[Migration Warning] Stock lot / ledger / cut-off migration failed:', e.message);
         }
 
         try {
@@ -834,6 +864,8 @@ export {
     ProductPricing,
     InventoryStock,
     InventoryTransaction,
+    StockCutoff,
+    StockOpeningCount,
     User,
     OTP,
     PartyCalling,
