@@ -11,6 +11,7 @@ import {
     settleSingleOrderPayment,
     submitDeliveryBankPayment,
     scanAndAssignOrder,
+    scanReassignOrder,
     resolveDeliveryNotice,
     declineDeliveryNotice
 } from '../../controllers/delivery/order.controller.js';
@@ -69,6 +70,7 @@ router.put('/:assignmentId/status', updateMyAssignmentStatus);
 router.put('/:assignmentId/complete-settle', completeOrderAndSettlePayment);
 router.post('/sales-return', createSalesReturn);
 router.post('/scan-assign', scanAndAssignOrder);
+router.post('/scan-reassign', scanReassignOrder);
 
 // Area categories & Multi-area order listing for Delivery App
 router.get('/area-categories', getDeliveryAreaCategories);

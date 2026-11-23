@@ -17,7 +17,7 @@ import {
     submitDeliveryBankPaymentService,
     restoreUserCreditFromPayment
 } from '../../services/delivery/deliverySettlement.service.js';
-import { scanAndAssignOrderService } from '../../services/delivery/deliveryScanner.service.js';
+import { scanAndAssignOrderService, scanReassignOrderService } from '../../services/delivery/deliveryScanner.service.js';
 
 export { restoreUserCreditFromPayment };
 
@@ -339,6 +339,39 @@ export const scanAndAssignOrder = async (req, res) => {
         return sendSuccessResponse(res, HTTP_STATUS.OK, result.message, result.data);
     } catch (error) {
         logger.error(`[Scan and Assign Order Error]: ${error.message}`);
+        return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "ઓર્ડર સોંપવામાં ભૂલ આવી (Error assigning order).", error.message);
+    }
+};
+
+/**
+ * @desc    Scan bill barcode and take the order (also from another delivery boy)
+ * @route   POST /api/delivery/orders/scan-reassign
+ * @body    { orderId: "<scanned text>", fromDeliveryBoyId?: "<boy shown in the confirm popup>" }
+ * @access  Private (Delivery Boy)
+ */
+export const scanReassignOrder = async (req, res) => {
+    try {
+        const { orderId, fromDeliveryBoyId } = req.body || {};
+        const result = await scanReassignOrderService({
+            orderId,
+            fromDeliveryBoyId,
+            reqUser: req.user,
+            reqMeta: { headers: req.headers, ip: req.ip, socket: req.socket }
+        });
+
+        if (result.badRequest) {
+            return sendErrorResponse(res, HTTP_STATUS.BAD_REQUEST, result.badRequest);
+        }
+        if (result.notFound) {
+            return sendErrorResponse(res, HTTP_STATUS.NOT_FOUND, result.notFound);
+        }
+        if (result.conflict) {
+            return sendErrorResponse(res, HTTP_STATUS.CONFLICT, result.message, result.data);
+        }
+
+        return sendSuccessResponse(res, HTTP_STATUS.OK, result.message, result.data);
+    } catch (error) {
+        logger.error(`[Scan Reassign Order Error]: ${error.message}`);
         return sendErrorResponse(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "ઓર્ડર સોંપવામાં ભૂલ આવી (Error assigning order).", error.message);
     }
 };

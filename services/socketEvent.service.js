@@ -291,6 +291,48 @@ export const broadcastOrderAssigned = async ({ order, assignment, deliveryBoyId,
 };
 
 /**
+ * Broadcast an order moved from one delivery boy to another (bill scan takeover).
+ * Emits to:
+ * - Admin room (`admin_orders`) → 'order:reassigned'
+ * - Old rider room (`rider_${fromDeliveryBoyId}`) → 'order:unassigned_from_me' + 'order:status_changed'
+ *   (status_changed so an app that doesn't know the new event still refreshes its list)
+ */
+export const broadcastOrderReassigned = async ({ order, fromDeliveryBoyId, toDeliveryBoy, routeCategoryId }) => {
+    const io = safeGetIO();
+    if (!io) return;
+
+    try {
+        const payload = formatOrderSocketPayload(order);
+        const eventData = {
+            type: 'ORDER_REASSIGNED',
+            orderId: payload.orderId,
+            id: payload.id,
+            fromDeliveryBoyId,
+            toDeliveryBoyId: toDeliveryBoy?.id,
+            toDeliveryBoy,
+            routeCategoryId: routeCategoryId || payload.routeCategoryId,
+            order: payload,
+            timestamp: new Date().toISOString()
+        };
+
+        io.to('admin_orders').emit('order:reassigned', eventData);
+        if (fromDeliveryBoyId) {
+            io.to(`rider_${fromDeliveryBoyId}`).emit('order:unassigned_from_me', eventData);
+            io.to(`rider_${fromDeliveryBoyId}`).emit('order:status_changed', {
+                ...eventData,
+                oldStatus: payload.orderStatus,
+                newStatus: payload.orderStatus,
+                deliveryBoyId: toDeliveryBoy?.id,
+            });
+        }
+
+        logger.info(`[Socket Broadcast] ORDER_REASSIGNED emitted for Order #${payload.orderId}: ${fromDeliveryBoyId} → ${toDeliveryBoy?.id}`);
+    } catch (err) {
+        logger.error(`[Socket Broadcast Error] broadcastOrderReassigned: ${err.message}`);
+    }
+};
+
+/**
  * 4. Broadcast Order Delivered & Payment Settled
  */
 export const broadcastOrderDelivered = async ({ order, deliveryBoyId, oldStatus }) => {
