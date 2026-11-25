@@ -737,6 +737,7 @@ export const getStockLedger = async (req, res, next) => {
                 createdBy: e.createdBy,
                 godown: e.godown?.name || '',
                 volume: e.variant ? volumeLabel(e.variant) : '',
+                variantId: e.variantId || null,
             };
         });
 
