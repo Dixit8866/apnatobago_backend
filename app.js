@@ -15,11 +15,22 @@ import HTTP_STATUS from './constants/httpStatusCodes.js';
 import APP_MESSAGES from './constants/messages.js';
 import globalErrorHandler from './middlewares/error.middleware.js';
 import logger from './logger/apiLogger.js';
+import { MEDIA_DIR } from './utils/aws.s3.js';
 
 dotenv.config();
 
 // Initialize express app
 const app = express();
+
+// Uploaded images / audio (stored on this server). Public like the old S3 links: any site or app can load them,
+// file names never change so browsers may cache them; not written to the request log.
+app.use('/uploads', express.static(MEDIA_DIR, {
+    maxAge: '30d',
+    setHeaders: (res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+}));
 
 // Winston HTTP Logging
 const morganFormat = ':method :url :status :res[content-length] - :response-time ms';
@@ -60,7 +71,6 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'x-api-key']
 }));
 app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Routes Grouping
 app.use('/api/admin', superadminRoutes);

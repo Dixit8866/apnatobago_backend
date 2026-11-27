@@ -1,4 +1,3 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
@@ -6,88 +5,71 @@ import fs from 'fs';
 
 dotenv.config();
 
-const s3Client = new S3Client({
-    region: process.env.PROD_AWS_REGION || 'ap-southeast-2',
-    credentials: {
-        accessKeyId: process.env.PROD_AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.PROD_AWS_SECRET_ACCESS_KEY,
-    }
-});
+/**
+ * File storage on our own server (AWS S3 is no longer used).
+ *
+ * MEDIA_DIR         folder that holds every uploaded file; served at /uploads (app.js)
+ *                   default: <backend>/uploads
+ * MEDIA_PUBLIC_URL  public address of this API, e.g. https://api.apnatobacco.com
+ *                   → uploads return https://api.apnatobacco.com/uploads/<file>
+ *                   (not set → "/uploads/<file>", same as the old local fallback)
+ *
+ * Function names stay uploadToS3 / deleteFromS3 so every caller keeps working unchanged.
+ */
+export const MEDIA_DIR = process.env.MEDIA_DIR
+    ? path.resolve(process.env.MEDIA_DIR)
+    : path.join(process.cwd(), 'uploads');
 
-const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME;
+const PUBLIC_BASE = String(process.env.MEDIA_PUBLIC_URL || '').trim().replace(/\/+$/, '');
 
-// Upload file to S3 with local disk fallback
+/** Full public link of a stored file name. */
+export const mediaUrl = (fileName) => `${PUBLIC_BASE}/uploads/${fileName}`;
+
+// Save an uploaded file on this server
 export const uploadToS3 = async (fileBuffer, originalName, mimeType) => {
-    const uniqueSuffix = crypto.randomBytes(16).toString('hex');
-    const extension = path.extname(originalName) || '.mp3';
-    const relativeFileName = `uploads/${Date.now()}-${uniqueSuffix}${extension}`;
-
-    // 1. Try S3 upload if configured
-    if (BUCKET_NAME && process.env.PROD_AWS_ACCESS_KEY_ID && process.env.PROD_AWS_SECRET_ACCESS_KEY) {
-        try {
-            const command = new PutObjectCommand({
-                Bucket: BUCKET_NAME,
-                Key: relativeFileName,
-                Body: fileBuffer,
-                ContentType: mimeType,
-            });
-
-            await s3Client.send(command);
-
-            const fileUrl = `https://${BUCKET_NAME}.s3.${process.env.PROD_AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${relativeFileName}`;
-            return { success: true, url: fileUrl, path: relativeFileName };
-        } catch (error) {
-            console.warn("[S3 Upload Notice] S3 service error, switching to local disk storage:", error.message);
-        }
-    }
-
-    // 2. Local Disk Fallback (guaranteed to succeed in dev or if S3 is unavailable)
     try {
-        const uploadDir = path.join(process.cwd(), 'uploads');
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        const localFileName = `${Date.now()}-${uniqueSuffix}${extension}`;
-        const localFilePath = path.join(uploadDir, localFileName);
-        fs.writeFileSync(localFilePath, fileBuffer);
+        const uniqueSuffix = crypto.randomBytes(16).toString('hex');
+        const extension = path.extname(originalName || '') || '.mp3';
+        const fileName = `${Date.now()}-${uniqueSuffix}${extension}`;
 
-        const localUrl = `/uploads/${localFileName}`;
-        console.log(`[Upload Success] File saved to local storage: ${localUrl}`);
-        return { success: true, url: localUrl, path: `uploads/${localFileName}` };
-    } catch (localErr) {
-        console.error("Local upload fallback error:", localErr);
-        return { success: false, error: localErr.message };
+        await fs.promises.mkdir(MEDIA_DIR, { recursive: true });
+        await fs.promises.writeFile(path.join(MEDIA_DIR, fileName), fileBuffer);
+
+        return { success: true, url: mediaUrl(fileName), path: `uploads/${fileName}` };
+    } catch (error) {
+        console.error('[Upload Error] Could not save file:', error.message);
+        return { success: false, error: error.message };
     }
 };
 
-// Delete file from S3 or local storage
+/**
+ * File name inside MEDIA_DIR for any link we have stored over time:
+ * https://api.apnatobacco.com/uploads/x.webp, the old https://apnatobacco.s3...amazonaws.com/uploads/x.webp,
+ * /uploads/x.webp, uploads/x.webp or x.webp. Only the file name is used, so nothing outside MEDIA_DIR is touched.
+ */
+const fileNameFromKey = (fileKey) => {
+    let key = String(fileKey || '').trim();
+    if (!key) return null;
+    if (/^https?:\/\//i.test(key)) {
+        try { key = new URL(key).pathname; } catch { return null; }
+    }
+    try { key = decodeURIComponent(key); } catch { /* keep as is */ }
+    const name = path.basename(key.split('?')[0]);
+    return name && name !== '.' && name !== '..' ? name : null;
+};
+
+// Delete a stored file from this server
 export const deleteFromS3 = async (fileKey) => {
     try {
-        let key = fileKey;
-        if (fileKey && fileKey.startsWith('http')) {
-            const url = new URL(fileKey);
-            key = url.pathname.replace(/^\//, '');
-        }
-
-        // Check if local file
-        if (key && (key.startsWith('uploads/') || !key.includes('//'))) {
-            const localPath = path.join(process.cwd(), key);
-            if (fs.existsSync(localPath)) {
-                try { fs.unlinkSync(localPath); } catch {}
-                return { success: true };
-            }
-        }
-
-        if (BUCKET_NAME) {
-            const command = new DeleteObjectCommand({
-                Bucket: BUCKET_NAME,
-                Key: key,
-            });
-            await s3Client.send(command);
+        const name = fileNameFromKey(fileKey);
+        if (!name) return { success: true };
+        const filePath = path.join(MEDIA_DIR, name);
+        if (fs.existsSync(filePath)) {
+            await fs.promises.unlink(filePath);
         }
         return { success: true };
     } catch (error) {
-        console.error("Delete Error:", error);
+        console.error('Delete Error:', error);
         return { success: false, error: error.message };
     }
 };
