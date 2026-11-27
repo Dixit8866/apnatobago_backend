@@ -7,6 +7,10 @@ import { parseReminderTime } from './reminderCron.js';
 import { getSoundId } from './notificationSounds.js';
 
 const CANCELLED_ORDER_STATUSES = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
+// An order placed earlier that is not dispatched yet (a new order merges into a Pending one and keeps its old date)
+const OPEN_ORDER_STATUSES = ['Pending', 'Confirmed', 'Packaging', 'Packed'];
+
+const last10 = (phone) => String(phone || '').replace(/\D/g, '').slice(-10);
 
 // Each bill print slot ("04:00 PM") covers one hour: 04:00 PM to 05:00 PM
 const BILL_SLOT_DURATION_MINUTES = 60;
@@ -63,12 +67,12 @@ const isDueNow = (billPrintTime, minuteOfDay, intervalMinutes) => {
 /**
  * Send one notification to many parties; failures are logged per party
  */
-const sendToParties = async (logTag, users, title, body, data) => {
+const sendToParties = async (logTag, users, title, body, data, options = {}) => {
     logger.info(`[${logTag}]: Sending notification to ${users.length} parties`);
 
     await Promise.all(users.map(async (user) => {
         try {
-            const result = await sendToDevice(user.fcmtoken, title, body, null, data);
+            const result = await sendToDevice(user.fcmtoken, title, body, null, data, options);
             const tokenResults = (result.results || [])
                 .map(r => `${String(r.token).substring(0, 15)}...: ${r.success ? 'OK' : r.error}`)
                 .join(' | ');
@@ -83,10 +87,68 @@ const sendToParties = async (logTag, users, title, body, data) => {
 };
 
 /**
+ * Parties (of the given ones) that have already ordered for today:
+ * an order placed today, an order for today's date (delivery / order date), or an earlier order
+ * not dispatched yet (Pending / Confirmed / Packaging / Packed). Matched by userId or by the
+ * party's phone (bills made by admin with the phone only). Cancelled orders do not count.
+ */
+const findPartiesWithOrderToday = async (users, dateStr) => {
+    if (!users.length) return new Set();
+    const todayStart = new Date(`${dateStr}T00:00:00+05:30`);
+    const todayEnd = new Date(`${dateStr}T23:59:59.999+05:30`);
+    const userIds = users.map(u => u.id);
+    const idsByPhone = new Map();
+    for (const u of users) {
+        const p = last10(u.number);
+        if (p.length < 7) continue;
+        if (!idsByPhone.has(p)) idsByPhone.set(p, []);
+        idsByPhone.get(p).push(u.id);
+    }
+    const phones = [...idsByPhone.keys()];
+    const sequelize = Order.sequelize;
+
+    const orders = await Order.findAll({
+        where: {
+            orderStatus: { [Op.notIn]: CANCELLED_ORDER_STATUSES },
+            [Op.and]: [
+                {
+                    [Op.or]: [
+                        { userId: { [Op.in]: userIds } },
+                        ...(phones.length ? [sequelize.where(
+                            sequelize.fn('RIGHT', sequelize.fn('REGEXP_REPLACE', sequelize.col('customerNumber'), '[^0-9]', '', 'g'), 10),
+                            { [Op.in]: phones }
+                        )] : [])
+                    ]
+                },
+                {
+                    [Op.or]: [
+                        { createdAt: { [Op.gte]: todayStart, [Op.lte]: todayEnd } },
+                        { deliveryDate: dateStr },
+                        { orderDate: dateStr },
+                        { orderStatus: { [Op.in]: OPEN_ORDER_STATUSES } }
+                    ]
+                }
+            ]
+        },
+        attributes: ['userId', 'customerNumber'],
+        raw: true
+    });
+
+    const ordered = new Set();
+    for (const o of orders) {
+        if (o.userId) ordered.add(o.userId);
+        (idsByPhone.get(last10(o.customerNumber)) || []).forEach(id => ordered.add(id));
+    }
+    return ordered;
+};
+
+/**
  * 1) Daily / Start Order Notification
  * Sent to KYC verified parties in the Daily Order / Start Order list (has
  * ordered before) that have not ordered today, repeatedly during their bill
  * print slot at the interval set in Notification Settings.
+ * Each push is urgent and expires after one interval, so a late reminder never
+ * reaches a party after it has ordered; the order check runs again every minute.
  */
 export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay }) => {
     if (!setting.dailyOrderEnabled) return;
@@ -109,22 +171,9 @@ export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay 
     if (dueUsers.length === 0) return;
 
     const userIds = dueUsers.map(u => u.id);
-    const todayStart = new Date(`${dateStr}T00:00:00+05:30`);
-    const todayEnd = new Date(`${dateStr}T23:59:59.999+05:30`);
 
-    const [ordersToday, everOrdered] = await Promise.all([
-        Order.findAll({
-            where: {
-                userId: { [Op.in]: userIds },
-                orderStatus: { [Op.notIn]: CANCELLED_ORDER_STATUSES },
-                [Op.or]: [
-                    { createdAt: { [Op.gte]: todayStart, [Op.lte]: todayEnd } },
-                    { deliveryDate: dateStr }
-                ]
-            },
-            attributes: ['userId'],
-            raw: true
-        }),
+    const [orderedTodayIds, everOrdered] = await Promise.all([
+        findPartiesWithOrderToday(dueUsers, dateStr),
         Order.findAll({
             where: {
                 userId: { [Op.in]: userIds },
@@ -136,7 +185,6 @@ export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay 
         })
     ]);
 
-    const orderedTodayIds = new Set(ordersToday.map(o => o.userId));
     const everOrderedIds = new Set(everOrdered.map(o => o.userId));
 
     const usersToNotify = dueUsers.filter(u => {
@@ -152,7 +200,7 @@ export const runDailyOrderNotification = async (setting, { dateStr, minuteOfDay 
         type: 'daily_order',
         soundUrl: setting.dailyOrderSound || '',
         soundId: getSoundId('daily_order', setting.dailyOrderSound)
-    });
+    }, { urgent: true, ttlSeconds: intervalMinutes * 60 });
 };
 
 /**
@@ -209,6 +257,12 @@ const ORDER_NOTIFICATION_JOBS = [
 ];
 
 export const initOrderNotificationCron = () => {
+    // pm2 cluster mode runs several copies of the server: only the first one sends, so a party never gets a push twice
+    if (process.env.NODE_APP_INSTANCE !== undefined && String(process.env.NODE_APP_INSTANCE) !== '0') {
+        console.log(`[OrderNotificationCron Debug] Not started on pm2 instance ${process.env.NODE_APP_INSTANCE} (instance 0 sends)`);
+        return;
+    }
+
     cron.schedule('* * * * *', async () => {
         const now = getKolkataNow();
         console.log(`[OrderNotificationCron Debug] Tick | build: ${CRON_BUILD} | IST ${now.dateStr} ${formatMinuteOfDay(now.minuteOfDay)}`);

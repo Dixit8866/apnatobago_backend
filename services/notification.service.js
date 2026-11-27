@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import logger from '../logger/apiLogger.js';
+import { getIosSoundName } from '../utils/notificationSounds.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,9 +59,106 @@ try {
 }
 
 /**
- * Send notification to a specific FCM token
+ * FCM message for one device token.
+ * options.urgent      deliver right away: Android priority high, APNs priority 10 (alert)
+ * options.ttlSeconds  drop the push if it can't be delivered within this time (no late reminders)
+ * Without options the message is the same as before.
  */
-export const sendToDevice = async (tokenInput, title, body, imageUrl = null, data = {}) => {
+export const buildDeviceMessage = (token, title, body, imageUrl = null, data = {}, options = {}) => {
+    const notificationType = data.type || 'reminder';
+
+    let androidSound = 'othernotification';
+    let androidChannelId = 'other_notification_channel';
+    let apnsSound = 'othernotification.mp3';
+    let actionValue = 'FLUTTER_NOTIFICATION_CLICK';
+
+    switch (notificationType) {
+        case 'reminder':
+            androidSound = 'reminder';
+            androidChannelId = 'reminder_channel';
+            apnsSound = 'reminder.mp3';
+            actionValue = 'categories';
+            break;
+        case 'shipping':
+            androidSound = 'othernotification';
+            androidChannelId = 'shipping_notification_channel';
+            apnsSound = 'othernotification.mp3';
+            actionValue = data.action || data.clickAction || data.click_action || 'shipping';
+            break;
+        case 'order':
+            androidSound = 'othernotification';
+            androidChannelId = 'orderdetails_notification_channel';
+            apnsSound = 'othernotification.mp3';
+            actionValue = 'orderdetails';
+            break;
+        case 'daily_order':
+        case 'no_order':
+            // Admin uploaded tune: app pre-creates channel data.soundId with that tune
+            // (GET /api/user/notification-settings/sounds); old apps fall back to the default channel
+            androidSound = 'default';
+            androidChannelId = data.soundId || `${notificationType}_channel`;
+            apnsSound = notificationType === 'daily_order' && data.soundUrl && data.soundId
+                ? getIosSoundName(data.soundId)
+                : 'default';
+            actionValue = 'categories';
+            break;
+        case 'other':
+        default:
+            androidSound = 'othernotification';
+            androidChannelId = 'other_notification_channel';
+            apnsSound = 'othernotification.mp3';
+            actionValue = data.action || data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
+            break;
+    }
+
+    const ttlSeconds = Number(options.ttlSeconds) > 0 ? Math.floor(Number(options.ttlSeconds)) : null;
+    const apnsHeaders = (options.urgent || ttlSeconds) ? {
+        ...(options.urgent && { 'apns-priority': '10', 'apns-push-type': 'alert' }),
+        ...(ttlSeconds && { 'apns-expiration': String(Math.floor(Date.now() / 1000) + ttlSeconds) })
+    } : null;
+
+    return {
+        token,
+        notification: {
+            title,
+            body,
+            ...(imageUrl && { image: imageUrl })
+        },
+        data: {
+            type: notificationType,
+            ...data,
+            action: actionValue,
+        },
+        android: {
+            ...(options.urgent && { priority: 'high' }),
+            ...(ttlSeconds && { ttl: ttlSeconds * 1000 }),
+            notification: {
+                ...(imageUrl && { image: imageUrl }),
+                priority: 'high',
+                sound: androidSound,
+                channelId: androidChannelId
+            }
+        },
+        apns: {
+            ...(apnsHeaders && { headers: apnsHeaders }),
+            payload: {
+                aps: {
+                    contentAvailable: true,
+                    sound: apnsSound
+                }
+            },
+            fcm_options: {
+                ...(imageUrl && { image: imageUrl })
+            }
+        }
+    };
+};
+
+/**
+ * Send notification to a specific FCM token
+ * options: { urgent, ttlSeconds } — see buildDeviceMessage
+ */
+export const sendToDevice = async (tokenInput, title, body, imageUrl = null, data = {}, options = {}) => {
     if (!tokenInput) {
         return { success: false, error: 'No tokens provided' };
     }
@@ -94,84 +192,9 @@ export const sendToDevice = async (tokenInput, title, body, imageUrl = null, dat
             throw new Error('Firebase Admin not initialized');
         }
 
-        const notificationType = data.type || 'reminder';
-
-        let androidSound = 'othernotification';
-        let androidChannelId = 'other_notification_channel';
-        let apnsSound = 'othernotification.mp3';
-        let actionValue = 'FLUTTER_NOTIFICATION_CLICK';
-
-        switch (notificationType) {
-            case 'reminder':
-                androidSound = 'reminder';
-                androidChannelId = 'reminder_channel';
-                apnsSound = 'reminder.mp3';
-                actionValue = 'categories';
-                break;
-            case 'shipping':
-                androidSound = 'othernotification';
-                androidChannelId = 'shipping_notification_channel';
-                apnsSound = 'othernotification.mp3';
-                actionValue = data.action || data.clickAction || data.click_action || 'shipping';
-                break;
-            case 'order':
-                androidSound = 'othernotification';
-                androidChannelId = 'orderdetails_notification_channel';
-                apnsSound = 'othernotification.mp3';
-                actionValue = 'orderdetails';
-                break;
-            case 'daily_order':
-            case 'no_order':
-                // Admin uploaded tune: app pre-creates channel data.soundId with that tune
-                // (GET /api/user/notification-settings/sounds); old apps fall back to the default channel
-                androidSound = 'default';
-                androidChannelId = data.soundId || `${notificationType}_channel`;
-                apnsSound = 'default';
-                actionValue = 'categories';
-                break;
-            case 'other':
-            default:
-                androidSound = 'othernotification';
-                androidChannelId = 'other_notification_channel';
-                apnsSound = 'othernotification.mp3';
-                actionValue = data.action || data.clickAction || data.click_action || 'FLUTTER_NOTIFICATION_CLICK';
-                break;
-        }
-
         const sendPromises = tokens.map(async (token) => {
             try {
-                const message = {
-                    token,
-                    notification: {
-                        title,
-                        body,
-                        ...(imageUrl && { image: imageUrl })
-                    },
-                    data: {
-                        type: notificationType,
-                        ...data,
-                        action: actionValue,
-                    },
-                    android: {
-                        notification: {
-                            ...(imageUrl && { image: imageUrl }),
-                            priority: 'high',
-                            sound: androidSound,
-                            channelId: androidChannelId
-                        }
-                    },
-                    apns: {
-                        payload: {
-                            aps: {
-                                contentAvailable: true,
-                                sound: apnsSound
-                            }
-                        },
-                        fcm_options: {
-                            ...(imageUrl && { image: imageUrl })
-                        }
-                    }
-                };
+                const message = buildDeviceMessage(token, title, body, imageUrl, data, options);
 
                 const response = await getMessaging(firebaseApp).send(message);
 

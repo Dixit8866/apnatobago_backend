@@ -19,15 +19,24 @@ export const getSoundId = (type, soundUrl) => soundUrl
     : `${type}_channel`;
 
 /**
- * List served to the app: [{ id, type, name, url, active }]
+ * iOS plays a custom push sound only from the app's Library/Sounds folder and only as caf / wav / aiff
+ * (not mp3). The app converts the tune and saves it under this name; the push's aps.sound uses it.
+ * If the file is not there (old app), iOS plays its default sound.
+ */
+export const getIosSoundName = (soundId) => `${soundId}.caf`;
+
+/**
+ * List served to the app: [{ id, type, name, url, active, iosSound }]
  */
 export const buildNotificationSoundList = (setting) => NOTIFICATION_SOUND_TYPES.map(t => {
     const url = setting?.[t.sound] || '';
+    const id = getSoundId(t.type, url);
     return {
-        id: getSoundId(t.type, url),
+        id,
         type: t.type,
         name: t.name,
         url,
-        active: !!url && setting?.[t.enabled] !== false
+        active: !!url && setting?.[t.enabled] !== false,
+        iosSound: getIosSoundName(id)
     };
 });
