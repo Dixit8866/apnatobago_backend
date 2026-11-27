@@ -255,6 +255,466 @@ export const getLedgerBillReturns = async (orderId, { transaction = null } = {})
     };
 };
 
+// Fields the ledger reads — one-party and all-party readers load exactly these (nothing else is used)
+const LEDGER_ORDER_ATTRIBUTES = ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt', 'packagingAt'];
+const LEDGER_PAYMENT_ATTRIBUTES = ['id', 'orderId', 'amount', 'paymentMethod', 'bankSettingId', 'deliveryBoyId', 'createdAt'];
+const LEDGER_BANK_ATTRIBUTES = ['id', 'bankName', 'accountName'];
+const LEDGER_BOY_ATTRIBUTES = ['id', 'name'];
+const LEDGER_ITEM_ATTRIBUTES = ['id', 'orderId', 'quantity', 'price', 'variantId'];
+const LEDGER_VARIANT_ATTRIBUTES = ['id', 'purchasePrice'];
+const LEDGER_LOG_ATTRIBUTES = ['id', 'userId', 'orderId', 'type', 'amount', 'previousBalance', 'note', 'createdByName', 'createdAt'];
+const LEDGER_RETURN_ATTRIBUTES = ['id', 'userId', 'orderId', 'returnAmount', 'quantity', 'price', 'reason', 'createdAt'];
+const LEDGER_RETURN_SKIP_STATUSES = ['Cancelled', 'Rejected'];
+
+/**
+ * A party's running ledger rows from its already loaded data (no DB access).
+ * syncPartyLedger (one party) and buildPartyLedgersBulk (many parties) both use this, so they always agree.
+ *
+ * @param {Object} data - { user, orders (createdAt ASC, with payments / items), balanceLogs (createdAt ASC), allUserReturns (createdAt ASC) }
+ * @returns {{ allBuiltRows: Array, latestClosingBalance: number, rawOpeningAmt: number, opType: string }}
+ */
+const buildLedgerRows = ({ user, orders, balanceLogs, allUserReturns }) => {
+    // Bills marked by a balance reset: placed right after the reset line; write-off bills keep the balance unchanged
+    const resetCarryTime = new Map();
+    const resetWriteOffIds = new Set();
+    for (const log of balanceLogs) {
+        const logType = String(log.type || '').toUpperCase();
+        if (log.orderId && (logType === BALANCE_RESET_CARRY || logType === BALANCE_RESET_WRITEOFF)) {
+            resetCarryTime.set(log.orderId, new Date(log.createdAt).getTime());
+            if (logType === BALANCE_RESET_WRITEOFF) resetWriteOffIds.add(log.orderId);
+        }
+    }
+
+    // Build Chronological Transactions List
+    const chronologicalTransactions = [];
+
+    // Include orders from Packaging onwards (Packaging, Packed, Shipping, Delivered, Payment Collect, Payment Verify, Completed)
+    // in running-ledger sequence (bill time, then bill number)
+    const eligibleOrders = sortOrdersForLedger(orders.filter(isLedgerOrder));
+
+
+    // Map sales returns to orders (Core Running Ledger Rule — see assignReturnsToOrders)
+    const { orderReturnsMap, unassignedStandaloneReturns } = assignReturnsToOrders(eligibleOrders, allUserReturns);
+
+    // 1. Process Eligible Orders (Packaging onwards)
+    for (const ord of eligibleOrders) {
+        const billNo = ord.orderId || String(ord.id).slice(0, 8);
+        const fin = calculateOrderFinancials(ord, ord.payments);
+        const orderDate = ord.deliveredAt || ord.packagingAt || ord.createdAt || new Date();
+
+        const orderPaymentsList = ord.payments || [];
+        const orderItemsList = ord.items || [];
+        const attachedReturns = orderReturnsMap.get(ord.id) || [];
+
+        // Sales Amount (Gross Bill)
+        const salesAmt = parseFloat(
+            fin.totalAmount > 0
+                ? fin.totalAmount
+                : (parseFloat(ord.totalAmount || 0) || 0)
+        );
+
+        // Purchase Cost = sum(item.quantity * variant.purchasePrice)
+        const purchaseCost = orderItemsList.reduce((sum, it) => {
+            const qty = parseFloat(it.quantity || 0);
+            const cost = parseFloat(it.variant?.purchasePrice || 0);
+            return sum + (qty * cost);
+        }, 0);
+
+        // Profit = Sales - Purchase Cost
+        const profit = Math.max(0, salesAmt - purchaseCost);
+
+        // Distinguish payment methods:
+        const isCashMethod = (m) => String(m || '').toUpperCase() === 'CASH';
+        const isBankMethod = (m) => ['ONLINE', 'BANK', 'CHEQUE', 'UPI', 'NEFT', 'RTGS'].includes(String(m || '').toUpperCase());
+
+        // Payment Breakdown - Only CASH and BANK/ONLINE payments belong to Cash and Bank columns
+        // Exclude CREDIT, SALES_RETURN, JAMA_CREDIT, COUPON (these are tracked in their own dedicated columns or balances)
+        const validPayments = orderPaymentsList.filter(p => {
+            const method = String(p.paymentMethod || '').toUpperCase();
+            return (isCashMethod(method) || isBankMethod(method)) && parseFloat(p.amount || 0) > 0;
+        });
+
+        const formattedBillNo = billNo.startsWith('B-') || billNo.startsWith('#') ? billNo.replace(/^#/, '') : `B-${billNo}`;
+        const orderTimestamp = new Date(orderDate).getTime();
+
+        // Coupon Discount
+        const couponDiscount = parseFloat(fin.couponDiscount || ord.couponDiscount || 0);
+
+        // Sales Return on Order (Includes cross-bill returns accepted during this order)
+        const returnTotal = attachedReturns.reduce((sum, r) => {
+            return sum + parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0);
+        }, 0);
+        const returnNote = sanitizeReturnNote(attachedReturns.map(r => r.reason));
+
+        // Distinguish payments made at delivery/order time vs subsequent payments:
+        let initialCash = 0;
+        let initialBank = 0;
+        const initialReceivers = [];
+
+        validPayments.forEach(p => {
+            const method = String(p.paymentMethod || '').toUpperCase();
+            const pAmt = parseFloat(p.amount || 0);
+            if (isCashMethod(method)) {
+                initialCash += pAmt;
+            } else if (isBankMethod(method)) {
+                initialBank += pAmt;
+                const rName = p.bankAccount?.bankName
+                    ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
+                    : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null);
+                if (rName) initialReceivers.push(rName);
+            }
+        });
+
+        // Fallback: If marked Paid or has paidAmount without individual OrderPayment record
+        if (validPayments.length === 0 && fin.paidAmount > 0) {
+            const fallbackMethod = String(ord.paymentMethod || 'CASH').toUpperCase();
+            if (isCashMethod(fallbackMethod)) {
+                initialCash = parseFloat(fin.paidAmount);
+            } else if (isBankMethod(fallbackMethod)) {
+                initialBank = parseFloat(fin.paidAmount);
+            }
+        }
+
+        // Payment fields and closing balance are ONLY populated once payment is verified
+        const st = String(ord.orderStatus || '').toLowerCase();
+        const isPaymentVerified = ord.paymentCollectStatus === 'Verified' || ['payment verify', 'completed'].includes(st);
+
+        // Exactly ONE row per ORDER in the Party Ledger - Never split orders into duplicate rows
+        chronologicalTransactions.push({
+            type: 'ORDER',
+            orderId: ord.id,
+            dateObj: new Date(orderDate),
+            billNo: formattedBillNo,
+            sales: salesAmt,
+            purchaseCost: parseFloat(purchaseCost.toFixed(2)),
+            profit: parseFloat(profit.toFixed(2)),
+            cash: isPaymentVerified ? parseFloat(initialCash.toFixed(2)) : 0,
+            bank: isPaymentVerified ? parseFloat(initialBank.toFixed(2)) : 0,
+            bankReceiver: isPaymentVerified ? (initialReceivers.length > 0 ? Array.from(new Set(initialReceivers)).join(', ') : '-') : '-',
+            kupan: isPaymentVerified ? parseFloat(couponDiscount.toFixed(2)) : 0,
+            returnVal: isPaymentVerified ? parseFloat(returnTotal.toFixed(2)) : 0,
+            attachedReturnVal: parseFloat(returnTotal.toFixed(2)),
+            returnNote: isPaymentVerified ? returnNote : '-',
+            isPaymentVerified,
+            balanceResetWriteOff: resetWriteOffIds.has(ord.id),
+            // Bill not verified at a balance reset goes right after the reset line (stable sort keeps bill order)
+            sortTime: resetCarryTime.has(ord.id) ? resetCarryTime.get(ord.id) + 1 : orderTimestamp
+        });
+    }
+
+    // 2. Process Standalone Sales Returns
+    unassignedStandaloneReturns.forEach((ret, rIdx) => {
+        const retDate = ret.createdAt || new Date();
+        const retAmt = parseFloat(ret.returnAmount || (parseFloat(ret.quantity || 0) * parseFloat(ret.price || 0)) || 0);
+        if (retAmt > 0) {
+            chronologicalTransactions.push({
+                type: 'RETURN',
+                orderId: null,
+                dateObj: new Date(retDate),
+                billNo: ret.returnNumber || `RTN-${String(ret.id).slice(0, 6).toUpperCase()}`,
+                sales: 0,
+                purchaseCost: 0,
+                profit: 0,
+                cash: 0,
+                bank: 0,
+                bankReceiver: '-',
+                kupan: 0,
+                returnVal: parseFloat(retAmt.toFixed(2)),
+                returnNote: sanitizeReturnNote(ret.reason),
+                sortTime: new Date(retDate).getTime() + 15 + rIdx
+            });
+        }
+    });
+
+    // 3. Process Independent Manual Adjustments (PartyBalanceLog)
+    // ONLY genuine manual adjustments not linked to an order should be processed here!
+    for (const log of balanceLogs) {
+        // Balance reset line: writes off the party balance as it was at reset time (not counted as cash / sales)
+        if (!log.orderId && String(log.type || '').toUpperCase() === BALANCE_RESET) {
+            chronologicalTransactions.push({
+                type: 'BALANCE_RESET',
+                orderId: null,
+                dateObj: new Date(log.createdAt),
+                billNo: `RESET-${String(log.id).slice(0, 6).toUpperCase()}`,
+                sales: 0,
+                purchaseCost: 0,
+                profit: 0,
+                cash: 0,
+                bank: 0,
+                bankReceiver: log.createdByName ? `Admin • ${log.createdByName}` : 'Admin',
+                kupan: 0,
+                returnVal: 0,
+                returnNote: '-',
+                balanceResetAmount: parseFloat(log.previousBalance || 0),
+                sortTime: new Date(log.createdAt).getTime()
+            });
+            continue;
+        }
+
+        // NEVER process logs linked to an order! Order dues/credits are handled through Order itself.
+        if (log.orderId) continue;
+
+        const autoNote = String(log.note || '').toLowerCase();
+        if (
+            autoNote.includes('overpayment') ||
+            autoNote.includes('credit jama on order') ||
+            autoNote.includes('jama balance') ||
+            autoNote.includes('cash/online overpayment') ||
+            autoNote.includes('admin settlement') ||
+            autoNote.includes('delivery settlement') ||
+            autoNote.includes('delivery boy settlement') ||
+            autoNote.includes('credit (baki)') ||
+            autoNote.includes('goods given on credit') ||
+            autoNote.includes('order #') ||
+            autoNote.includes('on order') ||
+            autoNote.includes('advance jama on order') ||
+            autoNote.includes('advance jama used on order') ||
+            autoNote.includes('past due cleared') ||
+            autoNote.includes('settled during delivery')
+        ) {
+            continue;
+        }
+
+        const logAmt = parseFloat(log.amount || 0);
+        if (logAmt <= 0) continue;
+
+        const logType = String(log.type || '').toUpperCase();
+        const logDate = log.createdAt || new Date();
+
+        if (logType === 'JAMA' || logType === 'PAYMENT') {
+            chronologicalTransactions.push({
+                type: 'ADJUSTMENT_CR',
+                orderId: null,
+                dateObj: new Date(logDate),
+                billNo: `PAY-${String(log.id).slice(0, 6).toUpperCase()}`,
+                sales: 0,
+                purchaseCost: 0,
+                profit: 0,
+                cash: logAmt,
+                bank: 0,
+                bankReceiver: log.createdByName ? `Admin • ${log.createdByName}` : 'Admin',
+                kupan: 0,
+                returnVal: 0,
+                returnNote: '-', // Never place automatic return note!
+                sortTime: new Date(logDate).getTime()
+            });
+        } else if (logType === 'BAKI' || logType === 'DUE') {
+            chronologicalTransactions.push({
+                type: 'ADJUSTMENT_DR',
+                orderId: null,
+                dateObj: new Date(logDate),
+                billNo: `OPN-${String(log.id).slice(0, 6).toUpperCase()}`,
+                sales: logAmt,
+                purchaseCost: 0,
+                profit: 0,
+                cash: 0,
+                bank: 0,
+                bankReceiver: '-',
+                kupan: 0,
+                returnVal: 0,
+                returnNote: '-', // Never place automatic return note!
+                sortTime: new Date(logDate).getTime()
+            });
+        }
+    }
+
+    // Initial Opening Balance for Party
+    const rawOpeningAmt = Math.max(0, parseFloat(user.openingBalance || 0));
+    const opType = String(user.openingBalanceType || 'CR').toUpperCase();
+    // CR = Baki / Due (Positive balance: customer owes admin)
+    // DR = Jama / Advance (Negative balance: customer has advance deposit with admin)
+    const initialPartyOpeningBalance = opType === 'DR' ? -rawOpeningAmt : rawOpeningAmt;
+
+    // Running ledger follows time: each row's closing balance is the next row's opening balance.
+    // Stable sort keeps bills with the same time in bill-number order.
+    chronologicalTransactions.sort((a, b) => a.sortTime - b.sortTime);
+
+    // Hisab starts again at the latest Balance Reset: rows dated before it stay in the ledger (no bill is removed)
+    // but are not counted in the summary totals (sales, cash, bank, kupan, return, purchase, profit)
+    const latestResetTime = chronologicalTransactions
+        .filter(tx => tx.type === 'BALANCE_RESET')
+        .reduce((latest, tx) => Math.max(latest, tx.dateObj.getTime()), 0);
+
+    // Build continuous Running Ledger Rows
+    let runningBalance = initialPartyOpeningBalance;
+    const allBuiltRows = chronologicalTransactions.map((tx, idx) => {
+        const dt = formatLedgerDateTime(tx.dateObj);
+        const openingBalance = runningBalance;
+        const totalAmount = parseFloat((openingBalance + tx.sales).toFixed(2));
+
+        let closingBalance = null;
+        if (tx.isPaymentVerified !== false) {
+            const creditsTotal = tx.cash + tx.bank + tx.kupan + tx.returnVal;
+            closingBalance = parseFloat((totalAmount - creditsTotal).toFixed(2));
+            if (tx.type === 'BALANCE_RESET') {
+                // Write off the balance as it was at reset time
+                closingBalance = parseFloat((totalAmount - tx.balanceResetAmount).toFixed(2));
+            } else if (tx.balanceResetWriteOff) {
+                // Bill written off by a balance reset: its own baki / jama does not change the balance
+                closingBalance = parseFloat(openingBalance.toFixed(2));
+            }
+            runningBalance = closingBalance;
+        }
+
+        return {
+            sr: idx + 1,
+            date: dt.dateStr,
+            time: dt.timeStr,
+            isoDate: dt.isoDate,
+            dateObj: tx.dateObj,
+            billNo: tx.billNo,
+            orderId: tx.orderId,
+            openingBalance: parseFloat(openingBalance.toFixed(2)),
+            sales: parseFloat(tx.sales.toFixed(2)),
+            totalAmount: totalAmount,
+            purchaseCost: parseFloat(tx.purchaseCost.toFixed(2)),
+            profit: parseFloat(tx.profit.toFixed(2)),
+            cash: parseFloat(tx.cash.toFixed(2)),
+            bank: parseFloat(tx.bank.toFixed(2)),
+            bankReceiver: tx.bankReceiver,
+            kupan: parseFloat(tx.kupan.toFixed(2)),
+            returnVal: parseFloat(tx.returnVal.toFixed(2)),
+            attachedReturnVal: parseFloat((tx.attachedReturnVal || tx.returnVal || 0).toFixed(2)),
+            returnNote: tx.returnNote,
+            closingBalance: closingBalance,
+            closingBalanceType: getBalanceType(closingBalance),
+            isPaymentVerified: tx.isPaymentVerified !== false,
+            isBalanceReset: tx.type === 'BALANCE_RESET',
+            isBalanceResetWriteOff: Boolean(tx.balanceResetWriteOff),
+            isBeforeReset: latestResetTime > 0 && tx.dateObj.getTime() < latestResetTime
+        };
+    });
+
+    // Synchronize User Model closingBalance as single source of truth (from verified transactions)
+    const latestClosingBalance = runningBalance;
+
+    return { allBuiltRows, latestClosingBalance, rawOpeningAmt, opType };
+};
+
+/** Party summary returned with the ledger rows. */
+const ledgerUserSummary = (user, latestClosingBalance, rawOpeningAmt, opType) => ({
+        id: user.id,
+        fullname: user.fullname,
+        shopName: user.businessProfile?.shopName || user.businessProfile?.shopNameAlt || user.fullname,
+        mobile: user.number ? `+91 ${user.number}` : '',
+        route: user.city || 'Main Route (A1)',
+        kycStatus: user.kycverification === 'verified' ? 'KYC Verified' : 'KYC Pending',
+        creditline: parseFloat(user.creditline || 0),
+        closingBalance: latestClosingBalance,
+        currentDue: latestClosingBalance > 0 ? latestClosingBalance : 0,
+        advanceJama: latestClosingBalance < 0 ? Math.abs(latestClosingBalance) : 0,
+        balanceType: latestClosingBalance > 0 ? 'DUE' : (latestClosingBalance < 0 ? 'JAMA' : 'CLEAR'),
+        openingBalance: rawOpeningAmt,
+        openingBalanceType: opType,
+        isOpeningBalanceSet: Boolean(user.isOpeningBalanceSet)
+    });
+
+/**
+ * Read-only ledgers of many parties at once: same rows / balances as syncPartyLedger(id, { persist: false }),
+ * but loads everything in a few queries instead of several per party. Nothing is saved.
+ *
+ * @param {Array<string>} userIds - party UUIDs
+ * @param {Object} [options] - { includeItems: false skips bill items (only purchase cost / profit use them) }
+ * @returns {Promise<Map<string, { user, ledgerRows, closingBalance }>>}
+ */
+export const buildPartyLedgersBulk = async (userIds, { includeItems = true } = {}) => {
+    const result = new Map();
+    const ids = [...new Set((userIds || []).filter(Boolean).map(String))];
+    if (!ids.length) return result;
+
+    const [users, orders, balanceLogs, returns] = await Promise.all([
+        User.findAll({ where: { id: ids }, include: [{ model: BusinessProfile, as: 'businessProfile' }] }),
+        Order.findAll({ attributes: LEDGER_ORDER_ATTRIBUTES, order: [['createdAt', 'ASC']] }),
+        PartyBalanceLog.findAll({ where: { userId: ids }, attributes: LEDGER_LOG_ATTRIBUTES, order: [['createdAt', 'ASC']] }),
+        SalesReturn.findAll({
+            where: { userId: ids, status: { [Op.notIn]: LEDGER_RETURN_SKIP_STATUSES } },
+            attributes: LEDGER_RETURN_ATTRIBUTES,
+            order: [['createdAt', 'ASC']],
+        }),
+    ]);
+
+    // Payments / items of the bills (same includes as the one-party query)
+    const [payments, items] = await Promise.all([
+        OrderPayment.findAll({
+            attributes: LEDGER_PAYMENT_ATTRIBUTES,
+            include: [
+                { model: BankSetting, as: 'bankAccount', attributes: LEDGER_BANK_ATTRIBUTES },
+                { model: DeliveryBoy, as: 'deliveryBoy', attributes: LEDGER_BOY_ATTRIBUTES }
+            ],
+        }),
+        includeItems
+            ? OrderItem.findAll({
+                attributes: LEDGER_ITEM_ATTRIBUTES,
+                include: [{ model: ProductVariant, as: 'variant', attributes: LEDGER_VARIANT_ATTRIBUTES }],
+            })
+            : [],
+    ]);
+    const paymentsByOrder = new Map();
+    for (const p of payments) {
+        if (!paymentsByOrder.has(p.orderId)) paymentsByOrder.set(p.orderId, []);
+        paymentsByOrder.get(p.orderId).push(p);
+    }
+    const itemsByOrder = new Map();
+    for (const it of items) {
+        if (!itemsByOrder.has(it.orderId)) itemsByOrder.set(it.orderId, []);
+        itemsByOrder.get(it.orderId).push(it);
+    }
+
+    // Party's bills: by userId, or by customer number ending with the party's phone (buildPartyOrderConditions)
+    const phoneKeys = new Map();
+    for (const u of users) {
+        const phone = u.number ? String(u.number).replace(/\D/g, '').slice(-10) : '';
+        if (phone && phone.length >= 7) {
+            if (!phoneKeys.has(phone)) phoneKeys.set(phone, []);
+            phoneKeys.get(phone).push(String(u.id));
+        }
+    }
+    const userSet = new Set(users.map((u) => String(u.id)));
+    const ordersByUser = new Map(users.map((u) => [String(u.id), []]));
+    for (const ord of orders) {
+        const owners = new Set();
+        if (ord.userId && userSet.has(String(ord.userId))) owners.add(String(ord.userId));
+        if (ord.customerNumber) {
+            const cn = String(ord.customerNumber);
+            for (let n = 7; n <= 10; n++) {
+                const key = cn.slice(-n);
+                if (key.length === n && phoneKeys.has(key)) phoneKeys.get(key).forEach((uid) => owners.add(uid));
+            }
+        }
+        if (!owners.size) continue;
+        ord.payments = paymentsByOrder.get(ord.id) || [];
+        ord.items = itemsByOrder.get(ord.id) || [];
+        for (const uid of owners) ordersByUser.get(uid).push(ord);
+    }
+    const group = (rows) => {
+        const m = new Map();
+        for (const r of rows) {
+            const k = String(r.userId);
+            if (!m.has(k)) m.set(k, []);
+            m.get(k).push(r);
+        }
+        return m;
+    };
+    const logsByUser = group(balanceLogs);
+    const returnsByUser = group(returns);
+
+    for (const user of users) {
+        const uid = String(user.id);
+        const { allBuiltRows, latestClosingBalance, rawOpeningAmt, opType } = buildLedgerRows({
+            user,
+            orders: ordersByUser.get(uid) || [],
+            balanceLogs: logsByUser.get(uid) || [],
+            allUserReturns: returnsByUser.get(uid) || [],
+        });
+        result.set(uid, {
+            user: ledgerUserSummary(user, latestClosingBalance, rawOpeningAmt, opType),
+            ledgerRows: allBuiltRows,
+            closingBalance: latestClosingBalance
+        });
+    }
+    return result;
+};
+
 /**
  * Reconstruct and synchronize the entire ledger history for a party.
  *
@@ -289,16 +749,16 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Fetch all non-cancelled orders for this party
         const orders = await Order.findAll({
             where: { [Op.or]: buildPartyOrderConditions(user) },
-            attributes: ['id', 'orderId', 'userId', 'customerNumber', 'orderStatus', 'totalAmount', 'couponDiscount', 'paymentMethod', 'createdAt', 'packagingAt'],
+            attributes: LEDGER_ORDER_ATTRIBUTES,
             include: [
                 {
                     model: OrderPayment,
                     as: 'payments',
-                    attributes: ['id', 'orderId', 'amount', 'paymentMethod', 'bankSettingId', 'deliveryBoyId', 'createdAt'],
+                    attributes: LEDGER_PAYMENT_ATTRIBUTES,
                     required: false,
                     include: [
-                        { model: BankSetting, as: 'bankAccount', attributes: ['id', 'bankName', 'accountName'] },
-                        { model: DeliveryBoy, as: 'deliveryBoy', attributes: ['id', 'name'] }
+                        { model: BankSetting, as: 'bankAccount', attributes: LEDGER_BANK_ATTRIBUTES },
+                        { model: DeliveryBoy, as: 'deliveryBoy', attributes: LEDGER_BOY_ATTRIBUTES }
                     ]
                 },
                 {
@@ -310,13 +770,13 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
                 {
                     model: OrderItem,
                     as: 'items',
-                    attributes: ['id', 'orderId', 'quantity', 'price', 'variantId'],
+                    attributes: LEDGER_ITEM_ATTRIBUTES,
                     required: false,
                     include: [
                         {
                             model: ProductVariant,
                             as: 'variant',
-                            attributes: ['id', 'purchasePrice']
+                            attributes: LEDGER_VARIANT_ATTRIBUTES
                         }
                     ]
                 }
@@ -339,334 +799,23 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         // Fetch manual balance logs (Opening dues, Adjustments)
         const balanceLogs = await PartyBalanceLog.findAll({
             where: { userId: user.id },
-            attributes: ['id', 'userId', 'orderId', 'type', 'amount', 'previousBalance', 'note', 'createdByName', 'createdAt'],
+            attributes: LEDGER_LOG_ATTRIBUTES,
             order: [['createdAt', 'ASC']],
             transaction
         });
-
-        // Bills marked by a balance reset: placed right after the reset line; write-off bills keep the balance unchanged
-        const resetCarryTime = new Map();
-        const resetWriteOffIds = new Set();
-        for (const log of balanceLogs) {
-            const logType = String(log.type || '').toUpperCase();
-            if (log.orderId && (logType === BALANCE_RESET_CARRY || logType === BALANCE_RESET_WRITEOFF)) {
-                resetCarryTime.set(log.orderId, new Date(log.createdAt).getTime());
-                if (logType === BALANCE_RESET_WRITEOFF) resetWriteOffIds.add(log.orderId);
-            }
-        }
-
-        // Build Chronological Transactions List
-        const chronologicalTransactions = [];
-
-        // Include orders from Packaging onwards (Packaging, Packed, Shipping, Delivered, Payment Collect, Payment Verify, Completed)
-        // in running-ledger sequence (bill time, then bill number)
-        const eligibleOrders = sortOrdersForLedger(orders.filter(isLedgerOrder));
 
         // Fetch ALL Sales Returns for this party
         const allUserReturns = await SalesReturn.findAll({
             where: {
                 userId: user.id,
-                status: { [Op.notIn]: ['Cancelled', 'Rejected'] }
+                status: { [Op.notIn]: LEDGER_RETURN_SKIP_STATUSES }
             },
-            attributes: ['id', 'userId', 'orderId', 'returnAmount', 'quantity', 'price', 'reason', 'createdAt'],
+            attributes: LEDGER_RETURN_ATTRIBUTES,
             order: [['createdAt', 'ASC']],
             transaction
         });
 
-        // Map sales returns to orders (Core Running Ledger Rule — see assignReturnsToOrders)
-        const { orderReturnsMap, unassignedStandaloneReturns } = assignReturnsToOrders(eligibleOrders, allUserReturns);
-
-        // 1. Process Eligible Orders (Packaging onwards)
-        for (const ord of eligibleOrders) {
-            const billNo = ord.orderId || String(ord.id).slice(0, 8);
-            const fin = calculateOrderFinancials(ord, ord.payments);
-            const orderDate = ord.deliveredAt || ord.packagingAt || ord.createdAt || new Date();
-
-            const orderPaymentsList = ord.payments || [];
-            const orderItemsList = ord.items || [];
-            const attachedReturns = orderReturnsMap.get(ord.id) || [];
-
-            // Sales Amount (Gross Bill)
-            const salesAmt = parseFloat(
-                fin.totalAmount > 0
-                    ? fin.totalAmount
-                    : (parseFloat(ord.totalAmount || 0) || 0)
-            );
-
-            // Purchase Cost = sum(item.quantity * variant.purchasePrice)
-            const purchaseCost = orderItemsList.reduce((sum, it) => {
-                const qty = parseFloat(it.quantity || 0);
-                const cost = parseFloat(it.variant?.purchasePrice || 0);
-                return sum + (qty * cost);
-            }, 0);
-
-            // Profit = Sales - Purchase Cost
-            const profit = Math.max(0, salesAmt - purchaseCost);
-
-            // Distinguish payment methods:
-            const isCashMethod = (m) => String(m || '').toUpperCase() === 'CASH';
-            const isBankMethod = (m) => ['ONLINE', 'BANK', 'CHEQUE', 'UPI', 'NEFT', 'RTGS'].includes(String(m || '').toUpperCase());
-
-            // Payment Breakdown - Only CASH and BANK/ONLINE payments belong to Cash and Bank columns
-            // Exclude CREDIT, SALES_RETURN, JAMA_CREDIT, COUPON (these are tracked in their own dedicated columns or balances)
-            const validPayments = orderPaymentsList.filter(p => {
-                const method = String(p.paymentMethod || '').toUpperCase();
-                return (isCashMethod(method) || isBankMethod(method)) && parseFloat(p.amount || 0) > 0;
-            });
-
-            const formattedBillNo = billNo.startsWith('B-') || billNo.startsWith('#') ? billNo.replace(/^#/, '') : `B-${billNo}`;
-            const orderTimestamp = new Date(orderDate).getTime();
-
-            // Coupon Discount
-            const couponDiscount = parseFloat(fin.couponDiscount || ord.couponDiscount || 0);
-
-            // Sales Return on Order (Includes cross-bill returns accepted during this order)
-            const returnTotal = attachedReturns.reduce((sum, r) => {
-                return sum + parseFloat(r.returnAmount || (parseFloat(r.quantity || 0) * parseFloat(r.price || 0)) || 0);
-            }, 0);
-            const returnNote = sanitizeReturnNote(attachedReturns.map(r => r.reason));
-
-            // Distinguish payments made at delivery/order time vs subsequent payments:
-            let initialCash = 0;
-            let initialBank = 0;
-            const initialReceivers = [];
-
-            validPayments.forEach(p => {
-                const method = String(p.paymentMethod || '').toUpperCase();
-                const pAmt = parseFloat(p.amount || 0);
-                if (isCashMethod(method)) {
-                    initialCash += pAmt;
-                } else if (isBankMethod(method)) {
-                    initialBank += pAmt;
-                    const rName = p.bankAccount?.bankName
-                        ? `${p.bankAccount.bankName}${p.bankAccount.accountName ? ` • ${p.bankAccount.accountName}` : ''}`
-                        : (p.deliveryBoy?.name ? `Delivery • ${p.deliveryBoy.name}` : null);
-                    if (rName) initialReceivers.push(rName);
-                }
-            });
-
-            // Fallback: If marked Paid or has paidAmount without individual OrderPayment record
-            if (validPayments.length === 0 && fin.paidAmount > 0) {
-                const fallbackMethod = String(ord.paymentMethod || 'CASH').toUpperCase();
-                if (isCashMethod(fallbackMethod)) {
-                    initialCash = parseFloat(fin.paidAmount);
-                } else if (isBankMethod(fallbackMethod)) {
-                    initialBank = parseFloat(fin.paidAmount);
-                }
-            }
-
-            // Payment fields and closing balance are ONLY populated once payment is verified
-            const st = String(ord.orderStatus || '').toLowerCase();
-            const isPaymentVerified = ord.paymentCollectStatus === 'Verified' || ['payment verify', 'completed'].includes(st);
-
-            // Exactly ONE row per ORDER in the Party Ledger - Never split orders into duplicate rows
-            chronologicalTransactions.push({
-                type: 'ORDER',
-                orderId: ord.id,
-                dateObj: new Date(orderDate),
-                billNo: formattedBillNo,
-                sales: salesAmt,
-                purchaseCost: parseFloat(purchaseCost.toFixed(2)),
-                profit: parseFloat(profit.toFixed(2)),
-                cash: isPaymentVerified ? parseFloat(initialCash.toFixed(2)) : 0,
-                bank: isPaymentVerified ? parseFloat(initialBank.toFixed(2)) : 0,
-                bankReceiver: isPaymentVerified ? (initialReceivers.length > 0 ? Array.from(new Set(initialReceivers)).join(', ') : '-') : '-',
-                kupan: isPaymentVerified ? parseFloat(couponDiscount.toFixed(2)) : 0,
-                returnVal: isPaymentVerified ? parseFloat(returnTotal.toFixed(2)) : 0,
-                attachedReturnVal: parseFloat(returnTotal.toFixed(2)),
-                returnNote: isPaymentVerified ? returnNote : '-',
-                isPaymentVerified,
-                balanceResetWriteOff: resetWriteOffIds.has(ord.id),
-                // Bill not verified at a balance reset goes right after the reset line (stable sort keeps bill order)
-                sortTime: resetCarryTime.has(ord.id) ? resetCarryTime.get(ord.id) + 1 : orderTimestamp
-            });
-        }
-
-        // 2. Process Standalone Sales Returns
-        unassignedStandaloneReturns.forEach((ret, rIdx) => {
-            const retDate = ret.createdAt || new Date();
-            const retAmt = parseFloat(ret.returnAmount || (parseFloat(ret.quantity || 0) * parseFloat(ret.price || 0)) || 0);
-            if (retAmt > 0) {
-                chronologicalTransactions.push({
-                    type: 'RETURN',
-                    orderId: null,
-                    dateObj: new Date(retDate),
-                    billNo: ret.returnNumber || `RTN-${String(ret.id).slice(0, 6).toUpperCase()}`,
-                    sales: 0,
-                    purchaseCost: 0,
-                    profit: 0,
-                    cash: 0,
-                    bank: 0,
-                    bankReceiver: '-',
-                    kupan: 0,
-                    returnVal: parseFloat(retAmt.toFixed(2)),
-                    returnNote: sanitizeReturnNote(ret.reason),
-                    sortTime: new Date(retDate).getTime() + 15 + rIdx
-                });
-            }
-        });
-
-        // 3. Process Independent Manual Adjustments (PartyBalanceLog)
-        // ONLY genuine manual adjustments not linked to an order should be processed here!
-        for (const log of balanceLogs) {
-            // Balance reset line: writes off the party balance as it was at reset time (not counted as cash / sales)
-            if (!log.orderId && String(log.type || '').toUpperCase() === BALANCE_RESET) {
-                chronologicalTransactions.push({
-                    type: 'BALANCE_RESET',
-                    orderId: null,
-                    dateObj: new Date(log.createdAt),
-                    billNo: `RESET-${String(log.id).slice(0, 6).toUpperCase()}`,
-                    sales: 0,
-                    purchaseCost: 0,
-                    profit: 0,
-                    cash: 0,
-                    bank: 0,
-                    bankReceiver: log.createdByName ? `Admin • ${log.createdByName}` : 'Admin',
-                    kupan: 0,
-                    returnVal: 0,
-                    returnNote: '-',
-                    balanceResetAmount: parseFloat(log.previousBalance || 0),
-                    sortTime: new Date(log.createdAt).getTime()
-                });
-                continue;
-            }
-
-            // NEVER process logs linked to an order! Order dues/credits are handled through Order itself.
-            if (log.orderId) continue;
-
-            const autoNote = String(log.note || '').toLowerCase();
-            if (
-                autoNote.includes('overpayment') ||
-                autoNote.includes('credit jama on order') ||
-                autoNote.includes('jama balance') ||
-                autoNote.includes('cash/online overpayment') ||
-                autoNote.includes('admin settlement') ||
-                autoNote.includes('delivery settlement') ||
-                autoNote.includes('delivery boy settlement') ||
-                autoNote.includes('credit (baki)') ||
-                autoNote.includes('goods given on credit') ||
-                autoNote.includes('order #') ||
-                autoNote.includes('on order') ||
-                autoNote.includes('advance jama on order') ||
-                autoNote.includes('advance jama used on order') ||
-                autoNote.includes('past due cleared') ||
-                autoNote.includes('settled during delivery')
-            ) {
-                continue;
-            }
-
-            const logAmt = parseFloat(log.amount || 0);
-            if (logAmt <= 0) continue;
-
-            const logType = String(log.type || '').toUpperCase();
-            const logDate = log.createdAt || new Date();
-
-            if (logType === 'JAMA' || logType === 'PAYMENT') {
-                chronologicalTransactions.push({
-                    type: 'ADJUSTMENT_CR',
-                    orderId: null,
-                    dateObj: new Date(logDate),
-                    billNo: `PAY-${String(log.id).slice(0, 6).toUpperCase()}`,
-                    sales: 0,
-                    purchaseCost: 0,
-                    profit: 0,
-                    cash: logAmt,
-                    bank: 0,
-                    bankReceiver: log.createdByName ? `Admin • ${log.createdByName}` : 'Admin',
-                    kupan: 0,
-                    returnVal: 0,
-                    returnNote: '-', // Never place automatic return note!
-                    sortTime: new Date(logDate).getTime()
-                });
-            } else if (logType === 'BAKI' || logType === 'DUE') {
-                chronologicalTransactions.push({
-                    type: 'ADJUSTMENT_DR',
-                    orderId: null,
-                    dateObj: new Date(logDate),
-                    billNo: `OPN-${String(log.id).slice(0, 6).toUpperCase()}`,
-                    sales: logAmt,
-                    purchaseCost: 0,
-                    profit: 0,
-                    cash: 0,
-                    bank: 0,
-                    bankReceiver: '-',
-                    kupan: 0,
-                    returnVal: 0,
-                    returnNote: '-', // Never place automatic return note!
-                    sortTime: new Date(logDate).getTime()
-                });
-            }
-        }
-
-        // Initial Opening Balance for Party
-        const rawOpeningAmt = Math.max(0, parseFloat(user.openingBalance || 0));
-        const opType = String(user.openingBalanceType || 'CR').toUpperCase();
-        // CR = Baki / Due (Positive balance: customer owes admin)
-        // DR = Jama / Advance (Negative balance: customer has advance deposit with admin)
-        const initialPartyOpeningBalance = opType === 'DR' ? -rawOpeningAmt : rawOpeningAmt;
-
-        // Running ledger follows time: each row's closing balance is the next row's opening balance.
-        // Stable sort keeps bills with the same time in bill-number order.
-        chronologicalTransactions.sort((a, b) => a.sortTime - b.sortTime);
-
-        // Hisab starts again at the latest Balance Reset: rows dated before it stay in the ledger (no bill is removed)
-        // but are not counted in the summary totals (sales, cash, bank, kupan, return, purchase, profit)
-        const latestResetTime = chronologicalTransactions
-            .filter(tx => tx.type === 'BALANCE_RESET')
-            .reduce((latest, tx) => Math.max(latest, tx.dateObj.getTime()), 0);
-
-        // Build continuous Running Ledger Rows
-        let runningBalance = initialPartyOpeningBalance;
-        const allBuiltRows = chronologicalTransactions.map((tx, idx) => {
-            const dt = formatLedgerDateTime(tx.dateObj);
-            const openingBalance = runningBalance;
-            const totalAmount = parseFloat((openingBalance + tx.sales).toFixed(2));
-
-            let closingBalance = null;
-            if (tx.isPaymentVerified !== false) {
-                const creditsTotal = tx.cash + tx.bank + tx.kupan + tx.returnVal;
-                closingBalance = parseFloat((totalAmount - creditsTotal).toFixed(2));
-                if (tx.type === 'BALANCE_RESET') {
-                    // Write off the balance as it was at reset time
-                    closingBalance = parseFloat((totalAmount - tx.balanceResetAmount).toFixed(2));
-                } else if (tx.balanceResetWriteOff) {
-                    // Bill written off by a balance reset: its own baki / jama does not change the balance
-                    closingBalance = parseFloat(openingBalance.toFixed(2));
-                }
-                runningBalance = closingBalance;
-            }
-
-            return {
-                sr: idx + 1,
-                date: dt.dateStr,
-                time: dt.timeStr,
-                isoDate: dt.isoDate,
-                dateObj: tx.dateObj,
-                billNo: tx.billNo,
-                orderId: tx.orderId,
-                openingBalance: parseFloat(openingBalance.toFixed(2)),
-                sales: parseFloat(tx.sales.toFixed(2)),
-                totalAmount: totalAmount,
-                purchaseCost: parseFloat(tx.purchaseCost.toFixed(2)),
-                profit: parseFloat(tx.profit.toFixed(2)),
-                cash: parseFloat(tx.cash.toFixed(2)),
-                bank: parseFloat(tx.bank.toFixed(2)),
-                bankReceiver: tx.bankReceiver,
-                kupan: parseFloat(tx.kupan.toFixed(2)),
-                returnVal: parseFloat(tx.returnVal.toFixed(2)),
-                attachedReturnVal: parseFloat((tx.attachedReturnVal || tx.returnVal || 0).toFixed(2)),
-                returnNote: tx.returnNote,
-                closingBalance: closingBalance,
-                closingBalanceType: getBalanceType(closingBalance),
-                isPaymentVerified: tx.isPaymentVerified !== false,
-                isBalanceReset: tx.type === 'BALANCE_RESET',
-                isBalanceResetWriteOff: Boolean(tx.balanceResetWriteOff),
-                isBeforeReset: latestResetTime > 0 && tx.dateObj.getTime() < latestResetTime
-            };
-        });
-
-        // Synchronize User Model closingBalance as single source of truth (from verified transactions)
-        const latestClosingBalance = runningBalance;
+        const { allBuiltRows, latestClosingBalance, rawOpeningAmt, opType } = buildLedgerRows({ user, orders, balanceLogs, allUserReturns });
 
         if (persist && user) {
             try {
@@ -713,22 +862,7 @@ export const syncPartyLedger = async (userId, { forceRebuild = false, transactio
         }
 
         return {
-            user: {
-                id: user.id,
-                fullname: user.fullname,
-                shopName: user.businessProfile?.shopName || user.businessProfile?.shopNameAlt || user.fullname,
-                mobile: user.number ? `+91 ${user.number}` : '',
-                route: user.city || 'Main Route (A1)',
-                kycStatus: user.kycverification === 'verified' ? 'KYC Verified' : 'KYC Pending',
-                creditline: parseFloat(user.creditline || 0),
-                closingBalance: latestClosingBalance,
-                currentDue: latestClosingBalance > 0 ? latestClosingBalance : 0,
-                advanceJama: latestClosingBalance < 0 ? Math.abs(latestClosingBalance) : 0,
-                balanceType: latestClosingBalance > 0 ? 'DUE' : (latestClosingBalance < 0 ? 'JAMA' : 'CLEAR'),
-                openingBalance: rawOpeningAmt,
-                openingBalanceType: opType,
-                isOpeningBalanceSet: Boolean(user.isOpeningBalanceSet)
-            },
+            user: ledgerUserSummary(user, latestClosingBalance, rawOpeningAmt, opType),
             ledgerRows: allBuiltRows,
             closingBalance: latestClosingBalance
         };

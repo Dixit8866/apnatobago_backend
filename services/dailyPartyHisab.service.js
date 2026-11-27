@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import sequelize from '../config/db.js';
 import { Order, User, BusinessProfile } from '../models/index.js';
-import { syncPartyLedger } from './partyLedger.service.js';
+import { buildPartyLedgersBulk } from './partyLedger.service.js';
 import logger from '../logger/apiLogger.js';
 
 /**
@@ -17,7 +17,6 @@ import logger from '../logger/apiLogger.js';
 const CANCELLED_STATUSES = ['Cancelled', 'Admin Cancel', 'User Cancel', 'Delivery Boy Cancel'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 const IST_OFFSET_MS = 330 * 60 * 1000;
-const WORKERS = 6;
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const sum = (rows, key) => r2(rows.reduce((s, r) => s + (Number(r[key]) || 0), 0));
@@ -30,20 +29,6 @@ const signedOpening = (u) => {
 
 /** Today's date in India as YYYY-MM-DD. */
 export const todayIST = () => new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 10);
-
-/** Run fn over items with a few at a time (DB pool is small). */
-const mapLimit = async (items, limit, fn) => {
-    const out = new Array(items.length);
-    let next = 0;
-    const worker = async () => {
-        while (next < items.length) {
-            const i = next++;
-            out[i] = await fn(items[i], i);
-        }
-    };
-    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-    return out;
-};
 
 /**
  * Parties that have started ordering: at least one order that is not cancelled
@@ -99,8 +84,7 @@ const emptyLine = (party, balance) => ({
 });
 
 /** One party's line for the day, from its running ledger (read only). */
-const buildPartyLine = async (party, startMs, endMs, placedToday = []) => {
-    const synced = await syncPartyLedger(party.id, { persist: false });
+const buildPartyLine = (party, synced, startMs, endMs, placedToday = []) => {
     const rows = synced.ledgerRows || [];
     const inDay = (r) => {
         const t = r.dateObj.getTime();
@@ -180,12 +164,18 @@ export const getDailyPartyHisab = async (date, { godownId = null } = {}) => {
     const ordering = await findOrderingParties();
     const parties = allParties.filter((p) => ordering.ids.has(String(p.id)) || ordering.phones.has(last10(p.number)));
     const phoneToUser = new Map(parties.filter((p) => last10(p.number).length >= 7).map((p) => [last10(p.number), p.id]));
-    const placed = await findOrdersPlaced(start, end, phoneToUser);
+    // All parties' ledgers in a few queries (same rows as the Party Ledger page); bill items are not needed here
+    const [placed, ledgers] = await Promise.all([
+        findOrdersPlaced(start, end, phoneToUser),
+        buildPartyLedgersBulk(parties.map((p) => p.id), { includeItems: false }),
+    ]);
 
     const failed = [];
-    const lines = await mapLimit(parties, WORKERS, async (party) => {
+    const lines = parties.map((party) => {
         try {
-            return await buildPartyLine(party, startMs, endMs, placed.get(String(party.id)) || []);
+            const synced = ledgers.get(String(party.id));
+            if (!synced) throw new Error('ledger not built');
+            return buildPartyLine(party, synced, startMs, endMs, placed.get(String(party.id)) || []);
         } catch (err) {
             logger.error(`[Daily Party Hisab] party ${party.id}: ${err.message}`);
             failed.push(party.id);
