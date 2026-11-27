@@ -5,7 +5,8 @@ import { syncPartyLedger } from './partyLedger.service.js';
 import logger from '../logger/apiLogger.js';
 
 /**
- * Daily Order No. Hisab — every party, one line each, for one day (India time), taken from the Party Ledger:
+ * Daily Order No. Hisab — every party that has started ordering, one line each, for one day (India time),
+ * highest closing balance first, taken from the Party Ledger:
  *   Opening + Today Sales − Cash − Bank − Kupan − Return = Closing
  * Opening / Closing are the party's running ledger balance at the start / end of the day, so this page
  * always agrees with the Party Ledger (nothing is stored here: every load reads the ledger again).
@@ -45,18 +46,17 @@ const mapLimit = async (items, limit, fn) => {
 };
 
 /**
- * Which parties have any ledger entry at all (orders by userId or phone, returns, manual entries).
- * A party with none has an empty ledger: its balance is just its party opening balance.
+ * Parties that have started ordering: at least one order that is not cancelled
+ * (by userId, or by the party's phone like the Party Ledger). Parties that never ordered are not listed.
  */
-const findLedgerParties = async () => {
-    const [orderUsers, orderPhones, returnUsers, logUsers] = await Promise.all([
-        sequelize.query(`SELECT DISTINCT "userId" AS id FROM orders WHERE "deletedAt" IS NULL AND "userId" IS NOT NULL`, { type: 'SELECT' }),
-        sequelize.query(`SELECT DISTINCT RIGHT(REGEXP_REPLACE("customerNumber", '[^0-9]', '', 'g'), 10) AS phone FROM orders WHERE "deletedAt" IS NULL AND "customerNumber" IS NOT NULL`, { type: 'SELECT' }),
-        sequelize.query(`SELECT DISTINCT "userId" AS id FROM sales_returns WHERE "deletedAt" IS NULL AND "userId" IS NOT NULL`, { type: 'SELECT' }),
-        sequelize.query(`SELECT DISTINCT "userId" AS id FROM party_balance_logs WHERE "userId" IS NOT NULL`, { type: 'SELECT' }),
+const findOrderingParties = async () => {
+    const notCancelled = CANCELLED_STATUSES.map((s) => `'${s}'`).join(', ');
+    const [orderUsers, orderPhones] = await Promise.all([
+        sequelize.query(`SELECT DISTINCT "userId" AS id FROM orders WHERE "deletedAt" IS NULL AND "userId" IS NOT NULL AND "orderStatus" NOT IN (${notCancelled})`, { type: 'SELECT' }),
+        sequelize.query(`SELECT DISTINCT RIGHT(REGEXP_REPLACE("customerNumber", '[^0-9]', '', 'g'), 10) AS phone FROM orders WHERE "deletedAt" IS NULL AND "customerNumber" IS NOT NULL AND "orderStatus" NOT IN (${notCancelled})`, { type: 'SELECT' }),
     ]);
     return {
-        ids: new Set([...orderUsers, ...returnUsers, ...logUsers].map((r) => String(r.id))),
+        ids: new Set(orderUsers.map((r) => String(r.id))),
         phones: new Set(orderPhones.map((r) => r.phone).filter((p) => p && p.length >= 7)),
     };
 };
@@ -172,18 +172,18 @@ export const getDailyPartyHisab = async (date, { godownId = null } = {}) => {
     const startMs = start.getTime();
     const endMs = end.getTime();
 
-    const parties = await User.findAll({
+    const allParties = await User.findAll({
         where: { status: { [Op.ne]: 'Deleted' }, ...(godownId ? { godownId } : {}) },
         attributes: ['id', 'fullname', 'number', 'city', 'openingBalance', 'openingBalanceType'],
         include: [{ model: BusinessProfile, as: 'businessProfile', attributes: ['shopName', 'shopNameAlt'], required: false }],
     });
+    const ordering = await findOrderingParties();
+    const parties = allParties.filter((p) => ordering.ids.has(String(p.id)) || ordering.phones.has(last10(p.number)));
     const phoneToUser = new Map(parties.filter((p) => last10(p.number).length >= 7).map((p) => [last10(p.number), p.id]));
-    const [ledgerParties, placed] = await Promise.all([findLedgerParties(), findOrdersPlaced(start, end, phoneToUser)]);
+    const placed = await findOrdersPlaced(start, end, phoneToUser);
 
     const failed = [];
     const lines = await mapLimit(parties, WORKERS, async (party) => {
-        const hasLedger = ledgerParties.ids.has(String(party.id)) || ledgerParties.phones.has(last10(party.number));
-        if (!hasLedger) return emptyLine(party, signedOpening(party));
         try {
             return await buildPartyLine(party, startMs, endMs, placed.get(String(party.id)) || []);
         } catch (err) {
@@ -193,9 +193,9 @@ export const getDailyPartyHisab = async (date, { godownId = null } = {}) => {
         }
     });
 
-    // Parties with something on this day first (by order / bill number), then everyone else by name
+    // Highest closing balance (most due) on top, jama (minus) at the bottom
     const list = lines.filter(Boolean).sort((a, b) =>
-        (Number(b.active) - Number(a.active)) ||
+        (b.closing - a.closing) ||
         (a.sortKey - b.sortKey) ||
         String(a.partyName).localeCompare(String(b.partyName), 'gu'));
     const rows = list.map(({ sortKey, ...line }, i) => ({ sr: i + 1, ...line }));
